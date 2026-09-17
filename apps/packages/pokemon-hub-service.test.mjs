@@ -11,6 +11,7 @@ const profileId = '00000000-0000-4000-8000-000000000001'
 
 test('moves one record from an inactive game into an empty Hub slot', async () => {
   let save = Buffer.from([1])
+  const invalidations = []
   const hubStore = createPokemonHubStore({ dataPath: await mkdtemp(join(tmpdir(), 'pokemon-hub-service-')) })
   const adapter = {
     id: 'gen3-gba-v1',
@@ -24,7 +25,7 @@ test('moves one record from an inactive game into an empty Hub slot', async () =
     saveStore: { get: async () => ({ bytes: save, revision: 1, sha256: 'a'.repeat(64) }), put: async (_p, _g, bytes) => { save = bytes; return { revision: 2 } } },
     hubStore,
     registry: { get: id => id === adapter.id ? adapter : null },
-    sessions: { hasLiveSession: () => false },
+    sessions: { hasLiveSession: () => false }, snapshots: { invalidateGames: (...args) => invalidations.push(args) },
     catalogLoader: async () => [{ id: 'pokemon-emerald', pokemonSave: { supported: true, adapter: adapter.id } }],
   })
 
@@ -32,6 +33,7 @@ test('moves one record from an inactive game into an empty Hub slot', async () =
 
   assert.equal(result.hubEpoch, 1)
   assert.equal(save[0], 0)
+  assert.deepEqual(invalidations, [[profileId, ['pokemon-emerald'], 1]])
   assert.equal((await hubStore.getProfileState(profileId)).slots[0].length, 36)
 })
 

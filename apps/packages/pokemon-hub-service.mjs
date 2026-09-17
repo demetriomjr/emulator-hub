@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { parseExpectedRevisions, parseHubLocation } from './pokemon-hub-model.mjs'
 
-export function createPokemonHubService({ profileStore, saveStore, hubStore, registry, sessions, catalogLoader }) {
+export function createPokemonHubService({ profileStore, saveStore, hubStore, registry, sessions, snapshots = { invalidateGames: () => {} }, catalogLoader }) {
   return {
     async getInventory(profileId) {
       if (await profileStore.get(profileId) === null) throw transferError('PROFILE_NOT_FOUND', 'Profile was not found.')
@@ -58,6 +58,7 @@ export function createPokemonHubService({ profileStore, saveStore, hubStore, reg
       const next = { ...inventory, hubEpoch: inventory.hubEpoch + 1, slots: [...inventory.slots] }
       next.slots[destination.slot] = hubPokemonId
       await hubStore.putProfileState(next, inventory.revision)
+      snapshots.invalidateGames(request.profileId, [source.gameId], next.hubEpoch)
       return { hubEpoch: next.hubEpoch, hubPokemonId }
     },
   }
