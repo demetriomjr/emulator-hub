@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createProfile, deleteProfile as deleteProfileRequest, getControlProfile, getGames, getLaunch, getPokemonHub, getProfiles, transferPokemonHub, updateControlProfile, updateProfile } from '../../packages/hub-client.js'
 import { activeGamepadBindings, readGamepadBinding, readGamepadSnapshot } from '../../packages/gamepad-input.mjs'
+import { choosePaneSource } from '../../packages/pokemon-hub-workspace.mjs'
 import './styles.css'
 
 const gbaControls = Object.freeze({
@@ -108,12 +109,13 @@ function App() {
   const [captureTarget, setCaptureTarget] = useState(null)
   const [controlRevision, setControlRevision] = useState(0)
   const [pokemonHubOpen, setPokemonHubOpen] = useState(false)
-  const [pokemonHubProfiles, setPokemonHubProfiles] = useState([])
   const [pokemonHubProfile, setPokemonHubProfile] = useState(null)
   const [pokemonHubData, setPokemonHubData] = useState(null)
   const [pokemonHubError, setPokemonHubError] = useState('')
   const [pokemonHubSelection, setPokemonHubSelection] = useState([])
   const [pokemonHubBusy, setPokemonHubBusy] = useState(false)
+  const [pokemonHubPanes, setPokemonHubPanes] = useState({ left: { kind: 'hub' }, right: null })
+  const [pokemonHubBoxes, setPokemonHubBoxes] = useState({})
   const [fastForwardEnabled, setFastForwardEnabled] = useState(false)
   const [fastForwardSpeed, setFastForwardSpeed] = useState(1.5)
   const [profileGame, setProfileGame] = useState(null)
@@ -281,6 +283,12 @@ function App() {
     setProfileBusy(true)
     try {
       const game = profileGame
+      if (profilePurpose === 'pokemon-hub') {
+        setProfileGame(null)
+        setPokemonHubOpen(true)
+        await selectPokemonHubProfile(profile)
+        return
+      }
       await getLaunch(game.id, profile.id)
       setProfileGame(null)
       const session = {
@@ -369,30 +377,36 @@ function App() {
   }
 
   async function openPokemonHub() {
-    setPokemonHubError('')
-    setPokemonHubData(null)
-    setPokemonHubSelection([])
-    setPokemonHubProfile(null)
-    setPokemonHubOpen(true)
-    try { setPokemonHubProfiles(await getProfiles()) } catch (cause) { setPokemonHubError(cause.message) }
+    openProfilePicker({ id: 'pokemon-hub', title: 'Pokémon Hub' }, 'pokemon-hub')
   }
 
   async function selectPokemonHubProfile(profile) {
     setPokemonHubError('')
     setPokemonHubProfile(profile)
-    try { setPokemonHubData(await getPokemonHub(profile.id)) } catch (cause) { setPokemonHubError(cause.message) }
+    try {
+      setPokemonHubData(await getPokemonHub(profile.id))
+      setPokemonHubPanes({ left: { kind: 'hub' }, right: null })
+      setPokemonHubBoxes({})
+    } catch (cause) { setPokemonHubError(cause.message) }
   }
 
-  function selectPokemonHubLocation(location) {
-    setPokemonHubSelection(current => current.length === 2 ? [location] : [...current, location])
+  function selectPokemonHubPane(side, source) {
+    const result = choosePaneSource(pokemonHubPanes, side, source || null)
+    setPokemonHubPanes(result.panes)
+    setPokemonHubSelection([])
+    setPokemonHubError(result.error)
+  }
+
+  function selectPokemonHubLocation(location, pane) {
+    setPokemonHubSelection(current => current.length === 1 && current[0].pane !== pane ? [...current, { ...location, pane }] : [{ ...location, pane }])
   }
 
   async function transferSelectedPokemon() {
     if (!pokemonHubProfile || !pokemonHubData || pokemonHubSelection.length !== 2) return
     const [first, second] = pokemonHubSelection
     const firstOccupied = first.kind === 'hub' ? Boolean(pokemonHubData.slots[first.slot]) : Boolean(pokemonHubData.games.find(game => game.id === first.gameId)?.boxes[first.box]?.slots[first.slot]?.occupied)
-    const source = firstOccupied ? first : second
-    const destination = firstOccupied ? second : first
+    const source = firstOccupied ? omitPane(first) : omitPane(second)
+    const destination = firstOccupied ? omitPane(second) : omitPane(first)
     setPokemonHubBusy(true)
     setPokemonHubError('')
     try {
@@ -442,12 +456,17 @@ function App() {
         <button className="hub-sidebar-action" type="button" aria-label="Configurar controles" title="Configurar controles" onClick={openControlPanel}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8h10M7 16h10M5 5h14v14H5zM9 8v8M15 8v8" /></svg>
         </button>
-        <button className="hub-sidebar-action" type="button" aria-label="Abrir Pokémon Hub" title="Pokémon Hub" onClick={openPokemonHub}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v12H4zM8 7V4h8v3M8 12h8M12 9v6" /></svg>
-        </button>
       </aside>
       <section className="hub-content">
         <div className="boxes">
+          <div className="box pokemon-hub-card">
+            <div className="cover">
+              <button className="hub-button" type="button" aria-label="Abrir Pokémon Hub" onClick={openPokemonHub}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" /></svg>
+              </button>
+            </div>
+            <div className="title"><small>Pokémon Hub</small></div>
+          </div>
           {games.map(game => <div className="box" key={game.id}>
             <div className="cover">
               {game.coverUrl && <img className="cover-image" src={game.coverUrl} alt={`Capa de ${game.title}`} />}
@@ -502,15 +521,13 @@ function App() {
         </div>
       </div>
     </div>}
-    {pokemonHubOpen && <div className="profile-overlay" role="dialog" aria-modal="true" aria-label="Pokémon Hub">
-      <div className="profile-panel">
-        <header className="profile-header"><h2>Pokémon Hub</h2><button className="dialog-close" type="button" aria-label="Fechar Pokémon Hub" onClick={() => setPokemonHubOpen(false)}>×</button></header>
-        <div className="profile-body">
-          {!pokemonHubProfile && <div className="profile-list">{pokemonHubProfiles.map(profile => <div className="profile-row" key={profile.id}><button className="profile-select" type="button" onClick={() => selectPokemonHubProfile(profile)}>{profile.name}</button></div>)}</div>}
-          {pokemonHubProfile && <><button className="profile-select" type="button" onClick={() => { setPokemonHubProfile(null); setPokemonHubData(null) }}>← {pokemonHubProfile.name}</button>{pokemonHubData && <><p>Hub: {pokemonHubData.slots.filter(Boolean).length}/30</p><div className="pokemon-hub-slots" aria-label="Slots do Pokémon Hub">{pokemonHubData.slots.map((entry, slot) => { const location = { kind: 'hub', slot }; return <button className={`pokemon-hub-slot${entry ? ' occupied' : ''}${pokemonHubSelection.some(selected => selected.kind === 'hub' && selected.slot === slot) ? ' selected' : ''}`} type="button" key={slot} onClick={() => selectPokemonHubLocation(location)}>{entry ? `#${entry.species ?? '?'}` : '—'}</button> })}</div><div className="profile-list">{pokemonHubData.games.map(game => <div className="profile-row pokemon-hub-game" key={game.id}><span className="profile-select">{game.title}: {game.status}</span>{game.status === 'ready' && <div className="pokemon-hub-slots">{game.boxes.flatMap((box, boxIndex) => box.slots.map((slot, slotIndex) => { const location = { kind: 'game', gameId: game.id, box: boxIndex, slot: slotIndex }; return <button className={`pokemon-hub-slot${slot.occupied ? ' occupied' : ''}${pokemonHubSelection.some(selected => selected.kind === 'game' && selected.gameId === game.id && selected.box === boxIndex && selected.slot === slotIndex) ? ' selected' : ''}`} type="button" key={`${boxIndex}-${slotIndex}`} onClick={() => selectPokemonHubLocation(location)}>{slot.occupied ? '●' : '—'}</button> }))}</div>}</div>)}</div>{pokemonHubSelection.length === 2 && <button className="control-save" type="button" disabled={pokemonHubBusy} onClick={transferSelectedPokemon}>{pokemonHubBusy ? 'Transferindo...' : 'Confirmar transferência'}</button>}</>}</>}
-          {pokemonHubError && <p className="profile-error" role="alert">{pokemonHubError}</p>}
-        </div>
-      </div>
+    {pokemonHubOpen && <div className="pokemon-workspace" role="dialog" aria-modal="true" aria-label="Pokémon Hub">
+      <header className="pokemon-workspace-header"><div><small>{pokemonHubProfile?.name}</small><h2>Pokémon Hub</h2></div><button className="dialog-close" type="button" aria-label="Fechar Pokémon Hub" onClick={() => setPokemonHubOpen(false)}>×</button></header>
+      {pokemonHubData && <div className="pokemon-workspace-body">
+        <PokemonHubPane side="left" source={pokemonHubPanes.left} data={pokemonHubData} selected={pokemonHubSelection} selectedBox={pokemonHubBoxes[pokemonHubPanes.left?.gameId]} onSourceChange={source => selectPokemonHubPane('left', source)} onBoxChange={(gameId, box) => setPokemonHubBoxes(current => ({ ...current, [gameId]: box }))} onSlotSelect={selectPokemonHubLocation} />
+        <PokemonHubPane side="right" source={pokemonHubPanes.right} data={pokemonHubData} selected={pokemonHubSelection} selectedBox={pokemonHubBoxes[pokemonHubPanes.right?.gameId]} onSourceChange={source => selectPokemonHubPane('right', source)} onBoxChange={(gameId, box) => setPokemonHubBoxes(current => ({ ...current, [gameId]: box }))} onSlotSelect={selectPokemonHubLocation} />
+      </div>}
+      <footer className="pokemon-workspace-footer">{pokemonHubSelection.length === 2 && <button className="control-save" type="button" disabled={pokemonHubBusy} onClick={transferSelectedPokemon}>{pokemonHubBusy ? 'Transferindo...' : 'Confirmar transferência'}</button>}{pokemonHubError && <p className="profile-error" role="alert">{pokemonHubError}</p>}</footer>
     </div>}
     {instancePicker && <div className="profile-overlay" role="dialog" aria-modal="true" aria-label="Selecionar jogo">
       <div className="profile-panel">
@@ -546,7 +563,7 @@ function App() {
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4L19 6" /></svg>
                   </button>
                 </form>
-                : <button className="profile-select" type="button" aria-label={isRunning ? `${profile.name} em execução` : profile.name} disabled={profileBusy || isRunning} onClick={() => launchWithProfile(profile)}>
+                : <button className="profile-select" type="button" aria-label={isRunning ? `${profile.name} em execução` : profile.name} disabled={profileBusy || (isRunning && profilePurpose !== 'pokemon-hub')} onClick={() => launchWithProfile(profile)}>
                   <span>{profile.name}</span>
                   {isRunning && <svg className="profile-running" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 1-6.4 2.7M4 3v5h5" /></svg>}
                 </button>}
@@ -625,5 +642,40 @@ function App() {
     </div>}
   </main>
 }
+
+function PokemonHubPane({ side, source, data, selected, selectedBox, onSourceChange, onBoxChange, onSlotSelect }) {
+  const games = data?.games ?? []
+  const game = source?.kind === 'game' ? games.find(candidate => candidate.id === source.gameId) : null
+  const boxIndex = game ? Math.min(selectedBox ?? 0, game.boxes.length - 1) : 0
+  const slots = source?.kind === 'hub' ? data?.slots ?? [] : game?.boxes[boxIndex]?.slots ?? []
+  const title = source?.kind === 'hub' ? 'Pokémon Hub' : game?.title ?? 'Escolha uma fonte'
+  const isSelected = location => selected.some(candidate => candidate.kind === location.kind && candidate.gameId === location.gameId && candidate.box === location.box && candidate.slot === location.slot)
+  return <section className="pokemon-workspace-pane" aria-label={`Painel ${side === 'left' ? 'esquerdo' : 'direito'} do Pokémon Hub`}>
+    <label className="pokemon-pane-source">Fonte
+      <select value={source?.kind === 'hub' ? 'hub' : source?.gameId ?? ''} onChange={event => onSourceChange(event.target.value === 'hub' ? { kind: 'hub' } : event.target.value ? { kind: 'game', gameId: event.target.value } : null)}>
+        <option value="">Escolher…</option>
+        <option value="hub">Pokémon Hub</option>
+        {games.map(candidate => <option key={candidate.id} value={candidate.id} disabled={candidate.status !== 'ready'}>{candidate.title} — {candidate.status}</option>)}
+      </select>
+    </label>
+    <h3>{title}</h3>
+    {game && <label className="pokemon-pane-source">Box do jogo
+      <select value={boxIndex} onChange={event => onBoxChange(game.id, Number(event.target.value))}>
+        {game.boxes.map((_box, index) => <option key={index} value={index}>Box {index + 1}</option>)}
+      </select>
+    </label>}
+    {source?.kind === 'hub' && <p className="pokemon-pane-note">Box 1 · {data?.slots.filter(Boolean).length ?? 0}/30</p>}
+    {source && (!game || game.status === 'ready') && <div className="pokemon-workspace-grid" aria-label={`${title} slots`}>
+      {slots.map((entry, slot) => {
+        const location = source.kind === 'hub' ? { kind: 'hub', slot } : { kind: 'game', gameId: game.id, box: boxIndex, slot }
+        const occupied = source.kind === 'hub' ? Boolean(entry) : Boolean(entry.occupied)
+        return <button className={`pokemon-hub-slot${occupied ? ' occupied' : ''}${isSelected(location) ? ' selected' : ''}`} type="button" key={slot} aria-label={`${title}, posição ${slot + 1}, ${occupied ? 'ocupada' : 'vazia'}`} onClick={() => onSlotSelect(location, side)}>{occupied ? `#${entry.species ?? '●'}` : '—'}</button>
+      })}
+    </div>}
+    {game && game.status !== 'ready' && <p className="pokemon-pane-note">{game.status === 'active' ? 'Feche o jogo antes de usar o Hub.' : 'Este save ainda não está disponível.'}</p>}
+  </section>
+}
+
+function omitPane({ pane, ...location }) { return location }
 
 createRoot(document.getElementById('root')).render(<App />)
