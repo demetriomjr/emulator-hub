@@ -1,22 +1,29 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { getPokemonHubColumnCount, getPokemonHubVisibleSlotCount } from './pokemon-hub-grid.mjs'
+import { getPokemonHubColumnCount, getPokemonHubGridWidth, getPokemonHubVisibleSlotCount, pokemonHubSlotSize } from './pokemon-hub-grid.mjs'
 
-test('keeps between five and twenty Hub cards in each visual row', () => {
-  assert.equal(getPokemonHubColumnCount(100), 5)
-  assert.equal(getPokemonHubColumnCount(747), 9)
-  assert.equal(getPokemonHubColumnCount(5000), 20)
+test('derives responsive Hub columns using the shared fixed slot size', () => {
+  assert.equal(pokemonHubSlotSize, 86)
+  assert.equal(getPokemonHubColumnCount(100), 1)
+  assert.equal(getPokemonHubColumnCount(500), 5)
+  assert.equal(getPokemonHubColumnCount(5000), 53)
 })
 
-test('renders the first sixty positions plus a completely empty final row', () => {
-  assert.equal(getPokemonHubVisibleSlotCount({}, 5), 65)
-  assert.equal(getPokemonHubVisibleSlotCount({}, 7), 63)
-  assert.equal(getPokemonHubVisibleSlotCount({}, 20), 80)
+test('uses the exact card-row width for symmetric Hub sections', () => {
+  assert.equal(getPokemonHubGridWidth(1), 86)
+  assert.equal(getPokemonHubGridWidth(6), 551)
+  assert.equal(getPokemonHubGridWidth(10), 923)
+})
+
+test('renders an empty Hub profile in exactly five visual rows', () => {
+  assert.equal(getPokemonHubVisibleSlotCount({}, 5), 25)
+  assert.equal(getPokemonHubVisibleSlotCount({}, 7), 35)
+  assert.equal(getPokemonHubVisibleSlotCount({}, 20), 100)
 })
 
 test('adds a new empty row when the last visible row receives a Pokémon', () => {
-  assert.equal(getPokemonHubVisibleSlotCount({ 59: { species: 'Pikachu' } }, 20), 80)
-  assert.equal(getPokemonHubVisibleSlotCount({ 79: { species: 'Pikachu' } }, 20), 100)
-  assert.equal(getPokemonHubVisibleSlotCount({ 62: { species: 'Pikachu' } }, 7), 70)
+  assert.equal(getPokemonHubVisibleSlotCount({ 24: { species: 'Pikachu' } }, 5), 30)
+  assert.equal(getPokemonHubVisibleSlotCount({ 34: { species: 'Pikachu' } }, 7), 42)
+  assert.equal(getPokemonHubVisibleSlotCount({ 99: { species: 'Pikachu' } }, 20), 120)
 })

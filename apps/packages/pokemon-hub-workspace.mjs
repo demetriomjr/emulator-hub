@@ -12,6 +12,13 @@ export function isPaneSourceAvailable(panes, index, nextSource) {
   return !panes.some((source, candidate) => candidate !== index && sameSource(source, nextSource))
 }
 
+export function hasAvailableSaveProfile(panes, index, gameId, profiles) {
+  return Array.isArray(profiles) && profiles.some(profile => (
+    profile && typeof profile.id === 'string'
+      && isPaneSourceAvailable(panes, index, { kind: 'game', gameId, profileId: profile.id })
+  ))
+}
+
 export function addWorkspacePane(panes) {
   if (panes.length >= 3) throw new Error('Pokémon Hub supports at most three panes.')
   return [...panes, null]

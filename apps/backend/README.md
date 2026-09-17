@@ -1,6 +1,21 @@
 # Emulator Hub backend
 
-This first slice uses Node.js built-in HTTP APIs and has no external runtime dependencies. It serves the configured game catalog and verified ROM bytes to the web frontend.
+This backend uses Node.js HTTP APIs and Redis for durable application data. It serves the configured game catalog and verified ROM bytes to the web frontend.
+
+## Redis persistence
+
+Application records (profiles, control profile, Pokémon Hub documents, and the ROM registry) require `REDIS_URL` before the backend starts. Game `.sav` bytes and their revision metadata remain in local `data/saves/`.
+
+The production Redis Docker port is intentionally loopback-only on the VPS. Forward it over SSH rather than exposing it publicly, then point the backend at that local port:
+
+```powershell
+ssh -N -L 127.0.0.1:6380:127.0.0.1:6379 <vps-user>@<vps-host>
+$env:REDIS_URL = 'redis://127.0.0.1:6380'
+$env:REDIS_NAMESPACE = 'emulator-hub:v1'
+npm start
+```
+
+The first start imports absent application records from the previous local JSON data and records a Redis migration marker. To run only that idempotent import, use `npm run migrate:redis`. It never uploads or removes a local `.sav` file.
 
 ## Local setup
 

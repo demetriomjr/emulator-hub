@@ -12,6 +12,7 @@
     "language": "English",
     "pokemonSave": {
       "adapter": "gen3-gba-v1",
+      "layoutProfile": "pokemon-emerald-gba",
       "saveKind": "battery",
       "supported": true
     }

@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { afterEach, describe, test } from 'node:test'
 
 import { createHubServer } from '../server.mjs'
+import { createMemoryRedisPersistence } from '../../packages/redis-persistence.mjs'
 
 const liveServers = new Set()
 const liveFixtures = new Set()
@@ -44,6 +45,7 @@ async function createFixture(entries, files = {}) {
     savesPath: join(root, 'data', 'saves'),
     pokemonHubPath: join(root, 'data', 'pokemon-hub'),
     pokemonHubProfilesPath: join(root, 'data', 'pokemon-hub-profiles'),
+    persistence: createMemoryRedisPersistence(),
   }
 }
 
@@ -67,7 +69,7 @@ async function jsonResponse(response) {
 }
 
 describe('hub backend HTTP contract', () => {
-  test('creates and lists Hub profiles from the Hub NoSQL collection', async () => {
+  test('creates and lists Hub profiles from the Redis-backed Hub collection', async () => {
     const { baseUrl } = await startFixture([])
 
     assert.deepEqual(await jsonResponse(await fetch(`${baseUrl}/api/pokemon-hub/profiles`)), { profiles: [] })
@@ -276,7 +278,7 @@ describe('hub backend HTTP contract', () => {
     const id = `rom-${sha1}`
 
     assert.deepEqual(await jsonResponse(await fetch(`${baseUrl}/api/games`)), {
-      games: [{ id, title: 'Pokémon FireRed Version', system: 'gba', core: 'gba', status: 'ready', region: 'wor', coverUrl: 'https://retrocollection.example/firered.png' }],
+      games: [{ id, title: 'Pokémon FireRed Version', system: 'gba', core: 'gba', status: 'ready', region: 'wor', coverUrl: 'https://retrocollection.example/firered.png', profiles: [] }],
     })
     const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/${id}/profiles`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Leaf' }),
@@ -316,6 +318,7 @@ describe('hub backend HTTP contract', () => {
           system: 'gb',
           core: 'gambatte',
           status: 'ready',
+          profiles: [],
         },
         {
           id: 'pokemon-blue',
@@ -324,9 +327,73 @@ describe('hub backend HTTP contract', () => {
           core: 'gambatte',
           status: 'unavailable',
           reason: 'ROM file was not found.',
+          profiles: [],
         },
       ],
     })
+  })
+
+  test('includes each ready ROM profile list in the shared catalog response', async () => {
+    const emerald = Buffer.from('emerald catalog profile')
+    const { baseUrl } = await startFixture([
+      { id: 'pokemon-emerald', title: 'Pokemon Emerald', system: 'gba', core: 'gba', file: 'pokemon-emerald.gba', sha256: sha256(emerald) },
+    ], { 'pokemon-emerald.gba': emerald })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-emerald/profiles`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'May' }),
+    }))
+
+    const catalog = await jsonResponse(await fetch(`${baseUrl}/api/games`))
+
+    assert.deepEqual(catalog.games[0].profiles, [profile])
+  })
+
+  test('lists only ready ROMs that have save profiles', async () => {
+    const emerald = Buffer.from('emerald with save profile')
+    const firered = Buffer.from('firered without save profile')
+    const ruby = Buffer.from('missing ruby with save profile')
+    const { baseUrl } = await startFixture([
+      { id: 'pokemon-emerald', title: 'Pokemon Emerald', system: 'gba', core: 'gba', file: 'pokemon-emerald.gba', sha256: sha256(emerald) },
+      { id: 'pokemon-firered', title: 'Pokemon FireRed', system: 'gba', core: 'gba', file: 'pokemon-firered.gba', sha256: sha256(firered) },
+      { id: 'pokemon-ruby', title: 'Pokemon Ruby', system: 'gba', core: 'gba', file: 'pokemon-ruby.gba', sha256: sha256(ruby) },
+    ], { 'pokemon-emerald.gba': emerald, 'pokemon-firered.gba': firered })
+
+    await fetch(`${baseUrl}/api/games/pokemon-emerald/profiles`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'May' }),
+    })
+    await fetch(`${baseUrl}/api/games/pokemon-ruby/profiles`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Brendan' }),
+    })
+
+    const response = await fetch(`${baseUrl}/api/pokemon-hub/save-profile-games`)
+
+    assert.equal(response.status, 200)
+    assert.deepEqual(await jsonResponse(response), {
+      games: [{ id: 'pokemon-emerald', title: 'Pokemon Emerald', system: 'gba' }],
+    })
+  })
+
+  test('reports a missing save before evaluating its layout support', async () => {
+    const rom = Buffer.from('pokemon save layout test rom')
+    const { baseUrl } = await startFixture([{
+      id: 'pokemon-emerald', title: 'Pokémon Emerald', system: 'gba', core: 'mgba', file: 'pokemon-emerald.gba', sha256: sha256(rom),
+    }], { 'pokemon-emerald.gba': rom })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-emerald/profiles`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'May' }),
+    }))
+
+    const response = await fetch(`${baseUrl}/api/pokemon-hub/save-profiles/pokemon-emerald/${profile.id}/layout`)
+
+    assert.equal(response.status, 404)
+    assert.deepEqual(await jsonResponse(response), { error: 'Save was not found.', code: 'SAVE_MISSING' })
+  })
+
+  test('returns an empty save-profile ROM list when no profiles exist', async () => {
+    const emerald = Buffer.from('emerald without save profile')
+    const { baseUrl } = await startFixture([
+      { id: 'pokemon-emerald', title: 'Pokemon Emerald', system: 'gba', core: 'gba', file: 'pokemon-emerald.gba', sha256: sha256(emerald) },
+    ], { 'pokemon-emerald.gba': emerald })
+
+    assert.deepEqual(await jsonResponse(await fetch(`${baseUrl}/api/pokemon-hub/save-profile-games`)), { games: [] })
   })
 
   test('returns a launch descriptor only for a verified game', async () => {

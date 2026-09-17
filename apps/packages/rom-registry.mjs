@@ -50,6 +50,32 @@ export function createRomRegistry({ dataPath }) {
   }
 }
 
+export function createRedisRomRegistry({ persistence }) {
+  return {
+    async load() {
+      let source
+      try { source = await persistence.get('rom-registry') } catch (error) { throw registryError('ROM_REGISTRY_LOAD_FAILED', 'ROM registry could not be loaded.', error) }
+      if (source === null) return []
+      try {
+        const document = JSON.parse(source)
+        if (!document || document.schemaVersion !== 1 || !Array.isArray(document.entries)) throw new Error('Registry schema is invalid.')
+        return document.entries.map(normalizeEntry)
+      } catch (error) { throw registryError('ROM_REGISTRY_LOAD_FAILED', 'ROM registry could not be loaded.', error) }
+    },
+    async replace(entries) {
+      if (!Array.isArray(entries)) throw registryError('ROM_REGISTRY_INVALID', 'ROM registry entries are invalid.')
+      let normalized
+      try { normalized = entries.map(normalizeEntry) } catch (error) {
+        if (error.code === 'ROM_REGISTRY_INVALID') throw error
+        throw registryError('ROM_REGISTRY_INVALID', 'ROM registry entries are invalid.', error)
+      }
+      if (new Set(normalized.map(entry => entry.id)).size !== normalized.length) throw registryError('ROM_REGISTRY_INVALID', 'ROM registry game IDs must be unique.')
+      try { await persistence.set('rom-registry', JSON.stringify({ schemaVersion: 1, entries: normalized })) } catch (error) { throw registryError('ROM_REGISTRY_WRITE_FAILED', 'ROM registry could not be saved.', error) }
+      return clone(normalized)
+    },
+  }
+}
+
 function normalizeEntry(value) {
   if (!value || typeof value !== 'object') throw registryError('ROM_REGISTRY_INVALID', 'ROM registry entry is invalid.')
   const entry = {

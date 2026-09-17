@@ -1,0 +1,8 @@
+{
+  "name": "@emulator-hub/apps",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "redis": "^5.12.1"
+  }
+}

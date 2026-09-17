@@ -4,18 +4,21 @@ import { lstat, readFile } from 'node:fs/promises'
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createGameMetadataLoader } from '../packages/game-metadata.mjs'
-import { createProfileStore } from '../packages/profile-store.mjs'
-import { createControlProfileStore } from '../packages/control-profile-store.mjs'
+import { createRedisProfileStore } from '../packages/profile-store.mjs'
+import { createRedisControlProfileStore } from '../packages/control-profile-store.mjs'
 import { createSaveStore } from '../packages/save-store.mjs'
-import { createPokemonHubStore } from '../packages/pokemon-hub-store.mjs'
-import { createPokemonHubProfileStore } from '../packages/pokemon-hub-profile-store.mjs'
+import { createRedisPokemonHubStore } from '../packages/pokemon-hub-store.mjs'
+import { createRedisPokemonHubProfileStore } from '../packages/pokemon-hub-profile-store.mjs'
 import { createPokemonHubSessionStore } from '../packages/pokemon-hub-session-store.mjs'
 import { createPokemonHubSnapshotStore } from '../packages/pokemon-hub-snapshot-store.mjs'
 import { createPokemonHubService } from '../packages/pokemon-hub-service.mjs'
 import { createPokemonSaveAdapterRegistry } from '../packages/pokemon-save-adapter-registry.mjs'
 import { pokemonGen3Adapter } from '../packages/pokemon-gen3-adapter.mjs'
+import { getPokemonSaveLayout } from '../packages/pokemon-save-layouts.mjs'
 import { createRomDiscovery } from '../packages/rom-discovery.mjs'
-import { createRomRegistry } from '../packages/rom-registry.mjs'
+import { createRedisRomRegistry } from '../packages/rom-registry.mjs'
+import { createRedisPersistence } from '../packages/redis-persistence.mjs'
+import { migrateLegacyJsonData } from '../packages/redis-legacy-migration.mjs'
 
 const backendDirectory = dirname(fileURLToPath(import.meta.url))
 const defaultCatalogPath = join(backendDirectory, 'catalog.json')
@@ -49,25 +52,28 @@ const unavailableReasons = Object.freeze({
 
 export function createHubServer(options = {}) {
   const romRegistryPath = options.romRegistryPath ?? (options.catalogPath ? join(dirname(options.catalogPath), 'data', 'rom-registry.json') : defaultRomRegistryPath)
+  const persistence = options.persistence ?? createRedisPersistence(redisConfiguration(options))
   const config = {
     catalogPath: options.catalogPath ?? defaultCatalogPath,
     romsDirectory: options.romsDirectory ?? options.romsDir ?? defaultRomsDirectory,
-    romRegistry: options.romRegistry ?? createRomRegistry({ dataPath: romRegistryPath }),
+    persistence,
+    romRegistry: options.romRegistry ?? createRedisRomRegistry({ persistence }),
     romDiscovery: options.romDiscovery ?? createRomDiscovery({ lookupBatch: options.romLookupBatch ?? lookupRomBatch, refreshLegacyMetadata: options.refreshLegacyMetadata ?? !options.catalogPath }),
     metadataLoader: options.metadataLoader ?? loadGameMetadata,
-    profileStore: options.profileStore ?? createProfileStore({ dataPath: options.profilesPath ?? defaultProfilesPath }),
-    controlProfileStore: options.controlProfileStore ?? createControlProfileStore({ dataPath: options.controlProfilePath ?? defaultControlProfilePath }),
+    profileStore: options.profileStore ?? createRedisProfileStore({ persistence }),
+    controlProfileStore: options.controlProfileStore ?? createRedisControlProfileStore({ persistence }),
     saveStore: options.saveStore ?? createSaveStore({ dataPath: options.savesPath ?? defaultSavesPath }),
-    pokemonHubStore: options.pokemonHubStore ?? createPokemonHubStore({ dataPath: options.pokemonHubPath ?? defaultPokemonHubPath }),
-    pokemonHubProfileStore: options.pokemonHubProfileStore ?? createPokemonHubProfileStore({ dataPath: options.pokemonHubProfilesPath ?? defaultPokemonHubProfilesPath }),
+    pokemonHubStore: options.pokemonHubStore ?? createRedisPokemonHubStore({ persistence }),
+    pokemonHubProfileStore: options.pokemonHubProfileStore ?? createRedisPokemonHubProfileStore({ persistence }),
     pokemonHubSessions: options.pokemonHubSessions ?? createPokemonHubSessionStore(),
     pokemonHubSnapshots: options.pokemonHubSnapshots ?? createPokemonHubSnapshotStore(),
+    pokemonSaveAdapters: options.pokemonSaveAdapters ?? createPokemonSaveAdapterRegistry([pokemonGen3Adapter]),
   }
   config.pokemonHubService = options.pokemonHubService ?? createPokemonHubService({
     profileStore: config.profileStore,
     saveStore: config.saveStore,
     hubStore: config.pokemonHubStore,
-    registry: createPokemonSaveAdapterRegistry([pokemonGen3Adapter]),
+    registry: config.pokemonSaveAdapters,
     sessions: config.pokemonHubSessions,
     snapshots: config.pokemonHubSnapshots,
     catalogLoader: () => loadAvailableCatalog(config),
@@ -122,6 +128,8 @@ async function handleRequest(request, response, config) {
   const isControlProfileRoute = route.pathname === '/api/control-profile'
   const saveRoute = parseSaveRoute(route.pathname)
   const pokemonHubRoute = parsePokemonHubRoute(route.pathname)
+  const saveLayoutRoute = parseSaveLayoutRoute(route.pathname)
+  const isSaveProfileGamesRoute = route.pathname === '/api/pokemon-hub/save-profile-games'
   const pokemonHubProfilesRoute = route.pathname === '/api/pokemon-hub/profiles'
   const pokemonHubProfileRoute = parsePokemonHubProfileRoute(route.pathname)
   const supportedMethod = request.method === 'GET'
@@ -141,6 +149,16 @@ async function handleRequest(request, response, config) {
 
   if (gameProfilesRoute) {
     await handleGameProfiles(request, response, config, gameProfilesRoute.gameId)
+    return
+  }
+
+  if (isSaveProfileGamesRoute) {
+    await listSaveProfileGames(response, config)
+    return
+  }
+
+  if (saveLayoutRoute) {
+    await getSaveLayout(response, config, saveLayoutRoute)
     return
   }
 
@@ -425,9 +443,39 @@ async function listGames(response, config) {
       }
     }
 
+    game.profiles = verification.ok ? await config.profileStore.list(entry.id) : []
+
     games.push(game)
   }
 
+  json(response, 200, { games })
+}
+
+async function listSaveProfileGames(response, config) {
+  let entries
+  try {
+    entries = await loadAvailableCatalog(config)
+  } catch (error) {
+    if (error.code === 'CATALOG_LOAD_FAILED') {
+      json(response, 500, { error: 'Catalog could not be loaded.' })
+      return
+    }
+    throw error
+  }
+
+  const games = []
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = normalizeEntry(entries[index], index)
+    const verification = await verifyRom(entry, config.romsDirectory)
+    if (!verification.ok || (await config.profileStore.list(entry.id)).length === 0) continue
+
+    const game = { id: entry.id, title: entry.title, system: entry.system }
+    if (entry.region && entry.region !== 'legacy') game.region = entry.region
+    if (entry.coverUrl) game.coverUrl = entry.coverUrl
+    games.push(game)
+  }
+
+  games.sort((left, right) => left.title.localeCompare(right.title) || left.id.localeCompare(right.id))
   json(response, 200, { games })
 }
 
@@ -490,6 +538,28 @@ function parseSaveRoute(pathname) {
 function parsePokemonHubRoute(pathname) {
   const match = /^\/api\/profiles\/([^/]+)\/pokemon-hub(?:\/(transfers))?$/.exec(pathname)
   return match ? { profileId: match[1], kind: match[2] === 'transfers' ? 'transfer' : 'inventory' } : null
+}
+
+function parseSaveLayoutRoute(pathname) {
+  const match = /^\/api\/pokemon-hub\/save-profiles\/([^/]+)\/([^/]+)\/layout$/.exec(pathname)
+  return match ? { gameId: match[1], profileId: match[2] } : null
+}
+
+async function getSaveLayout(response, config, { gameId, profileId }) {
+  const entry = await findEntry(config, gameId)
+  if (entry === null) return json(response, 404, { error: 'Game was not found.' })
+  if (await config.profileStore.get(entry.id, profileId) === null) return json(response, 404, { error: 'Profile was not found.' })
+  const save = await config.saveStore.get(profileId, entry.id)
+  if (save === null) return json(response, 404, { error: 'Save was not found.', code: 'SAVE_MISSING' })
+  const layout = getPokemonSaveLayout(entry.pokemonSave?.layoutProfile, entry.pokemonSave?.adapter)
+  const adapter = layout && config.pokemonSaveAdapters.get(entry.pokemonSave.adapter)
+  if (!adapter) return json(response, 409, { error: 'Save layout is not supported.' })
+  try {
+    const inspection = adapter.inspect(save.bytes, layout)
+    json(response, 200, { layout: { id: layout.id, party: { slots: layout.party.slots }, boxes: layout.boxes }, party: inspection.party, boxes: inspection.boxes })
+  } catch {
+    json(response, 409, { error: 'Save layout could not be read.' })
+  }
 }
 
 async function handlePokemonHub(request, response, config, route) {
@@ -860,10 +930,36 @@ function isMainModule() {
 }
 
 if (isMainModule()) {
+  void startMainServer()
+}
+
+async function startMainServer() {
   const port = Number.parseInt(process.env.PORT ?? '3000', 10)
   const host = process.env.HOST ?? '127.0.0.1'
-  const server = createHubServer()
-  server.listen(port, host, () => {
-    console.log(`Emulator Hub backend listening on http://${host}:${port}`)
-  })
+  const persistence = createRedisPersistence(redisConfiguration())
+  try {
+    await persistence.connect()
+    await migrateLegacyJsonData({
+      persistence,
+      profilesPath: defaultProfilesPath,
+      controlProfilePath: defaultControlProfilePath,
+      pokemonHubProfilesPath: defaultPokemonHubProfilesPath,
+      pokemonHubPath: defaultPokemonHubPath,
+      romRegistryPath: defaultRomRegistryPath,
+    })
+    const server = createHubServer({ persistence })
+    server.listen(port, host, () => {
+      console.log(`Emulator Hub backend listening on http://${host}:${port}`)
+    })
+  } catch (error) {
+    console.error(error.message)
+    process.exitCode = 1
+  }
+}
+
+function redisConfiguration(options = {}) {
+  return {
+    url: options.redisUrl ?? process.env.REDIS_URL,
+    namespace: options.redisNamespace ?? process.env.REDIS_NAMESPACE,
+  }
 }

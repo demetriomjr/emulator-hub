@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { addWorkspacePane, choosePaneSource, createPokemonHubWorkspaceState, isPaneSourceAvailable, removeWorkspacePane } from './pokemon-hub-workspace.mjs'
+import { addWorkspacePane, choosePaneSource, createPokemonHubWorkspaceState, hasAvailableSaveProfile, isPaneSourceAvailable, removeWorkspacePane } from './pokemon-hub-workspace.mjs'
 
 test('opens directly into an empty Hub workspace without selecting an Emulator Hub profile', () => {
   assert.deepEqual(createPokemonHubWorkspaceState(), { profile: null, panes: [null], boxes: {} })
@@ -17,6 +17,27 @@ test('rejects selecting the same game save in two workspace panes', () => {
   const result = choosePaneSource([{ kind: 'game', profileId: 'may', gameId: 'pokemon-emerald' }, null], 1, { kind: 'game', profileId: 'may', gameId: 'pokemon-emerald' })
 
   assert.deepEqual(result, { panes: [{ kind: 'game', profileId: 'may', gameId: 'pokemon-emerald' }, null], error: 'This game save is already open.' })
+})
+
+test('reserves only a complete game and save-profile pair', () => {
+  const emeraldMay = { kind: 'game', gameId: 'pokemon-emerald', profileId: 'may' }
+  const emeraldDawn = { kind: 'game', gameId: 'pokemon-emerald', profileId: 'dawn' }
+
+  assert.equal(isPaneSourceAvailable([emeraldMay, null], 1, { kind: 'game' }), true)
+  assert.equal(isPaneSourceAvailable([emeraldMay, null], 1, { kind: 'game', gameId: 'pokemon-emerald' }), true)
+  assert.equal(isPaneSourceAvailable([emeraldMay, null], 1, emeraldDawn), true)
+  assert.equal(isPaneSourceAvailable([emeraldMay, null], 1, emeraldMay), false)
+  assert.deepEqual(choosePaneSource([emeraldMay, null], 1, emeraldDawn), { panes: [emeraldMay, emeraldDawn], error: '' })
+  assert.deepEqual(choosePaneSource([emeraldMay, null], 1, emeraldMay), { panes: [emeraldMay, null], error: 'This game save is already open.' })
+})
+
+test('hides a ROM when every one of its save profiles is already open elsewhere', () => {
+  const rubyTest = { kind: 'game', gameId: 'pokemon-ruby', profileId: 'test' }
+  const rubyProfiles = [{ id: 'test', name: 'Test' }, { id: 'other', name: 'Other' }]
+
+  assert.equal(hasAvailableSaveProfile([rubyTest, null], 1, 'pokemon-ruby', [{ id: 'test', name: 'Test' }]), false)
+  assert.equal(hasAvailableSaveProfile([rubyTest, null], 1, 'pokemon-ruby', rubyProfiles), true)
+  assert.equal(hasAvailableSaveProfile([rubyTest, null], 0, 'pokemon-ruby', [{ id: 'test', name: 'Test' }]), true)
 })
 
 test('hides occupied complete sources from other pane selectors while retaining the current value', () => {

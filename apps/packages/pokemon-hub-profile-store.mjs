@@ -66,6 +66,54 @@ export function createPokemonHubProfileStore({ dataPath }) {
   }
 }
 
+export function createRedisPokemonHubProfileStore({ persistence }) {
+  let queue = Promise.resolve()
+  return {
+    async list() { return (await readRedisProfiles(persistence)).map(copy) },
+    create({ name }) {
+      const operation = queue.then(async () => {
+        const normalizedName = normalizeName(name)
+        const profiles = await readRedisProfiles(persistence)
+        if (profiles.some(profile => profile.name.localeCompare(normalizedName, undefined, { sensitivity: 'accent' }) === 0)) throw profileError('POKEMON_HUB_PROFILE_NAME_DUPLICATE', 'Pokémon Hub profile already exists.')
+        const profile = { schemaVersion: 5, hubProfileId: randomUUID(), name: normalizedName, createdAt: new Date().toISOString(), grid: { entries: {} } }
+        await writeRedisProfiles(persistence, [...profiles, profile])
+        return copy(profile)
+      })
+      queue = operation.catch(() => {})
+      return operation
+    },
+    rename(hubProfileId, name) {
+      const operation = queue.then(async () => {
+        const normalizedName = normalizeName(name)
+        const profiles = await readRedisProfiles(persistence)
+        const index = profiles.findIndex(profile => profile.hubProfileId === hubProfileId)
+        if (index === -1) throw profileError('POKEMON_HUB_PROFILE_NOT_FOUND', 'Pokémon Hub profile was not found.')
+        if (profiles.some(profile => profile.hubProfileId !== hubProfileId && profile.name.localeCompare(normalizedName, undefined, { sensitivity: 'accent' }) === 0)) throw profileError('POKEMON_HUB_PROFILE_NAME_DUPLICATE', 'Pokémon Hub profile already exists.')
+        profiles[index] = { ...profiles[index], name: normalizedName }
+        await writeRedisProfiles(persistence, profiles)
+        return copy(profiles[index])
+      })
+      queue = operation.catch(() => {})
+      return operation
+    },
+    delete(hubProfileId, { discardOccupied = false } = {}) {
+      const operation = queue.then(async () => {
+        const profiles = await readRedisProfiles(persistence)
+        const index = profiles.findIndex(profile => profile.hubProfileId === hubProfileId)
+        if (index === -1) throw profileError('POKEMON_HUB_PROFILE_NOT_FOUND', 'Pokémon Hub profile was not found.')
+        const profile = profiles[index]
+        const discardedPokemonCount = Object.keys(profile.grid.entries).length
+        if (discardedPokemonCount > 0 && !discardOccupied) throw profileError('POKEMON_HUB_PROFILE_NOT_EMPTY', 'Pokémon Hub profile contains Pokémon and requires discard confirmation.')
+        profiles.splice(index, 1)
+        await writeRedisProfiles(persistence, profiles)
+        return { hubProfileId, discardedPokemonCount }
+      })
+      queue = operation.catch(() => {})
+      return operation
+    },
+  }
+}
+
 async function readProfiles(dataPath) {
   try {
     const source = JSON.parse(await readFile(collectionPath(dataPath), 'utf8'))
@@ -95,6 +143,26 @@ async function writeProfiles(dataPath, profiles) {
 }
 
 function collectionPath(dataPath) { return join(dataPath, 'profiles.json') }
+
+async function readRedisProfiles(persistence) {
+  try {
+    const source = await persistence.get('pokemon-hub:profiles')
+    if (source === null) return []
+    const profiles = JSON.parse(source)
+    const normalized = Array.isArray(profiles) ? profiles.map(normalizeProfile) : null
+    if (!normalized || normalized.some(profile => profile === null)) throw new Error('Invalid Pokémon Hub profile data.')
+    return normalized
+  } catch (error) {
+    if (error.code?.startsWith('POKEMON_HUB_PROFILE_')) throw error
+    throw profileError('POKEMON_HUB_PROFILE_STORE_LOAD_FAILED', 'Pokémon Hub profiles could not be loaded.')
+  }
+}
+
+async function writeRedisProfiles(persistence, profiles) {
+  try { await persistence.set('pokemon-hub:profiles', JSON.stringify(profiles)) } catch {
+    throw profileError('POKEMON_HUB_PROFILE_STORE_WRITE_FAILED', 'Pokémon Hub profiles could not be saved.')
+  }
+}
 
 function normalizeName(value) {
   const name = typeof value === 'string' ? value.normalize('NFC').trim() : ''

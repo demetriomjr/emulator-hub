@@ -1,14 +1,33 @@
 async function getJson(url) {
   const response = await fetch(url, { cache: 'no-store' })
   const body = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`)
+  if (!response.ok) {
+    const error = new Error(body.error || `Request failed (${response.status})`)
+    if (typeof body.code === 'string') error.code = body.code
+    throw error
+  }
   return body
 }
 
 export async function getGames() {
   const body = await getJson('/api/games')
   if (!Array.isArray(body.games)) throw new Error('Invalid catalog response')
+  return body.games.map(game => {
+    if (!Array.isArray(game.profiles) || game.profiles.some(profile => !profile || typeof profile.id !== 'string' || typeof profile.name !== 'string' || typeof profile.createdAt !== 'string')) throw new Error('Invalid catalog profile response')
+    return game
+  })
+}
+
+export async function getSaveProfileGames() {
+  const body = await getJson('/api/pokemon-hub/save-profile-games')
+  if (!Array.isArray(body.games)) throw new Error('Invalid save-profile game response')
   return body.games
+}
+
+export async function getSaveProfileLayout(gameId, profileId) {
+  const body = await getJson(`/api/pokemon-hub/save-profiles/${encodeURIComponent(gameId)}/${encodeURIComponent(profileId)}/layout`)
+  if (!body.layout || !Array.isArray(body.party) || !Array.isArray(body.boxes)) throw new Error('Invalid save layout response')
+  return body
 }
 
 export async function getProfiles(gameId) {

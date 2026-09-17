@@ -44,6 +44,7 @@ yarn-error.log*
 pnpm-debug.log*
 tmp/
 temp/
+graphify-out/
 *.tmp
 
 # Editor and operating system

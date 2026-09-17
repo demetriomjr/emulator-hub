@@ -1,5 +1,10 @@
 # Specifications
 
+- [Spec 019 — Redis application persistence](019-redis-application-persistence.md): durable Redis-backed application data, SSH-tunnel deployment boundary, and one-time JSON import.
+
+- [Spec 017 — Pokemon Hub save-profile selection](017-pokemon-hub-save-profile-selection.md): two-stage ROM/profile selection, with save content initially deferred.
+- [Spec 018 — Pokemon Hub save Box layout](018-pokemon-hub-save-box-layout.md): read-only Generation III Party and PC Box rendering through title-specific JSON layout profiles.
+
 This directory holds the project's specifications. Define the architecture, shared package contracts, application responsibilities, and feature acceptance criteria here before implementing them.
 
 The initial direction is recorded in the root `AGENTS.md`.

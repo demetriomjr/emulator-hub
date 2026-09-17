@@ -2,11 +2,12 @@ const gen3SaveBytes = 0x20000
 
 export const pokemonGen3Adapter = Object.freeze({
   id: 'gen3-gba-v1',
-  inspect(saveBytes) {
+  inspect(saveBytes, layout = null) {
     const newest = selectNewestCopy(saveBytes)
     return {
       saveIndex: newest.saveIndex,
       copyOffset: newest.copyOffset,
+      ...(layout?.party ? { party: Array.from({ length: layout.party.slots }, (_, slot) => describePartySlot(readPartyBytes(saveBytes, newest, layout.party, slot))) } : {}),
       boxes: Array.from({ length: 14 }, (_, box) => ({
         slots: Array.from({ length: 30 }, (_, slot) => describePcSlot(readPcBytes(saveBytes, newest, box, slot))),
       })),
@@ -41,6 +42,11 @@ function describePcSlot(bytes) {
   return { occupied: true, ...(decoded?.canonical ? { species: decoded.canonical.species, shiny: decoded.canonical.shiny } : {}) }
 }
 
+function describePartySlot(bytes) {
+  if (bytes.every(byte => byte === 0)) return { occupied: false }
+  return describePcSlot(bytes.subarray(0, 80))
+}
+
 // Gen III PC Pokémon records contain a 48-byte encrypted payload.  We retain the
 // original bytes for lossless round-tripping, but decode stable identity fields for
 // Hub tracking without changing the game representation.
@@ -49,7 +55,7 @@ function decodePcRecord(bytes) {
   const originalTrainerId = bytes.readUInt32LE(4)
   const encrypted = Buffer.from(bytes.subarray(32, 80))
   const key = personality ^ originalTrainerId
-  for (let offset = 0; offset < encrypted.length; offset += 4) encrypted.writeUInt32LE(encrypted.readUInt32LE(offset) ^ key, offset)
+  for (let offset = 0; offset < encrypted.length; offset += 4) encrypted.writeUInt32LE((encrypted.readUInt32LE(offset) ^ key) >>> 0, offset)
   const order = substructureOrders[personality % 24]
   const growth = encrypted.subarray(order.indexOf('G') * 12, order.indexOf('G') * 12 + 12)
   const species = growth.readUInt16LE(0)
@@ -115,6 +121,15 @@ function readPcBytes(bytes, save, box, slot) {
   let written = 0
   for (const span of pcSpans(save, box, slot)) { Buffer.from(bytes).copy(result, written, span.offset, span.offset + span.count); written += span.count }
   return result
+}
+
+function readPartyBytes(bytes, save, party, slot) {
+  if (!Number.isInteger(party.sectionId) || party.sectionId < 0 || party.sectionId > 13 || !Number.isInteger(party.offset) || party.offset < 0 || !Number.isInteger(party.slots) || party.slots < 1 || !Number.isInteger(party.recordBytes) || party.recordBytes < 80 || !Number.isInteger(slot) || slot < 0 || slot >= party.slots) throw invalidSave('Gen III Party layout is invalid.')
+  const section = save.sectors.get(party.sectionId)
+  const offset = party.offset + slot * party.recordBytes
+  const length = party.sectionId === 13 ? 2000 : 3968
+  if (!section || offset + party.recordBytes > length) throw invalidSave('Gen III Party layout is invalid.')
+  return Buffer.from(bytes).subarray(section.offset + offset, section.offset + offset + party.recordBytes)
 }
 
 function writePcBytes(bytes, save, box, slot, record) {

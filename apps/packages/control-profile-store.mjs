@@ -41,6 +41,36 @@ export function createControlProfileStore({ dataPath }) {
   }
 }
 
+export function createRedisControlProfileStore({ persistence }) {
+  let queue = Promise.resolve()
+  return {
+    async get() {
+      try {
+        const source = await persistence.get('control-profile')
+        return copyProfile(source === null ? defaultControlProfile : normalizeProfile(JSON.parse(source)))
+      } catch (error) {
+        if (error.code === 'CONTROL_PROFILE_INVALID') throw error
+        const storeError = new Error('Control profile could not be loaded.', { cause: error })
+        storeError.code = 'CONTROL_PROFILE_LOAD_FAILED'
+        throw storeError
+      }
+    },
+    replace(profile) {
+      const operation = queue.then(async () => {
+        const normalized = normalizeProfile(profile)
+        try { await persistence.set('control-profile', JSON.stringify(normalized)) } catch (error) {
+          const storeError = new Error('Control profile could not be saved.', { cause: error })
+          storeError.code = 'CONTROL_PROFILE_WRITE_FAILED'
+          throw storeError
+        }
+        return copyProfile(normalized)
+      })
+      queue = operation.catch(() => {})
+      return operation
+    },
+  }
+}
+
 async function readProfile(dataPath) {
   try {
     const source = await readFile(dataPath, 'utf8')
