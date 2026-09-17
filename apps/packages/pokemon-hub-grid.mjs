@@ -15,7 +15,8 @@ export function getPokemonHubVisibleSlotCount(entries, columns) {
   const occupiedSlots = Object.keys(entries).map(Number)
   const highestOccupiedSlot = occupiedSlots.length === 0 ? -1 : Math.max(...occupiedSlots)
   const initialRows = Math.ceil(initialSlotCount / columns)
+  const initialRowsWithEmptyTail = initialSlotCount % columns === 0 ? initialRows + 1 : initialRows
   const occupiedRows = highestOccupiedSlot < 0 ? 0 : Math.floor(highestOccupiedSlot / columns) + 1
 
-  return Math.max(initialRows, occupiedRows + 1) * columns
+  return Math.max(initialRowsWithEmptyTail, occupiedRows + 1) * columns
 }

@@ -50,7 +50,7 @@ test('removes only the requested pane and will not remove the final pane', () =>
 
   assert.deepEqual(removeWorkspacePane([first, second, third], 1), [first, third])
   assert.deepEqual(removeWorkspacePane([first, second], 0), [second])
-  assert.throws(() => removeWorkspacePane([first], 0), /last/i)
+  assert.throws(() => removeWorkspacePane([first], 0), /at least one/i)
 })
 
 test('releases a removed source and ignores incomplete source type choices when checking duplicates', () => {

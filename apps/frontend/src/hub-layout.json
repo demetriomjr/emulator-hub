@@ -1,0 +1,16 @@
+{
+  "sections": [
+    {
+      "id": "game-boy-advance",
+      "title": "Game Boy Advance",
+      "system": "gba",
+      "gameIds": [
+        "rom-5b64eacf892920518db4ec664e62a086dd5f5bc8",
+        "rom-89b45fb172e6b55d51fc0e61989775187f6fe63c",
+        "pokemon-emerald-usa-europe",
+        "rom-dd5945db9b930750cb39d00c84da8571feebf417",
+        "rom-7862c67bdecbe21d1d69ce082ce34327e1c6ed5e"
+      ]
+    }
+  ]
+}

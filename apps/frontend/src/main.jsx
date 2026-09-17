@@ -6,6 +6,9 @@ import { createPokemonHubProfile, createProfile, deletePokemonHubProfile, delete
 import { activeGamepadBindings, readGamepadBinding, readGamepadSnapshot } from '../../packages/gamepad-input.mjs'
 import { getPokemonHubColumnCount, getPokemonHubVisibleSlotCount } from '../../packages/pokemon-hub-grid.mjs'
 import { addWorkspacePane, choosePaneSource, createPokemonHubWorkspaceState, isPaneSourceAvailable, removeWorkspacePane } from '../../packages/pokemon-hub-workspace.mjs'
+import { groupGamesByLayout } from '../../packages/hub-layout.mjs'
+import { getProfilePickerPlacement } from '../../packages/profile-picker-placement.mjs'
+import hubLayout from './hub-layout.json'
 import './styles.css'
 
 const gbaControls = Object.freeze({
@@ -140,6 +143,7 @@ function App() {
   const [fastForwardEnabled, setFastForwardEnabled] = useState(false)
   const [fastForwardSpeed, setFastForwardSpeed] = useState(1.5)
   const [profileGame, setProfileGame] = useState(null)
+  const [profilePickerPlacement, setProfilePickerPlacement] = useState(null)
   const [profilePurpose, setProfilePurpose] = useState('launch')
   const [profiles, setProfiles] = useState([])
   const [profileName, setProfileName] = useState('')
@@ -169,6 +173,7 @@ function App() {
         } else if (pokemonHubOpen) setPokemonHubOpen(false)
         else if (profileGame) {
           setProfileGame(null)
+          setProfilePickerPlacement(null)
           setCreatingProfile(false)
         }
         else if (instancePicker) setInstancePicker(false)
@@ -283,16 +288,17 @@ function App() {
     })
   }
 
-  async function openProfilePicker(game, purpose = 'launch') {
+  async function openProfilePicker(game, purpose = 'launch', anchor = null) {
     setError('')
     setProfileError('')
     setProfileName('')
     setEditingProfileId(null)
     setCreatingProfile(false)
     setProfilePurpose(purpose)
+    setProfilePickerPlacement(getProfilePickerPlacement(anchor, { width: window.innerWidth, height: window.innerHeight }))
     setProfileGame(game)
     try {
-      setProfiles(await getProfiles())
+      setProfiles(await getProfiles(game.id))
     } catch (cause) {
       setProfileError(cause.message)
     }
@@ -306,6 +312,7 @@ function App() {
       const game = profileGame
       await getLaunch(game.id, profile.id)
       setProfileGame(null)
+      setProfilePickerPlacement(null)
       const session = {
         gameId: game.id,
         profileId: profile.id,
@@ -329,7 +336,7 @@ function App() {
     setProfileError('')
     setProfileBusy(true)
     try {
-      const profile = await createProfile(profileName)
+      const profile = await createProfile(profileGame.id, profileName)
       setProfiles(current => [...current, profile])
       await launchWithProfile(profile)
     } catch (cause) {
@@ -344,7 +351,7 @@ function App() {
     setProfileError('')
     setProfileBusy(true)
     try {
-      await deleteProfileRequest(profile.id)
+      await deleteProfileRequest(profileGame.id, profile.id)
       setProfiles(current => current.filter(candidate => candidate.id !== profile.id))
     } catch (cause) {
       setProfileError(cause.message)
@@ -364,7 +371,7 @@ function App() {
     setProfileError('')
     setProfileBusy(true)
     try {
-      const updated = await updateProfile(profile.id, profileEditName)
+      const updated = await updateProfile(profileGame.id, profile.id, profileEditName)
       setProfiles(current => current.map(candidate => candidate.id === updated.id ? updated : candidate))
       setEditingProfileId(null)
     } catch (cause) {
@@ -533,6 +540,7 @@ function App() {
   }
 
   const activeProfileIds = new Set(activeSessions.map(session => session.profileId))
+  const gameSections = groupGamesByLayout(games, hubLayout)
 
   return <main className="hub">
     <div className="hub-layout" inert={activeSessions.length || profileGame || instancePicker || controlPanelOpen || pokemonHubOpen ? true : undefined}>
@@ -542,7 +550,9 @@ function App() {
         </button>
       </aside>
       <section className="hub-content">
-        <div className="boxes">
+        <section className="hub-section hub-section-internal" aria-labelledby="internal-applications-heading">
+          <header className="hub-section-header"><h2 id="internal-applications-heading">Aplicações internas</h2></header>
+          <div className="boxes">
           <div className="box pokemon-hub-card">
             <div className="cover">
               <button className="hub-button" type="button" aria-label="Abrir Pokémon Hub" onClick={openPokemonHub}>
@@ -551,21 +561,31 @@ function App() {
             </div>
             <div className="title"><small>Pokémon Hub</small></div>
           </div>
-          {games.map(game => <div className="box" key={game.id}>
+          </div>
+        </section>
+        {gameSections.map(section => <section className="hub-section hub-section-games" key={section.id} aria-labelledby={`${section.id}-heading`}>
+          <header className="hub-section-header"><h2 id={`${section.id}-heading`}>{section.title}</h2></header>
+          <div className="boxes">
+          {section.games.map(game => <div className="box" key={game.id}>
             <div className="cover">
               {game.coverUrl && <img className="cover-image" src={game.coverUrl} alt={`Capa de ${game.title}`} />}
               <button
                 className="play-button"
                 aria-label={`Play ${game.title}`}
                 disabled={game.status !== 'ready'}
-                onClick={() => openProfilePicker(game)}
+                onClick={event => {
+                  const playButton = event.currentTarget.getBoundingClientRect()
+                  const card = event.currentTarget.closest('.box')?.getBoundingClientRect()
+                  openProfilePicker(game, 'launch', { left: card?.left ?? playButton.left, top: playButton.top, bottom: playButton.bottom })
+                }}
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l13-7.5z" /></svg>
               </button>
             </div>
             {game.language && <div className="title"><small>{game.language}</small></div>}
           </div>)}
-        </div>
+          </div>
+        </section>)}
         {error && <p className="error" role="alert">{error}</p>}
       </section>
     </div>
@@ -665,11 +685,11 @@ function App() {
         </div>
       </div>
     </div>}
-    {profileGame && <div className="profile-overlay" role="dialog" aria-modal="true" aria-label="Selecionar perfil">
-      <div className="profile-panel">
+    {profileGame && <div className={`profile-overlay${profilePickerPlacement ? ' profile-picker-overlay' : ''}`} role="dialog" aria-modal="true" aria-label="Selecionar perfil">
+      <div className={`profile-panel${profilePickerPlacement ? ' profile-picker-panel' : ''}`} style={profilePickerPlacement ?? undefined}>
         <header className="profile-header">
           <h2>{profileGame.title}</h2>
-          <button className="dialog-close" type="button" aria-label="Fechar seleção de perfil" onClick={() => { setProfileGame(null); setCreatingProfile(false) }}>×</button>
+          <button className="dialog-close" type="button" aria-label="Fechar seleção de perfil" onClick={() => { setProfileGame(null); setProfilePickerPlacement(null); setCreatingProfile(false) }}>×</button>
         </header>
         <div className="profile-body">
           {profiles.length > 0 && <div className="profile-list">

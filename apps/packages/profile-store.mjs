@@ -1,32 +1,34 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 
 export function createProfileStore({ dataPath }) {
   let queue = Promise.resolve()
 
   return {
-    list: async () => (await readProfiles(dataPath)).map(copyProfile),
-    get: async id => (await readProfiles(dataPath)).find(profile => profile.id === id) ?? null,
-    create(name) {
+    list: async gameId => (await readProfiles(dataPath, gameId)).map(copyProfile),
+    get: async (gameId, id) => id === undefined
+      ? findProfile(dataPath, gameId)
+      : (await readProfiles(dataPath, gameId)).find(profile => profile.id === id) ?? null,
+    create(gameId, name) {
       const operation = queue.then(async () => {
         const normalizedName = normalizeProfileName(name)
-        const profiles = await readProfiles(dataPath)
+        const profiles = await readProfiles(dataPath, gameId)
         if (profiles.some(profile => profile.name.localeCompare(normalizedName, undefined, { sensitivity: 'accent' }) === 0)) {
           throw profileError('PROFILE_NAME_DUPLICATE', 'A profile with this name already exists.')
         }
 
         const profile = { id: randomUUID(), name: normalizedName, createdAt: new Date().toISOString() }
-        await writeProfiles(dataPath, [...profiles, profile])
+        await writeProfiles(dataPath, gameId, [...profiles, profile])
         return copyProfile(profile)
       })
       queue = operation.catch(() => {})
       return operation
     },
-    update(id, name) {
+    update(gameId, id, name) {
       const operation = queue.then(async () => {
         const normalizedName = normalizeProfileName(name)
-        const profiles = await readProfiles(dataPath)
+        const profiles = await readProfiles(dataPath, gameId)
         const index = profiles.findIndex(profile => profile.id === id)
         if (index === -1) return null
         if (profiles.some(profile => profile.id !== id && profile.name.localeCompare(normalizedName, undefined, { sensitivity: 'accent' }) === 0)) {
@@ -35,25 +37,41 @@ export function createProfileStore({ dataPath }) {
 
         const profile = { ...profiles[index], name: normalizedName }
         profiles[index] = profile
-        await writeProfiles(dataPath, profiles)
+        await writeProfiles(dataPath, gameId, profiles)
         return copyProfile(profile)
       })
       queue = operation.catch(() => {})
       return operation
     },
-    remove(id) {
+    remove(gameId, id) {
       const operation = queue.then(async () => {
-        const profiles = await readProfiles(dataPath)
+        const profiles = await readProfiles(dataPath, gameId)
         const index = profiles.findIndex(profile => profile.id === id)
         if (index === -1) return null
 
         const [removed] = profiles.splice(index, 1)
-        await writeProfiles(dataPath, profiles)
+        await writeProfiles(dataPath, gameId, profiles)
         return copyProfile(removed)
       })
       queue = operation.catch(() => {})
       return operation
     },
+  }
+}
+
+async function findProfile(dataPath, id) {
+  try {
+    const files = await readdir(dataPath)
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue
+      const gameId = file.slice(0, -'.json'.length)
+      const profile = (await readProfiles(dataPath, gameId)).find(candidate => candidate.id === id)
+      if (profile) return profile
+    }
+    return null
+  } catch (error) {
+    if (error.code === 'ENOENT') return null
+    throw error
   }
 }
 
@@ -65,9 +83,9 @@ export function normalizeProfileName(value) {
   return name
 }
 
-async function readProfiles(dataPath) {
+async function readProfiles(dataPath, gameId) {
   try {
-    const source = await readFile(dataPath, 'utf8')
+    const source = await readFile(collectionPath(dataPath, gameId), 'utf8')
     const profiles = JSON.parse(source)
     if (!Array.isArray(profiles) || profiles.some(profile => !validProfile(profile))) throw new Error('Invalid profile data.')
     return profiles
@@ -80,17 +98,25 @@ async function readProfiles(dataPath) {
   }
 }
 
-async function writeProfiles(dataPath, profiles) {
+async function writeProfiles(dataPath, gameId, profiles) {
   try {
-    await mkdir(dirname(dataPath), { recursive: true })
-    const temporaryPath = `${dataPath}.${randomUUID()}.tmp`
+    const path = collectionPath(dataPath, gameId)
+    await mkdir(dataPath, { recursive: true })
+    const temporaryPath = `${path}.${randomUUID()}.tmp`
     await writeFile(temporaryPath, JSON.stringify(profiles, null, 2), 'utf8')
-    await rename(temporaryPath, dataPath)
+    await rename(temporaryPath, path)
   } catch (error) {
     const storeError = new Error('Profiles could not be saved.', { cause: error })
     storeError.code = 'PROFILE_STORE_WRITE_FAILED'
     throw storeError
   }
+}
+
+function collectionPath(dataPath, gameId) {
+  if (typeof gameId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(gameId)) {
+    throw profileError('PROFILE_GAME_ID_INVALID', 'Game ID is invalid.')
+  }
+  return join(dataPath, `${gameId}.json`)
 }
 
 function validProfile(profile) {

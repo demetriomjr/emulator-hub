@@ -4,7 +4,9 @@ This first slice uses Node.js built-in HTTP APIs and has no external runtime dep
 
 ## Local setup
 
-Place ROM files manually in `roms/` and add an entry to `catalog.json`. The ROM directory is intentionally ignored by Git. The expected hash must come from an independently trusted source; do not generate it from a file that has not been trusted yet.
+Place supported ROM files in `roms/`; `GET /api/games` automatically scans them and registers only files whose SHA-1/MD5/size exactly match a `no-intro` record returned by the public hash lookup. The scan sends fingerprints and size, never ROM bytes. Unknown, modified, hacked, symlinked, and unsupported files are not listed or launchable. The local Git-ignored registration cache is `data/rom-registry.json`.
+
+`catalog.json` is now a compatibility overlay for legacy IDs and optional game-specific metadata such as Pokémon save adapters; new recognized ROMs do not need a manual entry. A hash match establishes identity with a public preservation dump, not legal ownership or physical-cartridge provenance.
 
 Optional card metadata uses `pokeapiVersion` for the PokéAPI game version and `wikipediaPage` for its box-art thumbnail. `region` and `language` identify the verified ROM dump; PokéAPI name translations do not establish the ROM's language. API data is cached in memory and unavailable metadata does not block play. See [Spec 004](../../.spec/004-rom-card-metadata.md).
 

@@ -39,7 +39,7 @@ async function createFixture(entries, files = {}) {
     root,
     romsDir,
     catalogPath,
-    profilesPath: join(root, 'data', 'profiles.json'),
+    profilesPath: join(root, 'data', 'profiles'),
     controlProfilePath: join(root, 'data', 'control-profile.json'),
     savesPath: join(root, 'data', 'saves'),
     pokemonHubPath: join(root, 'data', 'pokemon-hub'),
@@ -107,7 +107,7 @@ describe('hub backend HTTP contract', () => {
       id: 'pokemon-emerald', title: 'Pokémon Emerald', system: 'gba', core: 'mgba', file: 'pokemon-emerald.gba', sha256: sha256(rom),
       pokemonSave: { supported: true, adapter: 'gen3-gba-v1' },
     }], { 'pokemon-emerald.gba': rom })
-    const profile = await jsonResponse(await fetch(`${baseUrl}/api/profiles`, {
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-emerald/profiles`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'May' }),
     }))
 
@@ -125,7 +125,7 @@ describe('hub backend HTTP contract', () => {
     const { baseUrl } = await startFixture([{
       id: 'pokemon-emerald', title: 'Pokémon Emerald', system: 'gba', core: 'mgba', file: 'pokemon-emerald.gba', sha256: sha256(rom),
     }], { 'pokemon-emerald.gba': rom })
-    const profile = await jsonResponse(await fetch(`${baseUrl}/api/profiles`, {
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-emerald/profiles`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'May' }),
     }))
     const saveUrl = `${baseUrl}/api/profiles/${profile.id}/games/pokemon-emerald/save`
@@ -186,24 +186,24 @@ describe('hub backend HTTP contract', () => {
     assert.equal(missing.status, 400)
     assert.deepEqual(await jsonResponse(missing), { error: 'A profile is required to launch a game.' })
 
-    const created = await fetch(`${baseUrl}/api/profiles`, {
+    const created = await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Dawn' }),
     })
     assert.equal(created.status, 201)
     const profile = await jsonResponse(created)
     assert.equal(profile.name, 'Dawn')
 
-    const listed = await fetch(`${baseUrl}/api/profiles`)
+    const listed = await fetch(`${baseUrl}/api/games/pokemon-red/profiles`)
     assert.deepEqual(await jsonResponse(listed), { profiles: [profile] })
 
-    const renamed = await fetch(`${baseUrl}/api/profiles/${profile.id}`, {
+    const renamed = await fetch(`${baseUrl}/api/games/pokemon-red/profiles/${profile.id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Dawn II' }),
     })
     assert.equal(renamed.status, 200)
     const renamedProfile = await jsonResponse(renamed)
     assert.deepEqual(renamedProfile, { ...profile, name: 'Dawn II' })
 
-    const unknownRename = await fetch(`${baseUrl}/api/profiles/00000000-0000-0000-0000-000000000000`, {
+    const unknownRename = await fetch(`${baseUrl}/api/games/pokemon-red/profiles/00000000-0000-0000-0000-000000000000`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Nobody' }),
     })
     assert.equal(unknownRename.status, 404)
@@ -218,19 +218,71 @@ describe('hub backend HTTP contract', () => {
     const repeated = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/launch?profileId=${renamedProfile.id}`))
     assert.equal(repeated.gameId, descriptor.gameId)
 
-    const secondProfile = await jsonResponse(await fetch(`${baseUrl}/api/profiles`, {
+    const secondProfile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Lucas' }),
     }))
     const secondDescriptor = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/launch?profileId=${secondProfile.id}`))
     assert.notEqual(secondDescriptor.gameId, descriptor.gameId)
 
-    const deleted = await fetch(`${baseUrl}/api/profiles/${secondProfile.id}`, { method: 'DELETE' })
+    const deleted = await fetch(`${baseUrl}/api/games/pokemon-red/profiles/${secondProfile.id}`, { method: 'DELETE' })
     assert.equal(deleted.status, 200)
     assert.deepEqual(await jsonResponse(deleted), secondProfile)
 
-    const missingProfile = await fetch(`${baseUrl}/api/profiles/${secondProfile.id}`, { method: 'DELETE' })
+    const missingProfile = await fetch(`${baseUrl}/api/games/pokemon-red/profiles/${secondProfile.id}`, { method: 'DELETE' })
     assert.equal(missingProfile.status, 404)
     assert.deepEqual(await jsonResponse(missingProfile), { error: 'Profile was not found.' })
+  })
+
+  test('keeps equally named profiles and saves isolated by ROM', async () => {
+    const redRom = Buffer.from('profile isolation red rom')
+    const blueRom = Buffer.from('profile isolation blue rom')
+    const { baseUrl } = await startFixture([
+      { id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(redRom) },
+      { id: 'pokemon-blue', title: 'Pokémon Blue', system: 'gb', core: 'gambatte', file: 'pokemon-blue.gb', sha256: sha256(blueRom) },
+    ], { 'pokemon-red.gb': redRom, 'pokemon-blue.gb': blueRom })
+
+    const redProfile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Leaf' }),
+    }))
+    const blueProfile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-blue/profiles`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Leaf' }),
+    }))
+
+    assert.deepEqual(await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`)), { profiles: [redProfile] })
+    assert.deepEqual(await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-blue/profiles`)), { profiles: [blueProfile] })
+    assert.equal((await fetch(`${baseUrl}/api/games/pokemon-blue/launch?profileId=${redProfile.id}`)).status, 404)
+    assert.equal((await fetch(`${baseUrl}/api/profiles/${redProfile.id}/games/pokemon-blue/save`)).status, 404)
+  })
+
+  test('automatically registers a trusted No-Intro ROM that is absent from the legacy catalog', async () => {
+    const rom = Buffer.from('automatic trusted fire red rom')
+    const fixture = await createFixture([], { 'fire-red.gba': rom })
+    const server = createHubServer({
+      ...fixture,
+      romLookupBatch: async lookups => lookups.map(lookup => ({
+        game: {
+          name: 'Pokemon - Version Rouge Feu',
+          names: { us: 'Pokémon FireRed Version' },
+          platform: { slug: 'gba', name: 'Game Boy Advance' },
+          media: [{ type: 'box-2D', region: 'wor', url: 'https://retrocollection.example/firered.png' }],
+        },
+        dump: { sha1: lookup.sha1.toUpperCase(), md5: lookup.md5.toUpperCase(), size: lookup.size, region: 'wor', dump_source: 'no-intro' },
+      })),
+    })
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+    liveServers.add(server)
+    const baseUrl = `http://127.0.0.1:${server.address().port}`
+    const sha1 = createHash('sha1').update(rom).digest('hex')
+    const id = `rom-${sha1}`
+
+    assert.deepEqual(await jsonResponse(await fetch(`${baseUrl}/api/games`)), {
+      games: [{ id, title: 'Pokémon FireRed Version', system: 'gba', core: 'gba', status: 'ready', region: 'wor', coverUrl: 'https://retrocollection.example/firered.png' }],
+    })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/${id}/profiles`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Leaf' }),
+    }))
+    assert.equal(profile.name, 'Leaf')
+    assert.equal((await fetch(`${baseUrl}/roms/${id}`, { method: 'HEAD' })).status, 200)
   })
 
   test('lists configured games and marks missing ROMs unavailable', async () => {
@@ -290,7 +342,7 @@ describe('hub backend HTTP contract', () => {
       },
     ], { 'pokemon-red.gb': rom })
 
-    const profile = await jsonResponse(await fetch(`${baseUrl}/api/profiles`, {
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Red' }),
     }))
     const launchUrl = `${baseUrl}/api/games/pokemon-red/launch?profileId=${profile.id}`

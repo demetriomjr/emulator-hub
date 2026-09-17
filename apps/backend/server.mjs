@@ -14,15 +14,18 @@ import { createPokemonHubSnapshotStore } from '../packages/pokemon-hub-snapshot-
 import { createPokemonHubService } from '../packages/pokemon-hub-service.mjs'
 import { createPokemonSaveAdapterRegistry } from '../packages/pokemon-save-adapter-registry.mjs'
 import { pokemonGen3Adapter } from '../packages/pokemon-gen3-adapter.mjs'
+import { createRomDiscovery } from '../packages/rom-discovery.mjs'
+import { createRomRegistry } from '../packages/rom-registry.mjs'
 
 const backendDirectory = dirname(fileURLToPath(import.meta.url))
 const defaultCatalogPath = join(backendDirectory, 'catalog.json')
 const defaultRomsDirectory = join(backendDirectory, 'roms')
-const defaultProfilesPath = join(backendDirectory, 'data', 'profiles.json')
+const defaultProfilesPath = join(backendDirectory, 'data', 'profiles')
 const defaultControlProfilePath = join(backendDirectory, 'data', 'control-profile.json')
 const defaultSavesPath = join(backendDirectory, 'data', 'saves')
 const defaultPokemonHubPath = join(backendDirectory, 'data', 'pokemon-hub')
 const defaultPokemonHubProfilesPath = join(backendDirectory, 'data', 'pokemon-hub-profiles')
+const defaultRomRegistryPath = join(backendDirectory, 'data', 'rom-registry.json')
 const loadGameMetadata = createGameMetadataLoader()
 
 const systemExtensions = new Map([
@@ -45,9 +48,12 @@ const unavailableReasons = Object.freeze({
 })
 
 export function createHubServer(options = {}) {
+  const romRegistryPath = options.romRegistryPath ?? (options.catalogPath ? join(dirname(options.catalogPath), 'data', 'rom-registry.json') : defaultRomRegistryPath)
   const config = {
     catalogPath: options.catalogPath ?? defaultCatalogPath,
     romsDirectory: options.romsDirectory ?? options.romsDir ?? defaultRomsDirectory,
+    romRegistry: options.romRegistry ?? createRomRegistry({ dataPath: romRegistryPath }),
+    romDiscovery: options.romDiscovery ?? createRomDiscovery({ lookupBatch: options.romLookupBatch ?? lookupRomBatch, refreshLegacyMetadata: options.refreshLegacyMetadata ?? !options.catalogPath }),
     metadataLoader: options.metadataLoader ?? loadGameMetadata,
     profileStore: options.profileStore ?? createProfileStore({ dataPath: options.profilesPath ?? defaultProfilesPath }),
     controlProfileStore: options.controlProfileStore ?? createControlProfileStore({ dataPath: options.controlProfilePath ?? defaultControlProfilePath }),
@@ -64,7 +70,7 @@ export function createHubServer(options = {}) {
     registry: createPokemonSaveAdapterRegistry([pokemonGen3Adapter]),
     sessions: config.pokemonHubSessions,
     snapshots: config.pokemonHubSnapshots,
-    catalogLoader: () => loadCatalog(config.catalogPath),
+    catalogLoader: () => loadAvailableCatalog(config),
   })
 
   return createServer((request, response) => {
@@ -111,8 +117,8 @@ async function handleRequest(request, response, config) {
   }
 
   const isRomRoute = route.pathname.startsWith('/roms/')
-  const isProfilesRoute = route.pathname === '/api/profiles'
-  const isProfileRoute = route.pathname.startsWith('/api/profiles/')
+  const gameProfilesRoute = parseGameProfilesRoute(route.pathname)
+  const gameProfileRoute = parseGameProfileRoute(route.pathname)
   const isControlProfileRoute = route.pathname === '/api/control-profile'
   const saveRoute = parseSaveRoute(route.pathname)
   const pokemonHubRoute = parsePokemonHubRoute(route.pathname)
@@ -120,22 +126,21 @@ async function handleRequest(request, response, config) {
   const pokemonHubProfileRoute = parsePokemonHubProfileRoute(route.pathname)
   const supportedMethod = request.method === 'GET'
     || (request.method === 'HEAD' && isRomRoute)
-    || (request.method === 'POST' && isProfilesRoute)
+    || (request.method === 'POST' && gameProfilesRoute)
     || (request.method === 'POST' && pokemonHubProfilesRoute)
     || ((request.method === 'PATCH' || request.method === 'DELETE') && pokemonHubProfileRoute)
     || (request.method === 'PUT' && (isControlProfileRoute || saveRoute))
     || (request.method === 'POST' && pokemonHubRoute?.kind === 'transfer')
-    || (request.method === 'PATCH' && isProfileRoute)
-    || (request.method === 'DELETE' && isProfileRoute)
+    || (request.method === 'PATCH' && gameProfileRoute)
+    || (request.method === 'DELETE' && gameProfileRoute)
   if (!supportedMethod) {
-    response.setHeader('Allow', pokemonHubRoute ? pokemonHubRoute.kind === 'transfer' ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'PATCH, DELETE' : pokemonHubProfilesRoute || isProfilesRoute ? 'GET, POST' : saveRoute || isControlProfileRoute ? 'GET, PUT' : isProfileRoute ? 'PATCH, DELETE' : isRomRoute ? 'GET, HEAD' : 'GET')
+    response.setHeader('Allow', pokemonHubRoute ? pokemonHubRoute.kind === 'transfer' ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'PATCH, DELETE' : pokemonHubProfilesRoute || gameProfilesRoute ? 'GET, POST' : saveRoute || isControlProfileRoute ? 'GET, PUT' : gameProfileRoute ? 'PATCH, DELETE' : isRomRoute ? 'GET, HEAD' : 'GET')
     json(response, 405, { error: 'Method is not supported for this route.' })
     return
   }
 
-  if (isProfilesRoute) {
-    if (request.method === 'GET') await listProfiles(response, config)
-    else await createProfile(request, response, config)
+  if (gameProfilesRoute) {
+    await handleGameProfiles(request, response, config, gameProfilesRoute.gameId)
     return
   }
 
@@ -165,10 +170,8 @@ async function handleRequest(request, response, config) {
     return
   }
 
-  if (isProfileRoute) {
-    const id = route.pathname.slice('/api/profiles/'.length)
-    if (request.method === 'PATCH') await updateProfile(request, response, config, id)
-    else await deleteProfile(response, config, id)
+  if (gameProfileRoute) {
+    await handleGameProfile(request, response, config, gameProfileRoute)
     return
   }
 
@@ -214,8 +217,82 @@ function parseRoute(rawUrl) {
   return { pathname, searchParams: url.searchParams }
 }
 
-async function listProfiles(response, config) {
-  json(response, 200, { profiles: await config.profileStore.list() })
+function parseGameProfilesRoute(pathname) {
+  const match = /^\/api\/games\/([^/]+)\/profiles$/.exec(pathname)
+  return match ? { gameId: match[1] } : null
+}
+
+async function loadAvailableCatalog(config) {
+  const legacyEntries = await loadCatalog(config.catalogPath)
+  const cachedEntries = await config.romRegistry.load()
+  const scan = await config.romDiscovery.scan({
+    romsDirectory: config.romsDirectory,
+    cachedEntries,
+    legacyEntries,
+  })
+  const accepted = await config.romRegistry.replace(scan.accepted)
+  const byId = new Map(accepted.map(entry => [entry.id, entry]))
+
+  for (let index = 0; index < legacyEntries.length; index += 1) {
+    const legacy = normalizeEntry(legacyEntries[index], index)
+    if (byId.has(legacy.id)) continue
+    byId.set(legacy.id, legacy)
+  }
+  return [...byId.values()]
+}
+
+async function lookupRomBatch(lookups) {
+  const response = await fetch('https://retrobase-collection.com/api/public/v1/lookup/batch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(6000),
+    body: JSON.stringify({ lookups: lookups.map(({ sha1, md5, size }) => ({ sha1, md5, size })) }),
+  })
+  if (!response.ok) throw new Error(`ROM lookup returned ${response.status}.`)
+  const body = await response.json()
+  if (!Array.isArray(body?.data)) throw new Error('ROM lookup returned malformed data.')
+  return body.data
+}
+
+function parseGameProfileRoute(pathname) {
+  const match = /^\/api\/games\/([^/]+)\/profiles\/([^/]+)$/.exec(pathname)
+  return match ? { gameId: match[1], profileId: match[2] } : null
+}
+
+async function handleGameProfiles(request, response, config, encodedGameId) {
+  const entry = await findProfileGame(response, config, encodedGameId)
+  if (entry === null) return
+  if (request.method === 'GET') await listProfiles(response, config, entry.id)
+  else await createProfile(request, response, config, entry.id)
+}
+
+async function handleGameProfile(request, response, config, route) {
+  const entry = await findProfileGame(response, config, route.gameId)
+  if (entry === null) return
+  if (request.method === 'PATCH') await updateProfile(request, response, config, entry.id, route.profileId)
+  else await deleteProfile(response, config, entry.id, route.profileId)
+}
+
+async function findProfileGame(response, config, encodedGameId) {
+  const gameId = decodeId(encodedGameId)
+  if (gameId === null) {
+    json(response, 400, { error: 'Malformed game ID.' })
+    return null
+  }
+  let entry
+  try { entry = await findEntry(config, gameId) } catch (error) {
+    if (error.code === 'CATALOG_LOAD_FAILED') {
+      json(response, 500, { error: 'Catalog could not be loaded.' })
+      return null
+    }
+    throw error
+  }
+  if (entry === null) json(response, 404, { error: 'Game was not found.' })
+  return entry
+}
+
+async function listProfiles(response, config, gameId) {
+  json(response, 200, { profiles: await config.profileStore.list(gameId) })
 }
 
 async function getControlProfile(response, config) {
@@ -243,7 +320,7 @@ async function replaceControlProfile(request, response, config) {
   }
 }
 
-async function createProfile(request, response, config) {
+async function createProfile(request, response, config, gameId) {
   let body
   try {
     body = await readJsonBody(request)
@@ -254,7 +331,7 @@ async function createProfile(request, response, config) {
   }
 
   try {
-    const profile = await config.profileStore.create(body.name)
+    const profile = await config.profileStore.create(gameId, body.name)
     json(response, 201, profile)
   } catch (error) {
     if (error.code === 'PROFILE_NAME_INVALID') {
@@ -269,8 +346,8 @@ async function createProfile(request, response, config) {
   }
 }
 
-async function deleteProfile(response, config, id) {
-  const profile = await config.profileStore.remove(id)
+async function deleteProfile(response, config, gameId, id) {
+  const profile = await config.profileStore.remove(gameId, id)
   if (profile === null) {
     json(response, 404, { error: 'Profile was not found.' })
     return
@@ -279,7 +356,7 @@ async function deleteProfile(response, config, id) {
   json(response, 200, profile)
 }
 
-async function updateProfile(request, response, config, id) {
+async function updateProfile(request, response, config, gameId, id) {
   let body
   try {
     body = await readJsonBody(request)
@@ -290,7 +367,7 @@ async function updateProfile(request, response, config, id) {
   }
 
   try {
-    const profile = await config.profileStore.update(id, body.name)
+    const profile = await config.profileStore.update(gameId, id, body.name)
     if (profile === null) {
       json(response, 404, { error: 'Profile was not found.' })
       return
@@ -312,7 +389,7 @@ async function updateProfile(request, response, config, id) {
 async function listGames(response, config) {
   let entries
   try {
-    entries = await loadCatalog(config.catalogPath)
+    entries = await loadAvailableCatalog(config)
   } catch (error) {
     if (error.code === 'CATALOG_LOAD_FAILED') {
       json(response, 500, { error: 'Catalog could not be loaded.' })
@@ -338,12 +415,13 @@ async function listGames(response, config) {
     }
 
     if (verification.ok) {
+      if (entry.coverUrl) game.coverUrl = entry.coverUrl
+      if (entry.region && entry.region !== 'legacy') game.region = entry.region
+      if (entry.language) game.language = entry.language
       const metadata = await config.metadataLoader(entry)
       if (metadata) {
         if (metadata.versionName) game.title = `Pokémon ${metadata.versionName} Version`
         if (metadata.coverUrl) game.coverUrl = metadata.coverUrl
-        if (entry.region) game.region = entry.region
-        if (entry.language) game.language = entry.language
       }
     }
 
@@ -365,15 +443,9 @@ async function launchGame(response, config, encodedId, profileId) {
     return
   }
 
-  const profile = await config.profileStore.get(profileId)
-  if (profile === null) {
-    json(response, 404, { error: 'Profile was not found.' })
-    return
-  }
-
   let entry
   try {
-    entry = await findEntry(config.catalogPath, id)
+    entry = await findEntry(config, id)
   } catch (error) {
     if (error.code === 'CATALOG_LOAD_FAILED') {
       json(response, 500, { error: 'Catalog could not be loaded.' })
@@ -384,6 +456,12 @@ async function launchGame(response, config, encodedId, profileId) {
 
   if (entry === null) {
     json(response, 404, { error: 'Game was not found.' })
+    return
+  }
+
+  const profile = await config.profileStore.get(entry.id, profileId)
+  if (profile === null) {
+    json(response, 404, { error: 'Profile was not found.' })
     return
   }
 
@@ -480,10 +558,10 @@ function jsonPokemonHubError(response, error) {
 }
 
 async function handleSave(request, response, config, { profileId, gameId }) {
-  const profile = await config.profileStore.get(profileId)
-  if (profile === null) return json(response, 404, { error: 'Profile was not found.' })
-  const entry = await findEntry(config.catalogPath, gameId)
+  const entry = await findEntry(config, gameId)
   if (entry === null) return json(response, 404, { error: 'Game was not found.' })
+  const profile = await config.profileStore.get(entry.id, profileId)
+  if (profile === null) return json(response, 404, { error: 'Profile was not found.' })
   if (request.method === 'GET') {
     const save = await config.saveStore.get(profileId, gameId)
     if (save === null) return json(response, 404, { error: 'Save was not found.' })
@@ -542,7 +620,7 @@ async function streamRom(response, config, encodedId, headersOnly = false) {
 
   let entry
   try {
-    entry = await findEntry(config.catalogPath, id)
+    entry = await findEntry(config, id)
   } catch (error) {
     if (error.code === 'CATALOG_LOAD_FAILED') {
       json(response, 500, { error: 'Catalog could not be loaded.' })
@@ -571,8 +649,8 @@ async function streamRom(response, config, encodedId, headersOnly = false) {
   response.end(headersOnly ? undefined : verification.bytes)
 }
 
-async function findEntry(catalogPath, id) {
-  const entries = await loadCatalog(catalogPath)
+async function findEntry(config, id) {
+  const entries = await loadAvailableCatalog(config)
   const entry = entries.find((candidate) => normalizeEntry(candidate).id === id)
   return entry === undefined ? null : normalizeEntry(entry)
 }
@@ -585,11 +663,17 @@ function normalizeEntry(rawEntry, index = 0) {
     system: typeof entry.system === 'string' ? entry.system.trim().toLowerCase() : '',
     core: typeof entry.core === 'string' ? entry.core.trim() : '',
     file: typeof entry.file === 'string' ? entry.file : '',
+    sha1: typeof entry.sha1 === 'string' ? entry.sha1.trim().toLowerCase() : '',
+    md5: typeof entry.md5 === 'string' ? entry.md5.trim().toLowerCase() : '',
     sha256: typeof entry.sha256 === 'string' ? entry.sha256.trim().toLowerCase() : '',
+    size: Number.isSafeInteger(entry.size) ? entry.size : undefined,
+    source: typeof entry.source === 'string' ? entry.source.trim().toLowerCase() : '',
+    coverUrl: typeof entry.coverUrl === 'string' ? entry.coverUrl.trim() : '',
     pokeapiVersion: typeof entry.pokeapiVersion === 'string' ? entry.pokeapiVersion.trim().toLowerCase() : '',
     wikipediaPage: typeof entry.wikipediaPage === 'string' ? entry.wikipediaPage.trim() : '',
     region: typeof entry.region === 'string' ? entry.region.trim() : '',
     language: typeof entry.language === 'string' ? entry.language.trim() : '',
+    ...(entry.pokemonSave && typeof entry.pokemonSave === 'object' ? { pokemonSave: structuredClone(entry.pokemonSave) } : {}),
   }
 }
 

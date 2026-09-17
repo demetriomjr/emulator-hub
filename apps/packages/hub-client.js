@@ -11,14 +11,14 @@ export async function getGames() {
   return body.games
 }
 
-export async function getProfiles() {
-  const body = await getJson('/api/profiles')
+export async function getProfiles(gameId) {
+  const body = await getJson(profileCollectionUrl(gameId))
   if (!Array.isArray(body.profiles)) throw new Error('Invalid profile response')
   return body.profiles
 }
 
-export async function createProfile(name) {
-  const response = await fetch('/api/profiles', {
+export async function createProfile(gameId, name) {
+  const response = await fetch(profileCollectionUrl(gameId), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
@@ -28,15 +28,15 @@ export async function createProfile(name) {
   return body
 }
 
-export async function deleteProfile(id) {
-  const response = await fetch(`/api/profiles/${encodeURIComponent(id)}`, { method: 'DELETE' })
+export async function deleteProfile(gameId, id) {
+  const response = await fetch(`${profileCollectionUrl(gameId)}/${encodeURIComponent(id)}`, { method: 'DELETE' })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`)
   return body
 }
 
-export async function updateProfile(id, name) {
-  const response = await fetch(`/api/profiles/${encodeURIComponent(id)}`, {
+export async function updateProfile(gameId, id, name) {
+  const response = await fetch(`${profileCollectionUrl(gameId)}/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
@@ -68,6 +68,10 @@ export async function getLaunch(id, profileId) {
 
 export function getPokemonHub(profileId) {
   return getJson(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub`)
+}
+
+function profileCollectionUrl(gameId) {
+  return `/api/games/${encodeURIComponent(gameId)}/profiles`
 }
 
 export function getPokemonHubProfiles() {
