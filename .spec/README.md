@@ -1,5 +1,13 @@
 # Specifications
 
+- [Spec 024 — Pokemon Hub record model and snapshot transport](024-pokemon-hub-record-model-and-snapshot-transport.md): backend-owned complete Pokemon records, lossless Generation III representation, opaque instance identifiers, and small placement-only snapshot payloads.
+
+- [Spec 023 — Pokemon Hub snapshot integrity and exclusive sessions](023-pokemon-hub-snapshot-integrity.md): planned opaque Pokémon identities, exclusive source leases, versioned snapshot synchronization, deterministic duplicate correction, and a frontend-only test phase.
+
+- [Spec 022 — Pokemon Hub read-only drag and drop](022-pokemon-hub-read-only-drag-and-drop.md): frontend-only draggable occupied slots, droppable targets, and visual overlay without transfer writes.
+
+- [Spec 021 — Pokemon Hub sprite rendering](021-pokemon-hub-sprite-rendering.md): responsive local sprite planes over occupied Hub, Party, and Box slots; drag-and-drop remains deferred.
+
 - [Spec 020 — Local Pokemon sprite resources](020-local-pokemon-sprite-resources.md): local normal and shiny artwork for all base Pokémon and regional forms, synchronized before the frontend starts.
 
 - [Spec 019 — Redis application persistence](019-redis-application-persistence.md): durable Redis-backed application data, SSH-tunnel deployment boundary, and one-time JSON import.

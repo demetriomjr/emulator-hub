@@ -58,6 +58,8 @@ Before `npm run dev` launches Vite, a `predev` hook checks the local catalog onl
 
 The synchronizer identifies base species and regional forms from upstream metadata, not from frontend assumptions. It uses the source's National Pokédex identity to create the public filename, so a regional form never overwrites its base species.
 
+Before an image is written locally, the synchronizer must normalize its transparent canvas. It must find the non-transparent alpha bounds, crop away only transparent outer space, scale the visible artwork proportionally into a fixed 76×76 usable area, and center it in a transparent 96×96 PNG. This makes the largest visible dimension consistent while preserving each sprite's aspect ratio and a 10-pixel safe inset on every side. The generated manifest records a sprite-normalization version; a catalog produced by an earlier normalization version is incomplete and is rebuilt atomically on the next frontend start.
+
 ## Frontend behavior
 
 Frontend code resolves images solely through the local naming contract. A base sprite lookup receives `{ nationalDex, shiny }`; a regional lookup also receives `region`, and a regional subvariant receives `variant`. The resolver returns a public path only when values are valid:
@@ -90,4 +92,4 @@ The upstream artwork is third-party intellectual property. This feature records 
 5. Starting the frontend with a complete valid catalog makes no network request and changes no existing resource file; an incomplete catalog triggers at most one background synchronizer.
 6. The explicit synchronization command can refresh the catalog, and a retrieval failure preserves the previous complete catalog.
 7. Browser-visible artwork URLs are local `/resources/pokemon/...` paths; the browser has no upstream sprite-service dependency.
-8. Automated tests cover selection, exclusion, filename construction, manifest completeness, no-network-complete behavior, incomplete recovery, and preservation after a failed refresh. No project build is run.
+8. Automated tests cover selection, exclusion, filename construction, manifest completeness, no-network-complete behavior, incomplete recovery, preservation after a failed refresh, and alpha-bound crop/scale/centering. No project build is run.

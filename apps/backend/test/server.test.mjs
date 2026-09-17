@@ -69,6 +69,67 @@ async function jsonResponse(response) {
 }
 
 describe('hub backend HTTP contract', () => {
+  test('passes profile-scoped snapshot acquire and sync requests to the coordinator', async () => {
+    const fixture = await createFixture([])
+    const requests = []
+    const server = createHubServer({
+      ...fixture,
+      pokemonHubSnapshotCoordinator: {
+        async acquire(request) { requests.push({ type: 'acquire', request }); return { status: 'acquired' } },
+        async sync(request) { requests.push({ type: 'sync', request }); return { status: 'accepted' } },
+      },
+    })
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+    liveServers.add(server)
+    const baseUrl = `http://127.0.0.1:${server.address().port}`
+
+    const acquire = await fetch(`${baseUrl}/api/profiles/profile-may/pokemon-hub/snapshots/acquire`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceKey: 'save:profile-may:emerald', workspaceId: 'workspace-a', profileId: 'forged' }),
+    })
+    const sync = await fetch(`${baseUrl}/api/profiles/profile-may/pokemon-hub/snapshots/sync`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspaceId: 'workspace-a', clientSequence: 1, idempotencyKey: 'sync-1', sources: [], profileId: 'forged' }),
+    })
+
+    assert.equal(acquire.status, 200)
+    assert.equal(sync.status, 200)
+    assert.deepEqual(requests, [
+      { type: 'acquire', request: { sourceKey: 'save:profile-may:emerald', workspaceId: 'workspace-a', profileId: 'profile-may' } },
+      { type: 'sync', request: { workspaceId: 'workspace-a', clientSequence: 1, idempotencyKey: 'sync-1', sources: [], profileId: 'profile-may' } },
+    ])
+  })
+
+  test('adopts supported save bytes into the snapshot coordinator after a save revision is stored', async () => {
+    const rom = Buffer.from('pokemon snapshot adoption rom')
+    const fixture = await createFixture([{
+      id: 'pokemon-emerald', title: 'Pokémon Emerald', system: 'gba', core: 'mgba', file: 'pokemon-emerald.gba', sha256: sha256(rom),
+      pokemonSave: { supported: true, adapter: 'gen3-gba-v1', layoutProfile: 'pokemon-emerald-gba' },
+    }], { 'pokemon-emerald.gba': rom })
+    const adopted = []
+    const server = createHubServer({
+      ...fixture,
+      pokemonSaveAdapters: { get: () => ({ id: 'gen3-gba-v1', readAllSlots: () => [{ location: { kind: 'game', area: 'party', slot: 0 }, record: null }] }) },
+      pokemonHubSnapshotCoordinator: { adopt: async (request) => { adopted.push(request); return { sourceKey: request.sourceKey } } },
+    })
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+    liveServers.add(server)
+    const baseUrl = `http://127.0.0.1:${server.address().port}`
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-emerald/profiles`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'May' }),
+    }))
+    const bytes = Buffer.from([7, 8, 9])
+
+    const saved = await fetch(`${baseUrl}/api/profiles/${profile.id}/games/pokemon-emerald/save`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/octet-stream', 'If-Match': '*' }, body: bytes,
+    })
+
+    assert.equal(saved.status, 201)
+    assert.equal(adopted.length, 1)
+    assert.equal(adopted[0].profileId, profile.id)
+    assert.equal(adopted[0].sourceKey, `save:${profile.id}:pokemon-emerald`)
+    assert.equal(adopted[0].sourceRevision, 1)
+    assert.equal(adopted[0].adapter, 'gen3-gba-v1')
+  })
+
   test('creates and lists Hub profiles from the Redis-backed Hub collection', async () => {
     const { baseUrl } = await startFixture([])
 

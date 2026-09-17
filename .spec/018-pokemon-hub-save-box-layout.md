@@ -39,7 +39,7 @@ For the initial family, the JSON contains one profile for each title:
 | `pokemon-firered-gba` | Pokemon FireRed | 6 slots | 14 × 30, 6 × 5 |
 | `pokemon-leafgreen-gba` | Pokemon LeafGreen | 6 slots | 14 × 30, 6 × 5 |
 
-The profile also declares the Generation III Party location necessary for server-side decoding. Nothing in React derives an offset from a game ID, title, region, or adapter name.
+The profile also declares the Generation III Party count location and Party record location necessary for server-side decoding. The count is authoritative: records after that count are inactive even when their old bytes remain in the save. Nothing in React derives an offset from a game ID, title, region, or adapter name.
 
 ## Backend contract
 
@@ -55,7 +55,7 @@ The backend must:
 4. decode only safe slot projections, never raw bytes, checksums, file paths, hashes, or save revisions; and
 5. respond with the layout geometry plus the six Party projections and fourteen Box projections.
 
-Each slot projection is either `{ occupied: false }` or a safe display object such as `{ occupied: true, species, shiny }`. The response never contains a representation that can be written back to a save. A missing save, unknown profile, unsupported layout, or unreadable save returns a safe error and leaves other panes unaffected.
+Each slot projection is either `{ occupied: false }` or a safe display object such as `{ occupied: true, species, shiny }`. `species` is always the National Dex identifier; a Generation III adapter converts its native species identifier before exposing the projection. The Party projection contains only the first `partyCount` records; all later fixed visual positions are unoccupied regardless of residual bytes. The response never contains a representation that can be written back to a save. A missing save, unknown profile, unsupported layout, or unreadable save returns a safe error and leaves other panes unaffected.
 
 A missing save has the explicit `404` response code `SAVE_MISSING`. It is
 checked before layout support so a newly created profile for a title that has
@@ -87,7 +87,7 @@ not yet been played is never presented as an unsupported layout.
 ## Explicit deferrals
 
 - Slot selection, transfers, drag-and-drop, edits, releases, reordering, and save writes.
-- Pokemon sprites, names, moves, stats, summaries, box names, wallpapers, and party ordering writes.
+- Pokemon names, moves, stats, summaries, box names, wallpapers, and party ordering writes. Local sprite rendering is specified separately in [Spec 021](021-pokemon-hub-sprite-rendering.md).
 - Layout profiles for titles outside the five Generation III GBA titles.
 - Browser access to raw save bytes and any persistence of the selected Box or pane layout.
 
@@ -100,3 +100,9 @@ not yet been played is never presented as an unsupported layout.
 5. The route only returns safe display projections and no client code reads a `.sav` file or raw save bytes.
 6. An unavailable/missing/unsupported saved layout reports an error in that pane without disturbing another selected source.
 7. Automated tests cover layout-profile validation, Gen III Party/Box projection dimensions, endpoint scoping and safe response shape, and independent per-pane Box navigation. No project build is run.
+
+## Verification record
+
+- 2026-09-17: Added a regression fixture with one active Kadabra and a stale Jirachi record immediately after it. The adapter exposes only the counted Party member.
+- 2026-09-17: Added a native Generation III to National Dex conversion before the slot projection reaches local sprite resolution.
+- 2026-09-17: The targeted reading, resource, rendering, and backend HTTP suites passed: 48 tests, 0 failures. No project build was run.

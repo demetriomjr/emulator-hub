@@ -1,9 +1,13 @@
 import { access, mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
+import sharp from 'sharp'
 
 import { selectPokemonResources } from './pokemon-resource-catalog.mjs'
 
 const SCHEMA_VERSION = 1
+export const SPRITE_NORMALIZATION_VERSION = 1
+const SPRITE_CANVAS_SIZE = 96
+const SPRITE_CONTENT_SIZE = 76
 
 function manifestEntries(resources) {
   return resources.map(({ nationalDex, region, variant, sourceId, normalFile, shinyFile }) => ({ nationalDex, region, variant, sourceId, normalFile, shinyFile }))
@@ -22,7 +26,12 @@ async function completeCatalog(targetDirectory) {
   const manifestPath = join(targetDirectory, 'manifest.json')
   try {
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
-    if (manifest?.schemaVersion !== SCHEMA_VERSION || !Array.isArray(manifest.entries) || manifest.entries.length === 0) return null
+    if (
+      manifest?.schemaVersion !== SCHEMA_VERSION
+      || manifest?.spriteNormalizationVersion !== SPRITE_NORMALIZATION_VERSION
+      || !Array.isArray(manifest.entries)
+      || manifest.entries.length === 0
+    ) return null
     for (const entry of manifest.entries) {
       if (typeof entry?.normalFile !== 'string' || typeof entry?.shinyFile !== 'string') return null
       if (!await exists(join(targetDirectory, entry.normalFile)) || !await exists(join(targetDirectory, entry.shinyFile))) return null
@@ -61,6 +70,49 @@ function assertImage(bytes, url) {
   if (!(bytes instanceof Uint8Array) || bytes.byteLength === 0) {
     throw new TypeError(`Downloaded resource is empty: ${url}`)
   }
+}
+
+function alphaBounds(data, { width, height, channels }) {
+  let left = width
+  let top = height
+  let right = -1
+  let bottom = -1
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (data[(y * width + x) * channels + 3] === 0) continue
+      left = Math.min(left, x)
+      top = Math.min(top, y)
+      right = Math.max(right, x)
+      bottom = Math.max(bottom, y)
+    }
+  }
+
+  if (right < left || bottom < top) throw new TypeError('Downloaded sprite has no visible pixels')
+  return { left, top, width: right - left + 1, height: bottom - top + 1 }
+}
+
+export async function normalizePokemonSprite(bytes) {
+  assertImage(bytes, 'sprite')
+  const { data, info } = await sharp(bytes).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+  const bounds = alphaBounds(data, info)
+  const cropped = sharp(data, { raw: info }).extract(bounds).resize({
+    width: SPRITE_CONTENT_SIZE,
+    height: SPRITE_CONTENT_SIZE,
+    fit: 'inside',
+    kernel: sharp.kernel.lanczos3,
+  })
+  const { data: resized, info: resizedInfo } = await cropped.raw().toBuffer({ resolveWithObject: true })
+  const horizontalInset = SPRITE_CANVAS_SIZE - resizedInfo.width
+  const verticalInset = SPRITE_CANVAS_SIZE - resizedInfo.height
+
+  return sharp(resized, { raw: resizedInfo }).extend({
+    top: Math.floor(verticalInset / 2),
+    bottom: Math.ceil(verticalInset / 2),
+    left: Math.floor(horizontalInset / 2),
+    right: Math.ceil(horizontalInset / 2),
+    background: { r: 0, g: 0, b: 0, alpha: 0 },
+  }).png().toBuffer()
 }
 
 async function replaceDirectory(targetDirectory, stageDirectory) {
@@ -108,15 +160,16 @@ export async function syncPokemonResources({ targetDirectory, loadRecords, downl
       for (const resource of resources) {
         const normal = await download(resource.images.normal)
         assertImage(normal, resource.images.normal)
-        await writeFile(join(stageDirectory, resource.normalFile), normal)
+        await writeFile(join(stageDirectory, resource.normalFile), await normalizePokemonSprite(normal))
 
         const shiny = await download(resource.images.shiny)
         assertImage(shiny, resource.images.shiny)
-        await writeFile(join(stageDirectory, resource.shinyFile), shiny)
+        await writeFile(join(stageDirectory, resource.shinyFile), await normalizePokemonSprite(shiny))
       }
 
       await writeFile(join(stageDirectory, 'manifest.json'), JSON.stringify({
         schemaVersion: SCHEMA_VERSION,
+        spriteNormalizationVersion: SPRITE_NORMALIZATION_VERSION,
         entries: manifestEntries(resources),
       }, null, 2) + '\n')
       await replaceDirectory(targetDirectory, stageDirectory)

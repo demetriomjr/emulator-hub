@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "redis": "^5.12.1"
+    "redis": "^5.12.1",
+    "sharp": "^0.34.5"
   }
 }

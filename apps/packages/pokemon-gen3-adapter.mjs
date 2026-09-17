@@ -1,3 +1,5 @@
+import { getGen3NationalDex } from './pokemon-gen3-species.mjs'
+
 const gen3SaveBytes = 0x20000
 
 export const pokemonGen3Adapter = Object.freeze({
@@ -7,11 +9,26 @@ export const pokemonGen3Adapter = Object.freeze({
     return {
       saveIndex: newest.saveIndex,
       copyOffset: newest.copyOffset,
-      ...(layout?.party ? { party: Array.from({ length: layout.party.slots }, (_, slot) => describePartySlot(readPartyBytes(saveBytes, newest, layout.party, slot))) } : {}),
+      ...(layout?.party ? { party: inspectParty(saveBytes, newest, layout.party) } : {}),
       boxes: Array.from({ length: 14 }, (_, box) => ({
         slots: Array.from({ length: 30 }, (_, slot) => describePcSlot(readPcBytes(saveBytes, newest, box, slot))),
       })),
     }
+  },
+  readAllSlots(saveBytes, layout = null) {
+    const newest = selectNewestCopy(saveBytes)
+    const records = []
+    if (layout?.party) {
+      const activeSlots = readPartyCount(saveBytes, newest, layout.party)
+      for (let slot = 0; slot < layout.party.slots; slot += 1) {
+        const bytes = slot < activeSlots ? readPartyBytes(saveBytes, newest, layout.party, slot) : null
+        records.push(nativeSlot({ kind: 'game', area: 'party', slot }, bytes, 'party-record'))
+      }
+    }
+    for (let box = 0; box < 14; box += 1) for (let slot = 0; slot < 30; slot += 1) {
+      records.push(nativeSlot({ kind: 'game', area: 'box', box, slot }, readPcBytes(saveBytes, newest, box, slot), 'pc-record'))
+    }
+    return records
   },
   readSlot(saveBytes, box, slot) {
     const newest = selectNewestCopy(saveBytes)
@@ -36,6 +53,19 @@ export const pokemonGen3Adapter = Object.freeze({
   },
 })
 
+function nativeSlot(location, bytes, kind) {
+  if (bytes === null || bytes.subarray(0, 80).every(byte => byte === 0)) return { location, record: null }
+  const decoded = decodePcRecord(bytes.subarray(0, 80))
+  if (!decoded?.canonical) throw invalidSave('A populated Gen III record could not be decoded.')
+  return {
+    location,
+    record: {
+      representation: { adapter: 'gen3-gba-v1', kind, bytes: Buffer.from(bytes) },
+      display: { species: decoded.canonical.species, shiny: decoded.canonical.shiny },
+    },
+  }
+}
+
 function describePcSlot(bytes) {
   if (bytes.every(byte => byte === 0)) return { occupied: false }
   const decoded = decodePcRecord(bytes)
@@ -45,6 +75,13 @@ function describePcSlot(bytes) {
 function describePartySlot(bytes) {
   if (bytes.every(byte => byte === 0)) return { occupied: false }
   return describePcSlot(bytes.subarray(0, 80))
+}
+
+function inspectParty(saveBytes, save, party) {
+  const activeSlots = readPartyCount(saveBytes, save, party)
+  return Array.from({ length: party.slots }, (_, slot) => slot < activeSlots
+    ? describePartySlot(readPartyBytes(saveBytes, save, party, slot))
+    : { occupied: false })
 }
 
 // Gen III PC Pokémon records contain a 48-byte encrypted payload.  We retain the
@@ -58,8 +95,8 @@ function decodePcRecord(bytes) {
   for (let offset = 0; offset < encrypted.length; offset += 4) encrypted.writeUInt32LE((encrypted.readUInt32LE(offset) ^ key) >>> 0, offset)
   const order = substructureOrders[personality % 24]
   const growth = encrypted.subarray(order.indexOf('G') * 12, order.indexOf('G') * 12 + 12)
-  const species = growth.readUInt16LE(0)
-  if (species === 0 || species > 411) return null
+  const species = getGen3NationalDex(growth.readUInt16LE(0))
+  if (species === null) return null
   const trainerId = originalTrainerId & 0xffff
   const secretId = originalTrainerId >>> 16
   const shiny = ((trainerId ^ secretId ^ (personality & 0xffff) ^ (personality >>> 16)) & 0xffff) < 8
@@ -124,12 +161,24 @@ function readPcBytes(bytes, save, box, slot) {
 }
 
 function readPartyBytes(bytes, save, party, slot) {
-  if (!Number.isInteger(party.sectionId) || party.sectionId < 0 || party.sectionId > 13 || !Number.isInteger(party.offset) || party.offset < 0 || !Number.isInteger(party.slots) || party.slots < 1 || !Number.isInteger(party.recordBytes) || party.recordBytes < 80 || !Number.isInteger(slot) || slot < 0 || slot >= party.slots) throw invalidSave('Gen III Party layout is invalid.')
+  validatePartyLayout(party)
   const section = save.sectors.get(party.sectionId)
   const offset = party.offset + slot * party.recordBytes
   const length = party.sectionId === 13 ? 2000 : 3968
   if (!section || offset + party.recordBytes > length) throw invalidSave('Gen III Party layout is invalid.')
   return Buffer.from(bytes).subarray(section.offset + offset, section.offset + offset + party.recordBytes)
+}
+
+function readPartyCount(bytes, save, party) {
+  validatePartyLayout(party)
+  const section = save.sectors.get(party.sectionId)
+  const length = party.sectionId === 13 ? 2000 : 3968
+  if (!section || party.countOffset >= length) throw invalidSave('Gen III Party layout is invalid.')
+  return Math.min(Buffer.from(bytes)[section.offset + party.countOffset], party.slots)
+}
+
+function validatePartyLayout(party) {
+  if (!Number.isInteger(party.sectionId) || party.sectionId < 0 || party.sectionId > 13 || !Number.isInteger(party.countOffset) || party.countOffset < 0 || !Number.isInteger(party.offset) || party.offset < 0 || !Number.isInteger(party.slots) || party.slots < 1 || !Number.isInteger(party.recordBytes) || party.recordBytes < 80) throw invalidSave('Gen III Party layout is invalid.')
 }
 
 function writePcBytes(bytes, save, box, slot, record) {

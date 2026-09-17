@@ -71,15 +71,44 @@ test('projects occupied PC slots during inspection without exposing raw bytes', 
 test('projects the six configured Party positions without exposing native bytes', () => {
   const bytes = buildGen3Save({ firstIndex: 3, secondIndex: 7 })
   const record = buildPcRecord({ personality: 0, originalTrainerId: 0x56781234, species: 25 })
+  writePartyCount(bytes, 0xe000, 0x234, 1)
   writePartyRecord(bytes, 0xe000, 0x238, 0, record)
   refreshCopyChecksums(bytes, 0xe000)
 
-  const inspection = pokemonGen3Adapter.inspect(bytes, { party: { sectionId: 1, offset: 0x238, slots: 6, recordBytes: 100 } })
+  const inspection = pokemonGen3Adapter.inspect(bytes, { party: { sectionId: 1, countOffset: 0x234, offset: 0x238, slots: 6, recordBytes: 100 } })
 
   assert.deepEqual(inspection.party, [
     { occupied: true, species: 25, shiny: false },
     ...Array.from({ length: 5 }, () => ({ occupied: false })),
   ])
+})
+
+test('uses the Party count to exclude stale records after the active party', () => {
+  const bytes = buildGen3Save({ firstIndex: 3, secondIndex: 7 })
+  writePartyCount(bytes, 0xe000, 0x234, 1)
+  writePartyRecord(bytes, 0xe000, 0x238, 0, buildPcRecord({ personality: 0, originalTrainerId: 0x56781234, species: 64 }))
+  writePartyRecord(bytes, 0xe000, 0x238, 1, buildPcRecord({ personality: 1, originalTrainerId: 0x56781234, species: 385 }))
+  refreshCopyChecksums(bytes, 0xe000)
+
+  const inspection = pokemonGen3Adapter.inspect(bytes, { party: { sectionId: 1, countOffset: 0x234, offset: 0x238, slots: 6, recordBytes: 100 } })
+
+  assert.deepEqual(inspection.party, [
+    { occupied: true, species: 64, shiny: false },
+    ...Array.from({ length: 5 }, () => ({ occupied: false })),
+  ])
+})
+
+test('converts native Generation III species IDs to National Dex identifiers for display', () => {
+  const bytes = buildGen3Save({ firstIndex: 3, secondIndex: 7 })
+  writePartyCount(bytes, 0xe000, 0x234, 4)
+  for (const [slot, species] of [64, 277, 394, 409].entries()) {
+    writePartyRecord(bytes, 0xe000, 0x238, slot, buildPcRecord({ personality: 0, originalTrainerId: 0x56781234, species }))
+  }
+  refreshCopyChecksums(bytes, 0xe000)
+
+  const inspection = pokemonGen3Adapter.inspect(bytes, { party: { sectionId: 1, countOffset: 0x234, offset: 0x238, slots: 6, recordBytes: 100 } })
+
+  assert.deepEqual(inspection.party.map(slot => slot.species), [64, 252, 282, 385, undefined, undefined])
 })
 
 test('decodes stable Gen III identity fields while retaining the native record', () => {
@@ -103,6 +132,26 @@ test('decodes a valid encrypted record whose XOR result has the high bit set', (
   refreshCopyChecksums(bytes, 0xe000)
 
   assert.deepEqual(pokemonGen3Adapter.inspect(bytes).boxes[0].slots[0], { occupied: true, species: 25, shiny: false })
+})
+
+test('extracts complete native Party and PC records for backend-only adoption', () => {
+  const bytes = buildGen3Save({ firstIndex: 3, secondIndex: 7 })
+  const partyRecord = Buffer.alloc(100, 0xab)
+  buildPcRecord({ personality: 0, originalTrainerId: 0x56781234, species: 25 }).copy(partyRecord)
+  writePartyCount(bytes, 0xe000, 0x234, 1)
+  writePartyRecord(bytes, 0xe000, 0x238, 0, partyRecord)
+  writePcRecord(bytes, 0xe000, 0, 0, buildPcRecord({ personality: 0, originalTrainerId: 0x56781234, species: 64 }))
+  refreshCopyChecksums(bytes, 0xe000)
+
+  const records = pokemonGen3Adapter.readAllSlots(bytes, { party: { sectionId: 1, countOffset: 0x234, offset: 0x238, slots: 6, recordBytes: 100 } })
+
+  assert.deepEqual(records[0].record.display, { species: 25, shiny: false })
+  assert.equal(records[0].record.representation.kind, 'party-record')
+  assert.deepEqual(records[0].record.representation.bytes, partyRecord)
+  const pc = records.find(slot => slot.location.area === 'box' && slot.location.box === 0 && slot.location.slot === 0)
+  assert.equal(pc.record.representation.kind, 'pc-record')
+  assert.equal(pc.record.display.species, 64)
+  assert.equal(records.find(slot => slot.location.area === 'party' && slot.location.slot === 1).record, null)
 })
 
 function buildGen3Save({ firstIndex, secondIndex }) {
@@ -146,6 +195,10 @@ function writePcRecord(bytes, copyOffset, box, slot, record) {
 
 function writePartyRecord(bytes, copyOffset, partyOffset, slot, record) {
   record.copy(bytes, copyOffset + 0x1000 + partyOffset + slot * 100)
+}
+
+function writePartyCount(bytes, copyOffset, partyCountOffset, count) {
+  bytes.writeUInt32LE(count, copyOffset + 0x1000 + partyCountOffset)
 }
 
 function refreshCopyChecksums(bytes, copyOffset) {

@@ -12,6 +12,9 @@ import { createRedisPokemonHubProfileStore } from '../packages/pokemon-hub-profi
 import { createPokemonHubSessionStore } from '../packages/pokemon-hub-session-store.mjs'
 import { createPokemonHubSnapshotStore } from '../packages/pokemon-hub-snapshot-store.mjs'
 import { createPokemonHubService } from '../packages/pokemon-hub-service.mjs'
+import { createPokemonHubEventStore } from '../packages/pokemon-hub-event-store.mjs'
+import { createPokemonHubSnapshotCoordinator } from '../packages/pokemon-hub-snapshot-coordinator.mjs'
+import { adoptPokemonHubSave } from '../packages/pokemon-hub-save-adoption.mjs'
 import { createPokemonSaveAdapterRegistry } from '../packages/pokemon-save-adapter-registry.mjs'
 import { pokemonGen3Adapter } from '../packages/pokemon-gen3-adapter.mjs'
 import { getPokemonSaveLayout } from '../packages/pokemon-save-layouts.mjs'
@@ -68,7 +71,9 @@ export function createHubServer(options = {}) {
     pokemonHubSessions: options.pokemonHubSessions ?? createPokemonHubSessionStore(),
     pokemonHubSnapshots: options.pokemonHubSnapshots ?? createPokemonHubSnapshotStore(),
     pokemonSaveAdapters: options.pokemonSaveAdapters ?? createPokemonSaveAdapterRegistry([pokemonGen3Adapter]),
+    pokemonHubEventStore: options.pokemonHubEventStore ?? createPokemonHubEventStore({ persistence }),
   }
+  config.pokemonHubSnapshotCoordinator = options.pokemonHubSnapshotCoordinator ?? createPokemonHubSnapshotCoordinator({ persistence, eventStore: config.pokemonHubEventStore })
   config.pokemonHubService = options.pokemonHubService ?? createPokemonHubService({
     profileStore: config.profileStore,
     saveStore: config.saveStore,
@@ -138,11 +143,11 @@ async function handleRequest(request, response, config) {
     || (request.method === 'POST' && pokemonHubProfilesRoute)
     || ((request.method === 'PATCH' || request.method === 'DELETE') && pokemonHubProfileRoute)
     || (request.method === 'PUT' && (isControlProfileRoute || saveRoute))
-    || (request.method === 'POST' && pokemonHubRoute?.kind === 'transfer')
+    || (request.method === 'POST' && ['transfer', 'snapshot-acquire', 'snapshot-sync'].includes(pokemonHubRoute?.kind))
     || (request.method === 'PATCH' && gameProfileRoute)
     || (request.method === 'DELETE' && gameProfileRoute)
   if (!supportedMethod) {
-    response.setHeader('Allow', pokemonHubRoute ? pokemonHubRoute.kind === 'transfer' ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'PATCH, DELETE' : pokemonHubProfilesRoute || gameProfilesRoute ? 'GET, POST' : saveRoute || isControlProfileRoute ? 'GET, PUT' : gameProfileRoute ? 'PATCH, DELETE' : isRomRoute ? 'GET, HEAD' : 'GET')
+    response.setHeader('Allow', pokemonHubRoute ? ['transfer', 'snapshot-acquire', 'snapshot-sync'].includes(pokemonHubRoute.kind) ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'PATCH, DELETE' : pokemonHubProfilesRoute || gameProfilesRoute ? 'GET, POST' : saveRoute || isControlProfileRoute ? 'GET, PUT' : gameProfileRoute ? 'PATCH, DELETE' : isRomRoute ? 'GET, HEAD' : 'GET')
     json(response, 405, { error: 'Method is not supported for this route.' })
     return
   }
@@ -536,8 +541,9 @@ function parseSaveRoute(pathname) {
 }
 
 function parsePokemonHubRoute(pathname) {
-  const match = /^\/api\/profiles\/([^/]+)\/pokemon-hub(?:\/(transfers))?$/.exec(pathname)
-  return match ? { profileId: match[1], kind: match[2] === 'transfers' ? 'transfer' : 'inventory' } : null
+  const match = /^\/api\/profiles\/([^/]+)\/pokemon-hub(?:\/(transfers|snapshots\/acquire|snapshots\/sync))?$/.exec(pathname)
+  if (!match) return null
+  return { profileId: match[1], kind: match[2] === 'transfers' ? 'transfer' : match[2] === 'snapshots/acquire' ? 'snapshot-acquire' : match[2] === 'snapshots/sync' ? 'snapshot-sync' : 'inventory' }
 }
 
 function parseSaveLayoutRoute(pathname) {
@@ -572,7 +578,9 @@ async function handlePokemonHub(request, response, config, route) {
   let body
   try { body = await readJsonBody(request) } catch (error) { json(response, 400, { error: error.message }); return }
   try {
-    json(response, 200, await config.pokemonHubService.transfer({ ...body, profileId: route.profileId }))
+    if (route.kind === 'transfer') json(response, 200, await config.pokemonHubService.transfer({ ...body, profileId: route.profileId }))
+    else if (route.kind === 'snapshot-acquire') json(response, 200, await config.pokemonHubSnapshotCoordinator.acquire({ ...body, profileId: route.profileId }))
+    else json(response, 200, await config.pokemonHubSnapshotCoordinator.sync({ ...body, profileId: route.profileId }))
   } catch (error) { jsonPokemonHubError(response, error) }
 }
 
@@ -623,7 +631,7 @@ function jsonPokemonHubProfileError(response, error) {
 }
 
 function jsonPokemonHubError(response, error) {
-  const status = error.code === 'PROFILE_NOT_FOUND' ? 404 : error.code === 'POKEMON_HUB_REVISION_CONFLICT' ? 412 : error.code === 'POKEMON_HUB_GAME_ACTIVE' || error.code === 'POKEMON_HUB_DESTINATION_OCCUPIED' || error.code === 'POKEMON_HUB_SOURCE_EMPTY' ? 409 : 400
+  const status = error.code === 'PROFILE_NOT_FOUND' || error.code === 'SOURCE_NOT_ADOPTED' ? 404 : error.code === 'POKEMON_HUB_REVISION_CONFLICT' || error.code === 'SNAPSHOT_STALE' ? 412 : error.code === 'SOURCE_RESERVED' || error.code === 'LEASE_INVALID' || error.code === 'POKEMON_HUB_GAME_ACTIVE' || error.code === 'POKEMON_HUB_DESTINATION_OCCUPIED' || error.code === 'POKEMON_HUB_SOURCE_EMPTY' ? 409 : 400
   json(response, status, { error: error.message })
 }
 
@@ -649,6 +657,7 @@ async function handleSave(request, response, config, { profileId, gameId }) {
   if (expectedRevision === undefined) return json(response, 428, { error: 'If-Match is required.' })
   try {
     const saved = await config.saveStore.put(profileId, gameId, bytes, expectedRevision)
+    await adoptSaveIfSupported(config, profileId, entry, { bytes, revision: saved.revision })
     json(response, expectedRevision === null ? 201 : 200, saved)
   } catch (error) {
     json(response, error.code === 'SAVE_REVISION_CONFLICT' ? 412 : 400, { error: error.message })
@@ -931,6 +940,13 @@ function isMainModule() {
 
 if (isMainModule()) {
   void startMainServer()
+}
+
+async function adoptSaveIfSupported(config, profileId, entry, saved) {
+  const layout = getPokemonSaveLayout(entry.pokemonSave?.layoutProfile, entry.pokemonSave?.adapter)
+  const adapter = layout && config.pokemonSaveAdapters.get(entry.pokemonSave.adapter)
+  if (!adapter) return
+  await adoptPokemonHubSave({ coordinator: config.pokemonHubSnapshotCoordinator, profileId, gameId: entry.id, saved, adapter, layout })
 }
 
 async function startMainServer() {

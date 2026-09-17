@@ -2,7 +2,7 @@
 
 **Goal:** Populate one local frontend resource directory with normal and shiny artwork for every base Pokémon and regional form before Vite starts.
 
-**Architecture:** A reusable `apps/packages/` module selects eligible source records, creates deterministic local names, validates a manifest, and synchronizes missing PNGs atomically. A thin frontend script invokes that module from `predev`; React later consumes the public paths without an upstream request.
+**Architecture:** A reusable `apps/packages/` module selects eligible source records, creates deterministic local names, validates a versioned manifest, normalizes transparent image canvases, and synchronizes PNGs atomically. A thin frontend script invokes that module from `predev`; React later consumes the public paths without an upstream request.
 
 **Tech Stack:** Node.js ESM, Node `fetch`, `node:fs/promises`, Node test runner, npm lifecycle scripts, Vite static `public` directory.
 
@@ -79,8 +79,27 @@
 - [ ] Inspect `git status --short` and ensure generated frontend resources were not added to Git.
 - [ ] Record verification evidence in this plan.
 
+### Task 5: Normalize transparent sprite canvases during synchronization
+
+**Files:**
+- Modify: `apps/packages/pokemon-resource-sync.mjs`
+- Modify: `apps/packages/pokemon-resource-sync.test.mjs`
+- Modify: `apps/frontend/package.json`
+- Modify: `.spec/020-local-pokemon-sprite-resources.md`
+
+**Interfaces:**
+- Every synchronized PNG has a 96×96 transparent canvas.
+- Its non-transparent alpha bounds are cropped, proportionally resized to fit a 76×76 area, and centered.
+- A normalization version in `manifest.json` invalidates previous raw-image catalogs exactly once.
+
+- [x] Write failing coverage for alpha-bound crop/scale/centering and an obsolete normalization manifest.
+- [x] Add the image processor and apply it before each staged PNG write.
+- [x] Update manifest completeness validation to require the current normalization version.
+- [x] Run the focused resource tests without running a project build.
+
 ## Verification record
 
 - 2026-09-17: `node --test apps/packages/pokemon-resource-start.test.mjs apps/packages/pokemon-resource-catalog.test.mjs apps/packages/pokemon-resource-sync.test.mjs` passed: 9 tests.
 - 2026-09-17: Current upstream metadata preflight found 1,351 source records, selected 1,082 local resources, including 57 regional entries, with no selected record missing a normal or shiny image.
 - 2026-09-17: No project build was run. The full initial asset retrieval is triggered in the background by the next frontend `npm run dev` invocation, so Vite does not wait for it.
+- 2026-09-17: `node --test apps/packages/pokemon-resource-start.test.mjs apps/packages/pokemon-resource-catalog.test.mjs apps/packages/pokemon-resource-sync.test.mjs apps/packages/pokemon-slot-sprite.test.mjs apps/frontend/src/pokemon-slot-sprite-rendering.test.mjs` passed: 17 tests. A real local sprite was processed in memory and produced a 96×96 PNG with alpha; no project build or frontend start was run.
