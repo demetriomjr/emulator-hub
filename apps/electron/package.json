@@ -1,0 +1,11 @@
+{
+  "name": "@emulator-hub/electron",
+  "private": true,
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "latest"
+  }
+}

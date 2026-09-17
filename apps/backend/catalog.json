@@ -1,0 +1,14 @@
+[
+  {
+    "id": "pokemon-emerald-usa-europe",
+    "title": "Pokémon Emerald Version",
+    "system": "gba",
+    "core": "gba",
+    "file": "Pokemon - Emerald Version (USA, Europe).gba",
+    "sha256": "a9dec84dfe7f62ab2220bafaef7479da0929d066ece16a6885f6226db19085af",
+    "pokeapiVersion": "emerald",
+    "wikipediaPage": "Pokémon_Emerald",
+    "region": "USA / Europe",
+    "language": "English"
+  }
+]

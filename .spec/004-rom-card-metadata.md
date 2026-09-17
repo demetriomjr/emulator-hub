@@ -1,0 +1,9 @@
+# Spec 004 — ROM card metadata
+
+Enrich the existing square ROM card without adding pages or unrelated controls. The backend remains the source of configured ROMs and validates their hash as before. For the verified Pokémon Emerald (USA, Europe) entry, the card shows the English game title, the North American cover art, the dump region `USA / Europe`, and the ROM language `English`. A green Play icon remains over the cover. The card title and metadata sit in a readable bottom strip.
+
+The APIs have separate jobs. [PokéAPI's version endpoint](https://pokeapi.co/docs/v2#version) identifies Emerald and gives localized version names; its language values describe name translations, not the language of this ROM. The [Wikipedia page summary API](https://www.mediawiki.org/wiki/API:REST_API/Reference/en) supplies the North American Emerald box-art thumbnail. Neither API identifies a particular ROM dump by hash. The operator catalog therefore maps the trusted Emerald dump to the PokéAPI version and Wikipedia page; its `USA / Europe` region follows the No-Intro dump reference, and `English` follows the verified `BPEE` ROM code. Never infer ROM language from the PokéAPI translations or equate the Hoenn game region with the dump's release region.
+
+Shared metadata retrieval and validation live in `apps/packages/` and are consumed by the backend. The backend enriches `GET /api/games` without changing the launch or ROM-byte contracts. External API data is cached in memory and failures leave the configured game playable, with a placeholder where an image is unavailable. No ROM is sent to either metadata API.
+
+Acceptance: the existing Emerald card displays cover, `USA / Europe`, and `English`; the cover and game version come from the stated APIs; the Play button still opens the validated ROM; missing API responses do not prevent play. No project build is requested.

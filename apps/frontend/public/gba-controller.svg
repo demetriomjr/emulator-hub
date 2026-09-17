@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 520" fill="none">
+  <defs>
+    <linearGradient id="body" x1="500" y1="70" x2="500" y2="470" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#245E4E" stop-opacity=".66"/>
+      <stop offset="1" stop-color="#0D2E2C" stop-opacity=".82"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="500" y1="122" x2="500" y2="346" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#173C38" stop-opacity=".86"/>
+      <stop offset="1" stop-color="#091C20" stop-opacity=".86"/>
+    </linearGradient>
+  </defs>
+  <path d="M139 70h722c51 0 91 40 91 91v208c0 64-52 116-116 116H164c-64 0-116-52-116-116V161c0-51 40-91 91-91Z" fill="url(#body)" stroke="#94E0BB" stroke-opacity=".52" stroke-width="4"/>
+  <path d="M171 105h658c43 0 78 35 78 78v176c0 50-40 90-90 90H183c-50 0-90-40-90-90V183c0-43 35-78 78-78Z" fill="#183F38" fill-opacity=".44" stroke="#D5FFE9" stroke-opacity=".1" stroke-width="2"/>
+  <rect x="304" y="129" width="392" height="195" rx="17" fill="url(#screen)" stroke="#A6EDC9" stroke-opacity=".22" stroke-width="3"/>
+  <path d="M180 83h165l-22 36H165l15-36ZM655 83h165l15 36H677l-22-36Z" fill="#54A87F" fill-opacity=".42" stroke="#B6F7D6" stroke-opacity=".32" stroke-width="2"/>
+  <path d="M216 416h568" stroke="#B8F9D8" stroke-opacity=".18" stroke-width="3" stroke-linecap="round"/>
+</svg>
