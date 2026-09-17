@@ -159,3 +159,7 @@ The Emulator Hub already has the required profile-scoped binary save resource (`
 ## Implementation plan
 
 The executable architecture, package boundaries, transaction protocol, routes, test sequence, and UI work are in [Pokémon Hub Implementation Plan](011-pokemon-hub-implementation-plan.md). It must be executed task-by-task; it does not authorize copying OpenHome source or running a project build.
+
+## Superseding frontend workspace specification
+
+[Spec 012 — Pokémon Hub Workspace Frontend](012-pokemon-hub-workspace-frontend.md) supersedes this document's fixed 30-slot Hub inventory, sidebar/modal UX, and associated frontend/API projection details. It preserves all ownership, binary-adapter, active-session, transaction, licensing, and anti-duplication constraints established here. Future implementation planning must read both specifications, using Spec 012 as the authority for Hub organization profiles, boxes, workspace layout, and migration from schema version 1.
