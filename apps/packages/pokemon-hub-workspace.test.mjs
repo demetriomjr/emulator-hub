@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { choosePaneSource } from './pokemon-hub-workspace.mjs'
+import { choosePaneSource, createPokemonHubWorkspaceState } from './pokemon-hub-workspace.mjs'
+
+test('opens the Hub workspace before an Emulator Hub profile is chosen', () => {
+  assert.deepEqual(createPokemonHubWorkspaceState(), { profile: null, panes: { left: { kind: 'hub' }, right: null }, boxes: {} })
+})
 
 test('rejects selecting Hub as both workspace panes', () => {
   const result = choosePaneSource({ left: { kind: 'hub' }, right: null }, 'right', { kind: 'hub' })

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createProfile, deleteProfile as deleteProfileRequest, getControlProfile, getGames, getLaunch, getPokemonHub, getProfiles, transferPokemonHub, updateControlProfile, updateProfile } from '../../packages/hub-client.js'
 import { activeGamepadBindings, readGamepadBinding, readGamepadSnapshot } from '../../packages/gamepad-input.mjs'
-import { choosePaneSource } from '../../packages/pokemon-hub-workspace.mjs'
+import { choosePaneSource, createPokemonHubWorkspaceState } from '../../packages/pokemon-hub-workspace.mjs'
 import './styles.css'
 
 const gbaControls = Object.freeze({
@@ -377,7 +377,15 @@ function App() {
   }
 
   async function openPokemonHub() {
-    openProfilePicker({ id: 'pokemon-hub', title: 'Pokémon Hub' }, 'pokemon-hub')
+    const workspace = createPokemonHubWorkspaceState()
+    setPokemonHubError('')
+    setPokemonHubData(null)
+    setPokemonHubSelection([])
+    setPokemonHubProfile(workspace.profile)
+    setPokemonHubPanes(workspace.panes)
+    setPokemonHubBoxes(workspace.boxes)
+    setPokemonHubOpen(true)
+    try { setProfiles(await getProfiles()) } catch (cause) { setPokemonHubError(cause.message) }
   }
 
   async function selectPokemonHubProfile(profile) {
@@ -522,7 +530,8 @@ function App() {
       </div>
     </div>}
     {pokemonHubOpen && <div className="pokemon-workspace" role="dialog" aria-modal="true" aria-label="Pokémon Hub">
-      <header className="pokemon-workspace-header"><div><small>{pokemonHubProfile?.name}</small><h2>Pokémon Hub</h2></div><button className="dialog-close" type="button" aria-label="Fechar Pokémon Hub" onClick={() => setPokemonHubOpen(false)}>×</button></header>
+      <header className="pokemon-workspace-header"><div><small>{pokemonHubProfile?.name ?? 'Aplicativo de armazenamento e transferência'}</small><h2>Pokémon Hub</h2></div><button className="dialog-close" type="button" aria-label="Fechar Pokémon Hub" onClick={() => setPokemonHubOpen(false)}>×</button></header>
+      {!pokemonHubProfile && <div className="pokemon-workspace-empty"><h3>Carregar uma coleção</h3><p>Escolha o perfil do Emulator Hub cujos saves e coleções você quer abrir.</p><label className="pokemon-pane-source">Perfil do Emulator Hub<select defaultValue="" onChange={event => { const profile = profiles.find(candidate => candidate.id === event.target.value); if (profile) selectPokemonHubProfile(profile) }}><option value="" disabled>Escolher perfil…</option>{profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label></div>}
       {pokemonHubData && <div className="pokemon-workspace-body">
         <PokemonHubPane side="left" source={pokemonHubPanes.left} data={pokemonHubData} selected={pokemonHubSelection} selectedBox={pokemonHubBoxes[pokemonHubPanes.left?.gameId]} onSourceChange={source => selectPokemonHubPane('left', source)} onBoxChange={(gameId, box) => setPokemonHubBoxes(current => ({ ...current, [gameId]: box }))} onSlotSelect={selectPokemonHubLocation} />
         <PokemonHubPane side="right" source={pokemonHubPanes.right} data={pokemonHubData} selected={pokemonHubSelection} selectedBox={pokemonHubBoxes[pokemonHubPanes.right?.gameId]} onSourceChange={source => selectPokemonHubPane('right', source)} onBoxChange={(gameId, box) => setPokemonHubBoxes(current => ({ ...current, [gameId]: box }))} onSlotSelect={selectPokemonHubLocation} />

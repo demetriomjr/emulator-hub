@@ -1,3 +1,7 @@
+export function createPokemonHubWorkspaceState() {
+  return { profile: null, panes: { left: { kind: 'hub' }, right: null }, boxes: {} }
+}
+
 export function choosePaneSource(panes, side, nextSource) {
   const otherSide = side === 'left' ? 'right' : 'left'
   const other = panes[otherSide]
