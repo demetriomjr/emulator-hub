@@ -34,3 +34,13 @@ test('moves one record from an inactive game into an empty Hub slot', async () =
   assert.equal(save[0], 0)
   assert.equal((await hubStore.getProfileState(profileId)).slots[0].length, 36)
 })
+
+test('refuses a transfer while the source game has a live session', async () => {
+  const hubStore = createPokemonHubStore({ dataPath: await mkdtemp(join(tmpdir(), 'pokemon-hub-service-')) })
+  const service = createPokemonHubService({
+    profileStore: { get: async () => ({ id: profileId }) }, saveStore: { get: async () => null }, hubStore,
+    registry: { get: () => null }, sessions: { hasLiveSession: () => true }, catalogLoader: async () => [],
+  })
+
+  await assert.rejects(() => service.transfer({ profileId, source: { kind: 'game', gameId: 'pokemon-emerald', box: 0, slot: 0 }, destination: { kind: 'hub', slot: 0 }, expectedRevisions: { 'pokemon-emerald': 1 }, expectedHubEpoch: 0 }), { code: 'POKEMON_HUB_GAME_ACTIVE' })
+})
