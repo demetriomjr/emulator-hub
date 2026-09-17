@@ -44,3 +44,16 @@ test('persists a document without sharing mutable nested state', async () => {
 
   assert.equal((await store.getPokemon(profileId, document.hubPokemonId)).canonical.gameData.teraType, 'fire')
 })
+
+test('replaces an inventory only when its expected revision matches', async () => {
+  const store = await createStore()
+  const profileId = '00000000-0000-4000-8000-000000000001'
+  const current = await store.getProfileState(profileId)
+  const next = { ...current, hubEpoch: 1, slots: ['00000000-0000-4000-8000-000000000002', ...Array(29).fill(null)] }
+
+  const saved = await store.putProfileState(next, current.revision)
+
+  assert.equal(saved.revision, 2)
+  assert.equal(saved.hubEpoch, 1)
+  await assert.rejects(() => store.putProfileState(next, current.revision), { code: 'POKEMON_HUB_REVISION_CONFLICT' })
+})

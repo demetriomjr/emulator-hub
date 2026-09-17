@@ -28,6 +28,18 @@ export function createPokemonHubStore({ dataPath }) {
         throw error
       }
     },
+    async putProfileState(state, expectedRevision) {
+      validateProfileState(state)
+      const current = await this.getProfileState(state.profileId)
+      if (current.revision !== expectedRevision) {
+        const error = new Error('Pokémon Hub inventory revision does not match.')
+        error.code = 'POKEMON_HUB_REVISION_CONFLICT'
+        throw error
+      }
+      const saved = { ...state, revision: current.revision + 1, slots: [...state.slots] }
+      await writeJson(inventoryPath(dataPath, state.profileId), saved)
+      return copy(saved)
+    },
     async putPokemon(document) {
       validatePokemon(document)
       await writeJson(pokemonPath(dataPath, document.profileId, document.hubPokemonId), document)
@@ -52,6 +64,11 @@ function validatePokemon(value) {
   validateId(value.profileId)
   validateId(value.hubPokemonId)
   if (!Number.isInteger(value.revision) || value.revision < 1) throw invalidDocument()
+}
+function validateProfileState(value) {
+  if (!value || typeof value !== 'object' || value.schemaVersion !== 1 || !Number.isInteger(value.hubEpoch) || value.hubEpoch < 0 || !Array.isArray(value.slots) || value.slots.length !== 30) throw invalidDocument()
+  validateId(value.profileId)
+  if (value.slots.some(slot => slot !== null && (typeof slot !== 'string' || !uuidPattern.test(slot)))) throw invalidDocument()
 }
 function validateId(value) { if (typeof value !== 'string' || !uuidPattern.test(value)) throw invalidDocument() }
 function invalidDocument() { const error = new Error('Pokémon Hub document is invalid.'); error.code = 'POKEMON_HUB_DOCUMENT_INVALID'; return error }
