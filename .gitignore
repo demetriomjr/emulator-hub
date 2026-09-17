@@ -10,6 +10,7 @@ build/
 out/
 release/
 coverage/
+apps/frontend/public/resources/pokemon/
 .next/
 .nuxt/
 .output/

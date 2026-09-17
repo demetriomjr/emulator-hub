@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "node scripts/sync-pokemon-resources.mjs --background",
     "dev": "vite",
+    "sync:pokemon-resources": "node scripts/sync-pokemon-resources.mjs --refresh",
     "build": "vite build"
   },
   "dependencies": {

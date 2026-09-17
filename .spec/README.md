@@ -1,5 +1,7 @@
 # Specifications
 
+- [Spec 020 — Local Pokemon sprite resources](020-local-pokemon-sprite-resources.md): local normal and shiny artwork for all base Pokémon and regional forms, synchronized before the frontend starts.
+
 - [Spec 019 — Redis application persistence](019-redis-application-persistence.md): durable Redis-backed application data, SSH-tunnel deployment boundary, and one-time JSON import.
 
 - [Spec 017 — Pokemon Hub save-profile selection](017-pokemon-hub-save-profile-selection.md): two-stage ROM/profile selection, with save content initially deferred.
