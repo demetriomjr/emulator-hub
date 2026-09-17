@@ -1,0 +1,58 @@
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+export function createPokemonHubStore({ dataPath }) {
+  return {
+    async getProfileState(profileId) {
+      validateId(profileId)
+      const path = inventoryPath(dataPath, profileId)
+      try {
+        return copy(await readJson(path))
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error
+        const inventory = { schemaVersion: 1, profileId, hubEpoch: 0, revision: 1, slots: Array(30).fill(null) }
+        await writeJson(path, inventory)
+        return copy(inventory)
+      }
+    },
+    async getPokemon(profileId, hubPokemonId) {
+      validateId(profileId)
+      validateId(hubPokemonId)
+      try {
+        const document = await readJson(pokemonPath(dataPath, profileId, hubPokemonId))
+        return copy(document)
+      } catch (error) {
+        if (error.code === 'ENOENT') return null
+        throw error
+      }
+    },
+    async putPokemon(document) {
+      validatePokemon(document)
+      await writeJson(pokemonPath(dataPath, document.profileId, document.hubPokemonId), document)
+      return copy(document)
+    },
+  }
+}
+
+function inventoryPath(root, profileId) { return join(root, profileId, 'inventory.json') }
+function pokemonPath(root, profileId, hubPokemonId) { return join(root, profileId, 'pokemon', `${hubPokemonId}.json`) }
+
+async function readJson(path) { return JSON.parse(await readFile(path, 'utf8')) }
+async function writeJson(path, value) {
+  await mkdir(dirname(path), { recursive: true })
+  const temporary = `${path}.${process.pid}.tmp`
+  await writeFile(temporary, JSON.stringify(value, null, 2), 'utf8')
+  await rename(temporary, path)
+}
+
+function validatePokemon(value) {
+  if (!value || typeof value !== 'object' || value.schemaVersion !== 1) throw invalidDocument()
+  validateId(value.profileId)
+  validateId(value.hubPokemonId)
+  if (!Number.isInteger(value.revision) || value.revision < 1) throw invalidDocument()
+}
+function validateId(value) { if (typeof value !== 'string' || !uuidPattern.test(value)) throw invalidDocument() }
+function invalidDocument() { const error = new Error('Pokémon Hub document is invalid.'); error.code = 'POKEMON_HUB_DOCUMENT_INVALID'; return error }
+function copy(value) { return structuredClone(value) }
