@@ -9,6 +9,7 @@ import { createControlProfileStore } from '../packages/control-profile-store.mjs
 import { createSaveStore } from '../packages/save-store.mjs'
 import { createPokemonHubStore } from '../packages/pokemon-hub-store.mjs'
 import { createPokemonHubSessionStore } from '../packages/pokemon-hub-session-store.mjs'
+import { createPokemonHubSnapshotStore } from '../packages/pokemon-hub-snapshot-store.mjs'
 import { createPokemonHubService } from '../packages/pokemon-hub-service.mjs'
 import { createPokemonSaveAdapterRegistry } from '../packages/pokemon-save-adapter-registry.mjs'
 import { pokemonGen3Adapter } from '../packages/pokemon-gen3-adapter.mjs'
@@ -51,6 +52,7 @@ export function createHubServer(options = {}) {
     saveStore: options.saveStore ?? createSaveStore({ dataPath: options.savesPath ?? defaultSavesPath }),
     pokemonHubStore: options.pokemonHubStore ?? createPokemonHubStore({ dataPath: options.pokemonHubPath ?? defaultPokemonHubPath }),
     pokemonHubSessions: options.pokemonHubSessions ?? createPokemonHubSessionStore(),
+    pokemonHubSnapshots: options.pokemonHubSnapshots ?? createPokemonHubSnapshotStore(),
   }
   config.pokemonHubService = options.pokemonHubService ?? createPokemonHubService({
     profileStore: config.profileStore,
@@ -58,6 +60,7 @@ export function createHubServer(options = {}) {
     hubStore: config.pokemonHubStore,
     registry: createPokemonSaveAdapterRegistry([pokemonGen3Adapter]),
     sessions: config.pokemonHubSessions,
+    snapshots: config.pokemonHubSnapshots,
     catalogLoader: () => loadCatalog(config.catalogPath),
   })
 

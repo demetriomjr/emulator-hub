@@ -68,6 +68,20 @@ test('projects occupied PC slots during inspection without exposing raw bytes', 
   assert.deepEqual(inspection.boxes[0].slots[1], { occupied: false })
 })
 
+test('decodes stable Gen III identity fields while retaining the native record', () => {
+  const bytes = buildGen3Save({ firstIndex: 3, secondIndex: 7 })
+  const record = buildPcRecord({ personality: 0, originalTrainerId: 0x56781234, species: 25 })
+  writePcRecord(bytes, 0xe000, 0, 0, record)
+  refreshCopyChecksums(bytes, 0xe000)
+
+  const decoded = pokemonGen3Adapter.readSlot(bytes, 0, 0)
+
+  assert.equal(decoded.canonical.species, 25)
+  assert.deepEqual(decoded.identity, { personality: 0, originalTrainerId: 0x56781234 })
+  assert.deepEqual(pokemonGen3Adapter.inspect(bytes).boxes[0].slots[0], { occupied: true, species: 25, shiny: false })
+  assert.deepEqual(decoded.bytes, record)
+})
+
 function buildGen3Save({ firstIndex, secondIndex }) {
   const bytes = Buffer.alloc(0x20000, 0xff)
   writeCopy(bytes, 0, firstIndex)
@@ -112,4 +126,16 @@ function refreshCopyChecksums(bytes, copyOffset) {
     const offset = copyOffset + sectionId * 0x1000
     bytes.writeUInt16LE(gen3Checksum(bytes, offset, sectionId), offset + 0xff6)
   }
+}
+
+function buildPcRecord({ personality, originalTrainerId, species }) {
+  const record = Buffer.alloc(80)
+  record.writeUInt32LE(personality, 0)
+  record.writeUInt32LE(originalTrainerId, 4)
+  const decrypted = Buffer.alloc(48)
+  decrypted.writeUInt16LE(species, 0)
+  const key = personality ^ originalTrainerId
+  for (let offset = 0; offset < decrypted.length; offset += 4) decrypted.writeUInt32LE(decrypted.readUInt32LE(offset) ^ key, offset)
+  decrypted.copy(record, 32)
+  return record
 }

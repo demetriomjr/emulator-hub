@@ -8,14 +8,16 @@ export const pokemonGen3Adapter = Object.freeze({
       saveIndex: newest.saveIndex,
       copyOffset: newest.copyOffset,
       boxes: Array.from({ length: 14 }, (_, box) => ({
-        slots: Array.from({ length: 30 }, (_, slot) => ({ occupied: !readPcBytes(saveBytes, newest, box, slot).every(byte => byte === 0) })),
+        slots: Array.from({ length: 30 }, (_, slot) => describePcSlot(readPcBytes(saveBytes, newest, box, slot))),
       })),
     }
   },
   readSlot(saveBytes, box, slot) {
     const newest = selectNewestCopy(saveBytes)
     const bytes = readPcBytes(saveBytes, newest, box, slot)
-    return bytes.every(byte => byte === 0) ? null : { bytes: Buffer.from(bytes) }
+    if (bytes.every(byte => byte === 0)) return null
+    const decoded = decodePcRecord(bytes)
+    return { bytes: Buffer.from(bytes), ...(decoded ?? {}) }
   },
   writeSlot(saveBytes, box, slot, record) {
     const newest = selectNewestCopy(saveBytes)
@@ -32,6 +34,41 @@ export const pokemonGen3Adapter = Object.freeze({
     return copy
   },
 })
+
+function describePcSlot(bytes) {
+  if (bytes.every(byte => byte === 0)) return { occupied: false }
+  const decoded = decodePcRecord(bytes)
+  return { occupied: true, ...(decoded?.canonical ? { species: decoded.canonical.species, shiny: decoded.canonical.shiny } : {}) }
+}
+
+// Gen III PC Pokémon records contain a 48-byte encrypted payload.  We retain the
+// original bytes for lossless round-tripping, but decode stable identity fields for
+// Hub tracking without changing the game representation.
+function decodePcRecord(bytes) {
+  const personality = bytes.readUInt32LE(0)
+  const originalTrainerId = bytes.readUInt32LE(4)
+  const encrypted = Buffer.from(bytes.subarray(32, 80))
+  const key = personality ^ originalTrainerId
+  for (let offset = 0; offset < encrypted.length; offset += 4) encrypted.writeUInt32LE(encrypted.readUInt32LE(offset) ^ key, offset)
+  const order = substructureOrders[personality % 24]
+  const growth = encrypted.subarray(order.indexOf('G') * 12, order.indexOf('G') * 12 + 12)
+  const species = growth.readUInt16LE(0)
+  if (species === 0 || species > 411) return null
+  const trainerId = originalTrainerId & 0xffff
+  const secretId = originalTrainerId >>> 16
+  const shiny = ((trainerId ^ secretId ^ (personality & 0xffff) ^ (personality >>> 16)) & 0xffff) < 8
+  return {
+    identity: { personality, originalTrainerId },
+    canonical: { species, shiny, trainer: { trainerId, secretId } },
+  }
+}
+
+const substructureOrders = [
+  'GAEM', 'GAME', 'GEAM', 'GEMA', 'GMAE', 'GMEA',
+  'AGEM', 'AGME', 'AEGM', 'AEMG', 'AMGE', 'AMEG',
+  'EGAM', 'EGMA', 'EAGM', 'EAMG', 'EMGA', 'EMAG',
+  'MGAE', 'MGEA', 'MAGE', 'MAEG', 'MEGA', 'MEAG',
+]
 
 function selectNewestCopy(saveBytes) {
   if (!Buffer.isBuffer(saveBytes) && !(saveBytes instanceof Uint8Array)) throw invalidSave('A Gen III save is required.')

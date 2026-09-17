@@ -42,6 +42,7 @@ async function createFixture(entries, files = {}) {
     profilesPath: join(root, 'data', 'profiles.json'),
     controlProfilePath: join(root, 'data', 'control-profile.json'),
     savesPath: join(root, 'data', 'saves'),
+    pokemonHubPath: join(root, 'data', 'pokemon-hub'),
   }
 }
 
@@ -65,6 +66,25 @@ async function jsonResponse(response) {
 }
 
 describe('hub backend HTTP contract', () => {
+  test('returns a profile-scoped Pokémon Hub inventory', async () => {
+    const rom = Buffer.from('pokemon hub test rom')
+    const { baseUrl } = await startFixture([{
+      id: 'pokemon-emerald', title: 'Pokémon Emerald', system: 'gba', core: 'mgba', file: 'pokemon-emerald.gba', sha256: sha256(rom),
+      pokemonSave: { supported: true, adapter: 'gen3-gba-v1' },
+    }], { 'pokemon-emerald.gba': rom })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/profiles`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'May' }),
+    }))
+
+    const response = await fetch(`${baseUrl}/api/profiles/${profile.id}/pokemon-hub`)
+
+    assert.equal(response.status, 200)
+    const inventory = await jsonResponse(response)
+    assert.equal(inventory.hubEpoch, 0)
+    assert.equal(inventory.slots.length, 30)
+    assert.deepEqual(inventory.games, [{ id: 'pokemon-emerald', title: 'Pokémon Emerald', status: 'save-missing' }])
+  })
+
   test('stores and retrieves a changed in-game save for its selected profile', async () => {
     const rom = Buffer.from('pokemon save test rom')
     const { baseUrl } = await startFixture([{

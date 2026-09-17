@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { parseExpectedRevisions, parseHubLocation } from './pokemon-hub-model.mjs'
 
 export function createPokemonHubService({ profileStore, saveStore, hubStore, registry, sessions, snapshots = { invalidateGames: () => {} }, catalogLoader }) {
+  const profileTransfers = new Map()
   return {
     async getInventory(profileId) {
       if (await profileStore.get(profileId) === null) throw transferError('PROFILE_NOT_FOUND', 'Profile was not found.')
@@ -30,6 +31,11 @@ export function createPokemonHubService({ profileStore, saveStore, hubStore, reg
       return { hubEpoch: inventory.hubEpoch, revision: inventory.revision, slots, games }
     },
     async transfer(request) {
+      return runExclusively(profileTransfers, request.profileId, () => transferUnlocked(request))
+    },
+  }
+
+  async function transferUnlocked(request) {
       const source = parseHubLocation(request.source)
       const destination = parseHubLocation(request.destination)
       const { gameRevisions, hubEpoch } = parseExpectedRevisions(request.expectedRevisions, request.expectedHubEpoch)
@@ -67,7 +73,6 @@ export function createPokemonHubService({ profileStore, saveStore, hubStore, reg
       await hubStore.putProfileState(next, inventory.revision)
       snapshots.invalidateGames(request.profileId, [source.gameId], next.hubEpoch)
       return { hubEpoch: next.hubEpoch, hubPokemonId }
-    },
   }
 
   async function withdraw(request, source, destination, gameRevisions, hubEpoch) {
@@ -87,11 +92,18 @@ export function createPokemonHubService({ profileStore, saveStore, hubStore, reg
     const stored = await saveStore.get(request.profileId, destination.gameId)
     if (!stored || stored.revision !== gameRevisions[destination.gameId]) throw transferError('POKEMON_HUB_REVISION_CONFLICT', 'Game save changed.')
     if (adapter.readSlot(stored.bytes, destination.box, destination.slot)) throw transferError('POKEMON_HUB_DESTINATION_OCCUPIED', 'Game destination is occupied.')
-    const record = { bytes: Buffer.from(representation.bytesBase64, 'base64') }
-    await saveStore.put(request.profileId, destination.gameId, adapter.writeSlot(stored.bytes, destination.box, destination.slot, record), stored.revision)
     const next = { ...inventory, hubEpoch: inventory.hubEpoch + 1, slots: [...inventory.slots] }
     next.slots[source.slot] = null
+    // Remove the Hub claim before writing the destination.  A sudden process stop
+    // can at worst leave a recoverable missing placement, never two accessible copies.
     await hubStore.putProfileState(next, inventory.revision)
+    const record = { bytes: Buffer.from(representation.bytesBase64, 'base64') }
+    try {
+      await saveStore.put(request.profileId, destination.gameId, adapter.writeSlot(stored.bytes, destination.box, destination.slot, record), stored.revision)
+    } catch (error) {
+      await restoreInventory(hubStore, inventory)
+      throw error
+    }
     await hubStore.putPokemon({ ...document, state: 'in-game', location: destination, history: [...document.history, { type: 'withdrawal', at: new Date().toISOString(), destination }], revision: document.revision + 1 })
     snapshots.invalidateGames(request.profileId, [destination.gameId], next.hubEpoch)
     return { hubEpoch: next.hubEpoch, hubPokemonId }
@@ -115,12 +127,46 @@ export function createPokemonHubService({ profileStore, saveStore, hubStore, reg
     if (!record) throw transferError('POKEMON_HUB_SOURCE_EMPTY', 'Pokémon Hub source is empty.')
     if (destinationAdapter.readSlot(destinationSave.bytes, destination.box, destination.slot)) throw transferError('POKEMON_HUB_DESTINATION_OCCUPIED', 'Game destination is occupied.')
     await saveStore.put(request.profileId, source.gameId, sourceAdapter.writeSlot(sourceSave.bytes, source.box, source.slot, null), sourceSave.revision)
-    await saveStore.put(request.profileId, destination.gameId, destinationAdapter.writeSlot(destinationSave.bytes, destination.box, destination.slot, record), destinationSave.revision)
+    try {
+      await saveStore.put(request.profileId, destination.gameId, destinationAdapter.writeSlot(destinationSave.bytes, destination.box, destination.slot, record), destinationSave.revision)
+    } catch (error) {
+      await restoreSave(saveStore, request.profileId, source.gameId, sourceSave.bytes)
+      throw error
+    }
+    const hubPokemonId = randomUUID()
+    await hubStore.putPokemon({
+      schemaVersion: 1, hubPokemonId, profileId: request.profileId, state: 'in-game', location: destination,
+      identity: { species: record.canonical?.species ?? null, form: 0, shiny: false, nativeIdentity: record.identity ?? {} },
+      canonical: { trainer: {}, moves: [], stats: {}, met: {}, ribbons: [], attributes: {}, gameData: {}, unknownFields: {}, ...record.canonical },
+      representations: [{ adapter: sourceAdapter.id, kind: 'pc-record', bytesBase64: Buffer.from(record.bytes).toString('base64') }],
+      provenance: { firstSeenAt: new Date().toISOString(), sourceGameId: source.gameId },
+      history: [{ type: 'direct-transfer', at: new Date().toISOString(), source, destination }], revision: 1,
+    })
     const next = { ...inventory, hubEpoch: inventory.hubEpoch + 1, slots: [...inventory.slots] }
     await hubStore.putProfileState(next, inventory.revision)
     snapshots.invalidateGames(request.profileId, [source.gameId, destination.gameId], next.hubEpoch)
-    return { hubEpoch: next.hubEpoch }
+    return { hubEpoch: next.hubEpoch, hubPokemonId }
   }
 }
 
 function transferError(code, message) { const error = new Error(message); error.code = code; return error }
+
+async function restoreSave(saveStore, profileId, gameId, originalBytes) {
+  const current = await saveStore.get(profileId, gameId)
+  if (!current) throw new Error('Pokémon Hub could not restore the source save after a failed transfer.')
+  await saveStore.put(profileId, gameId, originalBytes, current.revision)
+}
+
+async function restoreInventory(hubStore, original) {
+  const current = await hubStore.getProfileState(original.profileId)
+  await hubStore.putProfileState({ ...original, revision: current.revision }, current.revision)
+}
+
+function runExclusively(queues, profileId, action) {
+  const previous = queues.get(profileId) ?? Promise.resolve()
+  const current = previous.catch(() => {}).then(action)
+  queues.set(profileId, current)
+  return current.finally(() => {
+    if (queues.get(profileId) === current) queues.delete(profileId)
+  })
+}
