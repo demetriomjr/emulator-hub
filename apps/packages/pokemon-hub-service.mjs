@@ -28,6 +28,7 @@ export function createPokemonHubService({ profileStore, saveStore, hubStore, reg
       const source = parseHubLocation(request.source)
       const destination = parseHubLocation(request.destination)
       const { gameRevisions, hubEpoch } = parseExpectedRevisions(request.expectedRevisions, request.expectedHubEpoch)
+      if (source.kind === 'hub' && destination.kind === 'game') return withdraw(request, source, destination, gameRevisions, hubEpoch)
       if (source.kind !== 'game' || destination.kind !== 'hub') throw transferError('POKEMON_HUB_TRANSFER_UNSUPPORTED', 'This Pokémon Hub transfer is not supported yet.')
       if (source.gameId !== request.source.gameId) throw transferError('POKEMON_HUB_TRANSFER_INVALID', 'Pokémon Hub source is invalid.')
       if (await profileStore.get(request.profileId) === null) throw transferError('PROFILE_NOT_FOUND', 'Profile was not found.')
@@ -61,6 +62,33 @@ export function createPokemonHubService({ profileStore, saveStore, hubStore, reg
       snapshots.invalidateGames(request.profileId, [source.gameId], next.hubEpoch)
       return { hubEpoch: next.hubEpoch, hubPokemonId }
     },
+  }
+
+  async function withdraw(request, source, destination, gameRevisions, hubEpoch) {
+    if (await profileStore.get(request.profileId) === null) throw transferError('PROFILE_NOT_FOUND', 'Profile was not found.')
+    if (sessions.hasLiveSession(request.profileId, destination.gameId)) throw transferError('POKEMON_HUB_GAME_ACTIVE', 'Close the game before using Pokémon Hub.')
+    const inventory = await hubStore.getProfileState(request.profileId)
+    if (inventory.hubEpoch !== hubEpoch) throw transferError('POKEMON_HUB_REVISION_CONFLICT', 'Pokémon Hub inventory changed.')
+    const hubPokemonId = inventory.slots[source.slot]
+    if (!hubPokemonId) throw transferError('POKEMON_HUB_SOURCE_EMPTY', 'Pokémon Hub source is empty.')
+    const document = await hubStore.getPokemon(request.profileId, hubPokemonId)
+    const catalog = await catalogLoader()
+    const game = catalog.find(entry => entry.id === destination.gameId && entry.pokemonSave?.supported === true)
+    const adapter = game && registry.get(game.pokemonSave.adapter)
+    if (!adapter) throw transferError('POKEMON_HUB_GAME_UNSUPPORTED', 'Game is not supported by Pokémon Hub.')
+    const representation = document?.representations.find(item => item.adapter === adapter.id && item.kind === 'pc-record')
+    if (!representation) throw transferError('POKEMON_HUB_TRANSFER_UNSUPPORTED', 'Pokémon is not compatible with this game.')
+    const stored = await saveStore.get(request.profileId, destination.gameId)
+    if (!stored || stored.revision !== gameRevisions[destination.gameId]) throw transferError('POKEMON_HUB_REVISION_CONFLICT', 'Game save changed.')
+    if (adapter.readSlot(stored.bytes, destination.box, destination.slot)) throw transferError('POKEMON_HUB_DESTINATION_OCCUPIED', 'Game destination is occupied.')
+    const record = { bytes: Buffer.from(representation.bytesBase64, 'base64') }
+    await saveStore.put(request.profileId, destination.gameId, adapter.writeSlot(stored.bytes, destination.box, destination.slot, record), stored.revision)
+    const next = { ...inventory, hubEpoch: inventory.hubEpoch + 1, slots: [...inventory.slots] }
+    next.slots[source.slot] = null
+    await hubStore.putProfileState(next, inventory.revision)
+    await hubStore.putPokemon({ ...document, state: 'in-game', location: destination, history: [...document.history, { type: 'withdrawal', at: new Date().toISOString(), destination }], revision: document.revision + 1 })
+    snapshots.invalidateGames(request.profileId, [destination.gameId], next.hubEpoch)
+    return { hubEpoch: next.hubEpoch, hubPokemonId }
   }
 }
 
