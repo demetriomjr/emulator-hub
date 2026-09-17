@@ -63,3 +63,15 @@ test('withdraws a retained native record from Hub into an empty game slot', asyn
   assert.equal(save[0], 9)
   assert.equal((await hubStore.getProfileState(profileId)).slots[0], null)
 })
+
+test('moves a record directly between two inactive compatible games', async () => {
+  const saves = new Map([['pokemon-emerald', Buffer.from([5])], ['pokemon-firered', Buffer.from([0])]])
+  const hubStore = createPokemonHubStore({ dataPath: await mkdtemp(join(tmpdir(), 'pokemon-hub-service-')) })
+  const adapter = { id: 'gen3-gba-v1', readSlot: bytes => bytes[0] ? { bytes: Buffer.alloc(80, bytes[0]), canonical: { species: 25 } } : null, writeSlot: (_bytes, _box, _slot, record) => Buffer.from([record ? record.bytes[0] : 0]), inspect: () => ({ boxes: [] }) }
+  const service = createPokemonHubService({ profileStore: { get: async () => ({ id: profileId }) }, saveStore: { get: async (_p, game) => ({ bytes: saves.get(game), revision: 1 }), put: async (_p, game, bytes) => saves.set(game, bytes) }, hubStore, registry: { get: () => adapter }, sessions: { hasLiveSession: () => false }, catalogLoader: async () => ['pokemon-emerald', 'pokemon-firered'].map(id => ({ id, pokemonSave: { supported: true, adapter: adapter.id } })) })
+
+  await service.transfer({ profileId, source: { kind: 'game', gameId: 'pokemon-emerald', box: 0, slot: 0 }, destination: { kind: 'game', gameId: 'pokemon-firered', box: 0, slot: 0 }, expectedRevisions: { 'pokemon-emerald': 1, 'pokemon-firered': 1 }, expectedHubEpoch: 0 })
+
+  assert.equal(saves.get('pokemon-emerald')[0], 0)
+  assert.equal(saves.get('pokemon-firered')[0], 5)
+})
