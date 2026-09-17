@@ -66,6 +66,21 @@ export async function getLaunch(id, profileId) {
   return getJson(`/api/games/${encodeURIComponent(id)}/launch?${parameters}`)
 }
 
+export function getPokemonHub(profileId) {
+  return getJson(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub`)
+}
+
+export async function transferPokemonHub(profileId, transfer) {
+  const response = await fetch(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/transfers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(transfer),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`)
+  return body
+}
+
 export async function getCloudSave(url) {
   const response = await fetch(url, { cache: 'no-store' })
   if (response.status === 404) return null

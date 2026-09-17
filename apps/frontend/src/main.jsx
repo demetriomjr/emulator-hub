@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { createProfile, deleteProfile as deleteProfileRequest, getControlProfile, getGames, getLaunch, getProfiles, updateControlProfile, updateProfile } from '../../packages/hub-client.js'
+import { createProfile, deleteProfile as deleteProfileRequest, getControlProfile, getGames, getLaunch, getPokemonHub, getProfiles, updateControlProfile, updateProfile } from '../../packages/hub-client.js'
 import { activeGamepadBindings, readGamepadBinding, readGamepadSnapshot } from '../../packages/gamepad-input.mjs'
 import './styles.css'
 
@@ -107,6 +107,11 @@ function App() {
   const [controlSaving, setControlSaving] = useState(false)
   const [captureTarget, setCaptureTarget] = useState(null)
   const [controlRevision, setControlRevision] = useState(0)
+  const [pokemonHubOpen, setPokemonHubOpen] = useState(false)
+  const [pokemonHubProfiles, setPokemonHubProfiles] = useState([])
+  const [pokemonHubProfile, setPokemonHubProfile] = useState(null)
+  const [pokemonHubData, setPokemonHubData] = useState(null)
+  const [pokemonHubError, setPokemonHubError] = useState('')
   const [fastForwardEnabled, setFastForwardEnabled] = useState(false)
   const [fastForwardSpeed, setFastForwardSpeed] = useState(1.5)
   const [profileGame, setProfileGame] = useState(null)
@@ -127,7 +132,7 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!activeSessions.length && !profileGame && !instancePicker && !controlPanelOpen) return
+    if (!activeSessions.length && !profileGame && !instancePicker && !controlPanelOpen && !pokemonHubOpen) return
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     const syncFullscreen = () => setFullscreen(document.fullscreenElement === playerShellRef.current)
@@ -136,7 +141,8 @@ function App() {
         if (controlPanelOpen) {
           setControlPanelOpen(false)
           setCaptureTarget(null)
-        } else if (profileGame) {
+        } else if (pokemonHubOpen) setPokemonHubOpen(false)
+        else if (profileGame) {
           setProfileGame(null)
           setCreatingProfile(false)
         }
@@ -151,7 +157,7 @@ function App() {
       document.removeEventListener('fullscreenchange', syncFullscreen)
       document.removeEventListener('keydown', onKeyDown)
     }
-  }, [activeSessions.length, controlPanelOpen, instancePicker, profileGame])
+  }, [activeSessions.length, controlPanelOpen, instancePicker, profileGame, pokemonHubOpen])
 
   useEffect(() => {
     if (!captureTarget) return
@@ -360,6 +366,20 @@ function App() {
     }
   }
 
+  async function openPokemonHub() {
+    setPokemonHubError('')
+    setPokemonHubData(null)
+    setPokemonHubProfile(null)
+    setPokemonHubOpen(true)
+    try { setPokemonHubProfiles(await getProfiles()) } catch (cause) { setPokemonHubError(cause.message) }
+  }
+
+  async function selectPokemonHubProfile(profile) {
+    setPokemonHubError('')
+    setPokemonHubProfile(profile)
+    try { setPokemonHubData(await getPokemonHub(profile.id)) } catch (cause) { setPokemonHubError(cause.message) }
+  }
+
   function startControlCapture(id, kind) {
     setControlError('')
     setCaptureTarget({ id, kind, baseline: kind === 'gamepad' ? readGamepadSnapshot() : [] })
@@ -395,10 +415,13 @@ function App() {
   const activeProfileIds = new Set(activeSessions.map(session => session.profileId))
 
   return <main className="hub">
-    <div className="hub-layout" inert={activeSessions.length || profileGame || instancePicker || controlPanelOpen ? true : undefined}>
+    <div className="hub-layout" inert={activeSessions.length || profileGame || instancePicker || controlPanelOpen || pokemonHubOpen ? true : undefined}>
       <aside className="hub-sidebar" aria-label="Ações globais">
         <button className="hub-sidebar-action" type="button" aria-label="Configurar controles" title="Configurar controles" onClick={openControlPanel}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8h10M7 16h10M5 5h14v14H5zM9 8v8M15 8v8" /></svg>
+        </button>
+        <button className="hub-sidebar-action" type="button" aria-label="Abrir Pokémon Hub" title="Pokémon Hub" onClick={openPokemonHub}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v12H4zM8 7V4h8v3M8 12h8M12 9v6" /></svg>
         </button>
       </aside>
       <section className="hub-content">
@@ -454,6 +477,16 @@ function App() {
             <button className="control-save" type="button" disabled={controlSaving || Boolean(captureTarget)} onClick={saveControlProfile}>{controlSaving ? 'Salvando...' : 'Salvar controles'}</button>
           </>}
           {controlError && <p className="profile-error" role="alert">{controlError}</p>}
+        </div>
+      </div>
+    </div>}
+    {pokemonHubOpen && <div className="profile-overlay" role="dialog" aria-modal="true" aria-label="Pokémon Hub">
+      <div className="profile-panel">
+        <header className="profile-header"><h2>Pokémon Hub</h2><button className="dialog-close" type="button" aria-label="Fechar Pokémon Hub" onClick={() => setPokemonHubOpen(false)}>×</button></header>
+        <div className="profile-body">
+          {!pokemonHubProfile && <div className="profile-list">{pokemonHubProfiles.map(profile => <div className="profile-row" key={profile.id}><button className="profile-select" type="button" onClick={() => selectPokemonHubProfile(profile)}>{profile.name}</button></div>)}</div>}
+          {pokemonHubProfile && <><button className="profile-select" type="button" onClick={() => { setPokemonHubProfile(null); setPokemonHubData(null) }}>← {pokemonHubProfile.name}</button>{pokemonHubData && <><p>Hub: {pokemonHubData.slots.filter(Boolean).length}/30</p><div className="profile-list">{pokemonHubData.games.map(game => <div className="profile-row" key={game.id}><span className="profile-select">{game.title}: {game.status}</span></div>)}</div></>}</>}
+          {pokemonHubError && <p className="profile-error" role="alert">{pokemonHubError}</p>}
         </div>
       </div>
     </div>}
