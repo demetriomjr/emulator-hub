@@ -70,6 +70,40 @@ export function getPokemonHub(profileId) {
   return getJson(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub`)
 }
 
+export function getPokemonHubProfiles() {
+  return getJson('/api/pokemon-hub/profiles')
+}
+
+export async function createPokemonHubProfile(profile) {
+  const response = await fetch('/api/pokemon-hub/profiles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(profile),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`)
+  return body
+}
+
+export async function renamePokemonHubProfile(hubProfileId, name) {
+  const response = await fetch(`/api/pokemon-hub/profiles/${encodeURIComponent(hubProfileId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`)
+  return body
+}
+
+export async function deletePokemonHubProfile(hubProfileId, { discardOccupied = false } = {}) {
+  const parameters = new URLSearchParams({ discardOccupied: String(discardOccupied) })
+  const response = await fetch(`/api/pokemon-hub/profiles/${encodeURIComponent(hubProfileId)}?${parameters}`, { method: 'DELETE' })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`)
+  return body
+}
+
 export async function transferPokemonHub(profileId, transfer) {
   const response = await fetch(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/transfers`, {
     method: 'POST',

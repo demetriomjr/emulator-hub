@@ -7,6 +7,8 @@ status: draft
 
 # Spec 011 — Profile-scoped Pokémon Hub
 
+> **Current scope:** Spec 012 and [Spec 013 — Pokémon Hub Profile Creation](013-pokemon-hub-profile-creation-plan.md) supersede this document for Pokémon Hub entry, workspace layout, Hub-profile selection, and Hub-profile persistence. This specification remains authoritative only for the existing profile-scoped game-save transfer engine until a later integration spec connects that engine to the new Hub-profile collection. Its former modal and generic-profile-picker UX must not be reintroduced.
+
 ## Goal
 
 Provide a deliberately small, Pokémon HOME-like **Pokémon Hub** inside Emulator Hub. Pokémon Hub is the product name; it is not Pokémon Bank or Pokémon HOME. It uses only the selected backend-owned profile and the profile's already-managed in-game save bytes: no save-file picker, import, export, or arbitrary path is ever exposed to the player. A player can move a Pokémon from a supported game's PC boxes into Pokémon Hub, from Pokémon Hub back into a game's PC boxes, or directly from one supported game to another through the Hub transaction model.

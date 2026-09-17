@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import { addWorkspacePane, choosePaneSource, createPokemonHubWorkspaceState } from './pokemon-hub-workspace.mjs'
 
-test('opens the Hub workspace before an Emulator Hub profile is chosen', () => {
+test('opens directly into an empty Hub workspace without selecting an Emulator Hub profile', () => {
   assert.deepEqual(createPokemonHubWorkspaceState(), { profile: null, panes: [null], boxes: {} })
 })
 

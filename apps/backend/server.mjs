@@ -8,6 +8,7 @@ import { createProfileStore } from '../packages/profile-store.mjs'
 import { createControlProfileStore } from '../packages/control-profile-store.mjs'
 import { createSaveStore } from '../packages/save-store.mjs'
 import { createPokemonHubStore } from '../packages/pokemon-hub-store.mjs'
+import { createPokemonHubProfileStore } from '../packages/pokemon-hub-profile-store.mjs'
 import { createPokemonHubSessionStore } from '../packages/pokemon-hub-session-store.mjs'
 import { createPokemonHubSnapshotStore } from '../packages/pokemon-hub-snapshot-store.mjs'
 import { createPokemonHubService } from '../packages/pokemon-hub-service.mjs'
@@ -21,6 +22,7 @@ const defaultProfilesPath = join(backendDirectory, 'data', 'profiles.json')
 const defaultControlProfilePath = join(backendDirectory, 'data', 'control-profile.json')
 const defaultSavesPath = join(backendDirectory, 'data', 'saves')
 const defaultPokemonHubPath = join(backendDirectory, 'data', 'pokemon-hub')
+const defaultPokemonHubProfilesPath = join(backendDirectory, 'data', 'pokemon-hub-profiles')
 const loadGameMetadata = createGameMetadataLoader()
 
 const systemExtensions = new Map([
@@ -51,6 +53,7 @@ export function createHubServer(options = {}) {
     controlProfileStore: options.controlProfileStore ?? createControlProfileStore({ dataPath: options.controlProfilePath ?? defaultControlProfilePath }),
     saveStore: options.saveStore ?? createSaveStore({ dataPath: options.savesPath ?? defaultSavesPath }),
     pokemonHubStore: options.pokemonHubStore ?? createPokemonHubStore({ dataPath: options.pokemonHubPath ?? defaultPokemonHubPath }),
+    pokemonHubProfileStore: options.pokemonHubProfileStore ?? createPokemonHubProfileStore({ dataPath: options.pokemonHubProfilesPath ?? defaultPokemonHubProfilesPath }),
     pokemonHubSessions: options.pokemonHubSessions ?? createPokemonHubSessionStore(),
     pokemonHubSnapshots: options.pokemonHubSnapshots ?? createPokemonHubSnapshotStore(),
   }
@@ -113,15 +116,19 @@ async function handleRequest(request, response, config) {
   const isControlProfileRoute = route.pathname === '/api/control-profile'
   const saveRoute = parseSaveRoute(route.pathname)
   const pokemonHubRoute = parsePokemonHubRoute(route.pathname)
+  const pokemonHubProfilesRoute = route.pathname === '/api/pokemon-hub/profiles'
+  const pokemonHubProfileRoute = parsePokemonHubProfileRoute(route.pathname)
   const supportedMethod = request.method === 'GET'
     || (request.method === 'HEAD' && isRomRoute)
     || (request.method === 'POST' && isProfilesRoute)
+    || (request.method === 'POST' && pokemonHubProfilesRoute)
+    || ((request.method === 'PATCH' || request.method === 'DELETE') && pokemonHubProfileRoute)
     || (request.method === 'PUT' && (isControlProfileRoute || saveRoute))
     || (request.method === 'POST' && pokemonHubRoute?.kind === 'transfer')
     || (request.method === 'PATCH' && isProfileRoute)
     || (request.method === 'DELETE' && isProfileRoute)
   if (!supportedMethod) {
-    response.setHeader('Allow', pokemonHubRoute ? pokemonHubRoute.kind === 'transfer' ? 'POST' : 'GET' : saveRoute || isControlProfileRoute ? 'GET, PUT' : isProfilesRoute ? 'GET, POST' : isProfileRoute ? 'PATCH, DELETE' : isRomRoute ? 'GET, HEAD' : 'GET')
+    response.setHeader('Allow', pokemonHubRoute ? pokemonHubRoute.kind === 'transfer' ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'PATCH, DELETE' : pokemonHubProfilesRoute || isProfilesRoute ? 'GET, POST' : saveRoute || isControlProfileRoute ? 'GET, PUT' : isProfileRoute ? 'PATCH, DELETE' : isRomRoute ? 'GET, HEAD' : 'GET')
     json(response, 405, { error: 'Method is not supported for this route.' })
     return
   }
@@ -129,6 +136,16 @@ async function handleRequest(request, response, config) {
   if (isProfilesRoute) {
     if (request.method === 'GET') await listProfiles(response, config)
     else await createProfile(request, response, config)
+    return
+  }
+
+  if (pokemonHubProfilesRoute) {
+    await handlePokemonHubProfiles(request, response, config)
+    return
+  }
+
+  if (pokemonHubProfileRoute) {
+    await handlePokemonHubProfile(request, response, config, pokemonHubProfileRoute, route.searchParams)
     return
   }
 
@@ -409,6 +426,52 @@ async function handlePokemonHub(request, response, config, route) {
   try {
     json(response, 200, await config.pokemonHubService.transfer({ ...body, profileId: route.profileId }))
   } catch (error) { jsonPokemonHubError(response, error) }
+}
+
+function parsePokemonHubProfileRoute(pathname) {
+  const match = /^\/api\/pokemon-hub\/profiles\/([^/]+)$/.exec(pathname)
+  return match ? { hubProfileId: match[1] } : null
+}
+
+async function handlePokemonHubProfiles(request, response, config) {
+  if (request.method === 'GET') {
+    json(response, 200, { profiles: await config.pokemonHubProfileStore.list() })
+    return
+  }
+  let body
+  try { body = await readJsonBody(request) } catch (error) { json(response, 400, { error: error.message }); return }
+  try {
+    json(response, 201, await config.pokemonHubProfileStore.create(body))
+  } catch (error) {
+    if (error.code === 'POKEMON_HUB_PROFILE_INVALID') {
+      json(response, 400, { error: error.message })
+      return
+    }
+    if (error.code === 'POKEMON_HUB_PROFILE_NAME_DUPLICATE') {
+      json(response, 409, { error: error.message })
+      return
+    }
+    throw error
+  }
+}
+
+async function handlePokemonHubProfile(request, response, config, route, searchParams) {
+  if (request.method === 'DELETE') {
+    try {
+      json(response, 200, await config.pokemonHubProfileStore.delete(route.hubProfileId, { discardOccupied: searchParams.get('discardOccupied') === 'true' }))
+    } catch (error) { jsonPokemonHubProfileError(response, error) }
+    return
+  }
+  let body
+  try { body = await readJsonBody(request) } catch (error) { json(response, 400, { error: error.message }); return }
+  try {
+    json(response, 200, await config.pokemonHubProfileStore.rename(route.hubProfileId, body.name))
+  } catch (error) { jsonPokemonHubProfileError(response, error) }
+}
+
+function jsonPokemonHubProfileError(response, error) {
+  const status = error.code === 'POKEMON_HUB_PROFILE_NOT_FOUND' ? 404 : error.code === 'POKEMON_HUB_PROFILE_NAME_DUPLICATE' || error.code === 'POKEMON_HUB_PROFILE_NOT_EMPTY' ? 409 : 400
+  json(response, status, { error: error.message })
 }
 
 function jsonPokemonHubError(response, error) {

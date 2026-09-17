@@ -43,6 +43,7 @@ async function createFixture(entries, files = {}) {
     controlProfilePath: join(root, 'data', 'control-profile.json'),
     savesPath: join(root, 'data', 'saves'),
     pokemonHubPath: join(root, 'data', 'pokemon-hub'),
+    pokemonHubProfilesPath: join(root, 'data', 'pokemon-hub-profiles'),
   }
 }
 
@@ -66,6 +67,40 @@ async function jsonResponse(response) {
 }
 
 describe('hub backend HTTP contract', () => {
+  test('creates and lists Hub profiles from the Hub NoSQL collection', async () => {
+    const { baseUrl } = await startFixture([])
+
+    assert.deepEqual(await jsonResponse(await fetch(`${baseUrl}/api/pokemon-hub/profiles`)), { profiles: [] })
+
+    const createdResponse = await fetch(`${baseUrl}/api/pokemon-hub/profiles`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Shiny collection' }),
+    })
+    assert.equal(createdResponse.status, 201)
+    const created = await jsonResponse(createdResponse)
+    assert.equal(created.name, 'Shiny collection')
+    assert.deepEqual(created.grid, { entries: {} })
+
+    assert.deepEqual(await jsonResponse(await fetch(`${baseUrl}/api/pokemon-hub/profiles`)), { profiles: [created] })
+  })
+
+  test('renames and deletes a Hub profile through its own collection route', async () => {
+    const { baseUrl } = await startFixture([])
+    const created = await jsonResponse(await fetch(`${baseUrl}/api/pokemon-hub/profiles`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Shiny collection' }),
+    }))
+
+    const renamedResponse = await fetch(`${baseUrl}/api/pokemon-hub/profiles/${created.hubProfileId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Living dex' }),
+    })
+    assert.equal(renamedResponse.status, 200)
+    const updated = await jsonResponse(renamedResponse)
+    assert.equal(updated.name, 'Living dex')
+
+    const deletedResponse = await fetch(`${baseUrl}/api/pokemon-hub/profiles/${created.hubProfileId}`, { method: 'DELETE' })
+    assert.equal(deletedResponse.status, 200)
+    assert.deepEqual(await jsonResponse(deletedResponse), { hubProfileId: created.hubProfileId, discardedPokemonCount: 0 })
+  })
+
   test('returns a profile-scoped Pokémon Hub inventory', async () => {
     const rom = Buffer.from('pokemon hub test rom')
     const { baseUrl } = await startFixture([{

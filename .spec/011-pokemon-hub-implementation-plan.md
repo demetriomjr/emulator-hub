@@ -1,5 +1,7 @@
 # Pokémon Hub Implementation Plan
 
+> **Current scope:** This plan targets the legacy profile-scoped transfer engine. Do not use its frontend tasks to alter the direct workspace entry or create Hub profiles. Those behaviors are defined by [Spec 012](012-pokemon-hub-workspace-frontend.md) and [Spec 013](013-pokemon-hub-profile-creation-plan.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship the first profile-scoped Pokémon Hub slice: inspect Gen III saves, move one PC Pokémon between inactive supported saves and Hub storage atomically, preserve a canonical extensible Pokémon document, and block stale state restoration.
