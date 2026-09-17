@@ -74,7 +74,7 @@ test('restores the Hub claim when a withdrawal save write fails', async () => {
   const adapter = { id: 'gen3-gba-v1', readSlot: () => null, writeSlot: () => Buffer.from([9]), inspect: () => ({ boxes: [] }) }
   const service = createPokemonHubService({ profileStore: { get: async () => ({ id: profileId }) }, saveStore: { get: async () => ({ bytes: Buffer.from([0]), revision: 1 }), put: async () => { throw new Error('disk failure') } }, hubStore, registry: { get: () => adapter }, sessions: { hasLiveSession: () => false }, catalogLoader: async () => [{ id: 'pokemon-emerald', pokemonSave: { supported: true, adapter: adapter.id } }] })
 
-  await assert.rejects(() => service.transfer({ profileId, source: { kind: 'hub', slot: 0 }, destination: { kind: 'game', gameId: 'pokemon-emerald', box: 0, slot: 0 }, expectedRevisions: { 'pokemon-emerald': 1 }, expectedHubEpoch: 1 }), /disk failure/)
+  await assert.rejects(() => service.transfer({ profileId, source: { kind: 'hub', slot: 0 }, destination: { kind: 'game', gameId: 'pokemon-emerald', box: 0, slot: 0 }, expectedRevisions: { 'pokemon-emerald': 1 }, expectedHubEpoch: 0 }), /disk failure/)
   assert.equal((await hubStore.getProfileState(profileId)).slots[0], hubPokemonId)
 })
 
