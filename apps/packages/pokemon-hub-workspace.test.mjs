@@ -1,27 +1,31 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { choosePaneSource, createPokemonHubWorkspaceState } from './pokemon-hub-workspace.mjs'
+import { addWorkspacePane, choosePaneSource, createPokemonHubWorkspaceState } from './pokemon-hub-workspace.mjs'
 
 test('opens the Hub workspace before an Emulator Hub profile is chosen', () => {
-  assert.deepEqual(createPokemonHubWorkspaceState(), { profile: null, panes: { left: { kind: 'hub' }, right: null }, boxes: {} })
+  assert.deepEqual(createPokemonHubWorkspaceState(), { profile: null, panes: [null], boxes: {} })
 })
 
-test('rejects selecting Hub as both workspace panes', () => {
-  const result = choosePaneSource({ left: { kind: 'hub' }, right: null }, 'right', { kind: 'hub' })
+test('rejects loading the same Hub profile in two workspace panes', () => {
+  const result = choosePaneSource([{ kind: 'hub', hubProfileId: 'shiny' }, null], 1, { kind: 'hub', hubProfileId: 'shiny' })
 
-  assert.deepEqual(result, { panes: { left: { kind: 'hub' }, right: null }, error: 'Pokémon Hub can only be open in one pane.' })
+  assert.deepEqual(result, { panes: [{ kind: 'hub', hubProfileId: 'shiny' }, null], error: 'This Hub profile is already open.' })
 })
 
-test('rejects selecting the same save in both workspace panes', () => {
-  const result = choosePaneSource({ left: { kind: 'game', gameId: 'pokemon-emerald' }, right: null }, 'right', { kind: 'game', gameId: 'pokemon-emerald' })
+test('rejects selecting the same game save in two workspace panes', () => {
+  const result = choosePaneSource([{ kind: 'game', profileId: 'may', gameId: 'pokemon-emerald' }, null], 1, { kind: 'game', profileId: 'may', gameId: 'pokemon-emerald' })
 
-  assert.deepEqual(result, { panes: { left: { kind: 'game', gameId: 'pokemon-emerald' }, right: null }, error: 'The same game save cannot be open in both panes.' })
+  assert.deepEqual(result, { panes: [{ kind: 'game', profileId: 'may', gameId: 'pokemon-emerald' }, null], error: 'This game save is already open.' })
 })
 
-test('allows a game save and Hub to occupy opposite panes', () => {
-  const result = choosePaneSource({ left: null, right: null }, 'left', { kind: 'game', gameId: 'pokemon-emerald' })
-  const second = choosePaneSource(result.panes, 'right', { kind: 'hub' })
+test('allows distinct sources and a third workspace pane', () => {
+  const result = choosePaneSource([null, null], 0, { kind: 'game', profileId: 'may', gameId: 'pokemon-emerald' })
+  const second = choosePaneSource(result.panes, 1, { kind: 'hub', hubProfileId: 'shiny' })
 
-  assert.deepEqual(second, { panes: { left: { kind: 'game', gameId: 'pokemon-emerald' }, right: { kind: 'hub' } }, error: '' })
+  assert.deepEqual(addWorkspacePane(second.panes), [{ kind: 'game', profileId: 'may', gameId: 'pokemon-emerald' }, { kind: 'hub', hubProfileId: 'shiny' }, null])
+})
+
+test('does not create more than three workspace panes', () => {
+  assert.throws(() => addWorkspacePane([null, null, null]), /three/i)
 })
