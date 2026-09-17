@@ -7,6 +7,11 @@ import { createGameMetadataLoader } from '../packages/game-metadata.mjs'
 import { createProfileStore } from '../packages/profile-store.mjs'
 import { createControlProfileStore } from '../packages/control-profile-store.mjs'
 import { createSaveStore } from '../packages/save-store.mjs'
+import { createPokemonHubStore } from '../packages/pokemon-hub-store.mjs'
+import { createPokemonHubSessionStore } from '../packages/pokemon-hub-session-store.mjs'
+import { createPokemonHubService } from '../packages/pokemon-hub-service.mjs'
+import { createPokemonSaveAdapterRegistry } from '../packages/pokemon-save-adapter-registry.mjs'
+import { pokemonGen3Adapter } from '../packages/pokemon-gen3-adapter.mjs'
 
 const backendDirectory = dirname(fileURLToPath(import.meta.url))
 const defaultCatalogPath = join(backendDirectory, 'catalog.json')
@@ -14,6 +19,7 @@ const defaultRomsDirectory = join(backendDirectory, 'roms')
 const defaultProfilesPath = join(backendDirectory, 'data', 'profiles.json')
 const defaultControlProfilePath = join(backendDirectory, 'data', 'control-profile.json')
 const defaultSavesPath = join(backendDirectory, 'data', 'saves')
+const defaultPokemonHubPath = join(backendDirectory, 'data', 'pokemon-hub')
 const loadGameMetadata = createGameMetadataLoader()
 
 const systemExtensions = new Map([
@@ -43,7 +49,17 @@ export function createHubServer(options = {}) {
     profileStore: options.profileStore ?? createProfileStore({ dataPath: options.profilesPath ?? defaultProfilesPath }),
     controlProfileStore: options.controlProfileStore ?? createControlProfileStore({ dataPath: options.controlProfilePath ?? defaultControlProfilePath }),
     saveStore: options.saveStore ?? createSaveStore({ dataPath: options.savesPath ?? defaultSavesPath }),
+    pokemonHubStore: options.pokemonHubStore ?? createPokemonHubStore({ dataPath: options.pokemonHubPath ?? defaultPokemonHubPath }),
+    pokemonHubSessions: options.pokemonHubSessions ?? createPokemonHubSessionStore(),
   }
+  config.pokemonHubService = options.pokemonHubService ?? createPokemonHubService({
+    profileStore: config.profileStore,
+    saveStore: config.saveStore,
+    hubStore: config.pokemonHubStore,
+    registry: createPokemonSaveAdapterRegistry([pokemonGen3Adapter]),
+    sessions: config.pokemonHubSessions,
+    catalogLoader: () => loadCatalog(config.catalogPath),
+  })
 
   return createServer((request, response) => {
     handleRequest(request, response, config).catch((error) => {
@@ -93,14 +109,16 @@ async function handleRequest(request, response, config) {
   const isProfileRoute = route.pathname.startsWith('/api/profiles/')
   const isControlProfileRoute = route.pathname === '/api/control-profile'
   const saveRoute = parseSaveRoute(route.pathname)
+  const pokemonHubRoute = parsePokemonHubRoute(route.pathname)
   const supportedMethod = request.method === 'GET'
     || (request.method === 'HEAD' && isRomRoute)
     || (request.method === 'POST' && isProfilesRoute)
     || (request.method === 'PUT' && (isControlProfileRoute || saveRoute))
+    || (request.method === 'POST' && pokemonHubRoute?.kind === 'transfer')
     || (request.method === 'PATCH' && isProfileRoute)
     || (request.method === 'DELETE' && isProfileRoute)
   if (!supportedMethod) {
-    response.setHeader('Allow', saveRoute || isControlProfileRoute ? 'GET, PUT' : isProfilesRoute ? 'GET, POST' : isProfileRoute ? 'PATCH, DELETE' : isRomRoute ? 'GET, HEAD' : 'GET')
+    response.setHeader('Allow', pokemonHubRoute ? pokemonHubRoute.kind === 'transfer' ? 'POST' : 'GET' : saveRoute || isControlProfileRoute ? 'GET, PUT' : isProfilesRoute ? 'GET, POST' : isProfileRoute ? 'PATCH, DELETE' : isRomRoute ? 'GET, HEAD' : 'GET')
     json(response, 405, { error: 'Method is not supported for this route.' })
     return
   }
@@ -119,6 +137,11 @@ async function handleRequest(request, response, config) {
 
   if (saveRoute) {
     await handleSave(request, response, config, saveRoute)
+    return
+  }
+
+  if (pokemonHubRoute) {
+    await handlePokemonHub(request, response, config, pokemonHubRoute)
     return
   }
 
@@ -364,6 +387,30 @@ async function launchGame(response, config, encodedId, profileId) {
 function parseSaveRoute(pathname) {
   const match = /^\/api\/profiles\/([^/]+)\/games\/([^/]+)\/save$/.exec(pathname)
   return match ? { profileId: match[1], gameId: match[2] } : null
+}
+
+function parsePokemonHubRoute(pathname) {
+  const match = /^\/api\/profiles\/([^/]+)\/pokemon-hub(?:\/(transfers))?$/.exec(pathname)
+  return match ? { profileId: match[1], kind: match[2] === 'transfers' ? 'transfer' : 'inventory' } : null
+}
+
+async function handlePokemonHub(request, response, config, route) {
+  if (route.kind === 'inventory') {
+    try {
+      json(response, 200, await config.pokemonHubService.getInventory(route.profileId))
+    } catch (error) { jsonPokemonHubError(response, error) }
+    return
+  }
+  let body
+  try { body = await readJsonBody(request) } catch (error) { json(response, 400, { error: error.message }); return }
+  try {
+    json(response, 200, await config.pokemonHubService.transfer({ ...body, profileId: route.profileId }))
+  } catch (error) { jsonPokemonHubError(response, error) }
+}
+
+function jsonPokemonHubError(response, error) {
+  const status = error.code === 'PROFILE_NOT_FOUND' ? 404 : error.code === 'POKEMON_HUB_REVISION_CONFLICT' ? 412 : error.code === 'POKEMON_HUB_GAME_ACTIVE' || error.code === 'POKEMON_HUB_DESTINATION_OCCUPIED' || error.code === 'POKEMON_HUB_SOURCE_EMPTY' ? 409 : 400
+  json(response, status, { error: error.message })
 }
 
 async function handleSave(request, response, config, { profileId, gameId }) {

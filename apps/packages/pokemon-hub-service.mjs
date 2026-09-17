@@ -3,6 +3,27 @@ import { parseExpectedRevisions, parseHubLocation } from './pokemon-hub-model.mj
 
 export function createPokemonHubService({ profileStore, saveStore, hubStore, registry, sessions, catalogLoader }) {
   return {
+    async getInventory(profileId) {
+      if (await profileStore.get(profileId) === null) throw transferError('PROFILE_NOT_FOUND', 'Profile was not found.')
+      const inventory = await hubStore.getProfileState(profileId)
+      const catalog = await catalogLoader()
+      const games = []
+      for (const game of catalog) {
+        if (game.pokemonSave?.supported !== true || !registry.get(game.pokemonSave.adapter)) continue
+        const stored = await saveStore.get(profileId, game.id)
+        if (!stored) {
+          games.push({ id: game.id, title: game.title, status: 'save-missing' })
+          continue
+        }
+        try {
+          const inspection = registry.get(game.pokemonSave.adapter).inspect(stored.bytes)
+          games.push({ id: game.id, title: game.title, status: sessions.hasLiveSession(profileId, game.id) ? 'active' : 'ready', revision: stored.revision, boxes: inspection.boxes })
+        } catch {
+          games.push({ id: game.id, title: game.title, status: 'save-unsupported' })
+        }
+      }
+      return { hubEpoch: inventory.hubEpoch, revision: inventory.revision, slots: inventory.slots, games }
+    },
     async transfer(request) {
       const source = parseHubLocation(request.source)
       const destination = parseHubLocation(request.destination)

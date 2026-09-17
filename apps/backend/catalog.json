@@ -9,6 +9,11 @@
     "pokeapiVersion": "emerald",
     "wikipediaPage": "Pokémon_Emerald",
     "region": "USA / Europe",
-    "language": "English"
+    "language": "English",
+    "pokemonSave": {
+      "adapter": "gen3-gba-v1",
+      "saveKind": "battery",
+      "supported": true
+    }
   }
 ]
