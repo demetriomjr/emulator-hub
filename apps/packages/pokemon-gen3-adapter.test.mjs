@@ -57,6 +57,17 @@ test('moves a PC record that crosses a logical sector boundary without touching 
   assert.equal(rewritten.readUInt32LE(0xe000 + 5 * 0x1000 + 0xff8), 0x08012025)
 })
 
+test('projects occupied PC slots during inspection without exposing raw bytes', () => {
+  const bytes = buildGen3Save({ firstIndex: 3, secondIndex: 7 })
+  writePcRecord(bytes, 0xe000, 0, 0, Buffer.alloc(80, 0x33))
+  refreshCopyChecksums(bytes, 0xe000)
+
+  const inspection = pokemonGen3Adapter.inspect(bytes)
+
+  assert.deepEqual(inspection.boxes[0].slots[0], { occupied: true })
+  assert.deepEqual(inspection.boxes[0].slots[1], { occupied: false })
+})
+
 function buildGen3Save({ firstIndex, secondIndex }) {
   const bytes = Buffer.alloc(0x20000, 0xff)
   writeCopy(bytes, 0, firstIndex)

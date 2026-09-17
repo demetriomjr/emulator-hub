@@ -22,7 +22,12 @@ export function createPokemonHubService({ profileStore, saveStore, hubStore, reg
           games.push({ id: game.id, title: game.title, status: 'save-unsupported' })
         }
       }
-      return { hubEpoch: inventory.hubEpoch, revision: inventory.revision, slots: inventory.slots, games }
+      const slots = await Promise.all(inventory.slots.map(async hubPokemonId => {
+        if (!hubPokemonId) return null
+        const document = await hubStore.getPokemon(profileId, hubPokemonId)
+        return document ? { hubPokemonId, species: document.identity.species, form: document.identity.form, shiny: document.identity.shiny } : null
+      }))
+      return { hubEpoch: inventory.hubEpoch, revision: inventory.revision, slots, games }
     },
     async transfer(request) {
       const source = parseHubLocation(request.source)

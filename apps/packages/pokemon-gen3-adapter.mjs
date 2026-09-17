@@ -7,7 +7,9 @@ export const pokemonGen3Adapter = Object.freeze({
     return {
       saveIndex: newest.saveIndex,
       copyOffset: newest.copyOffset,
-      boxes: Array.from({ length: 14 }, () => ({ slots: Array(30).fill(null) })),
+      boxes: Array.from({ length: 14 }, (_, box) => ({
+        slots: Array.from({ length: 30 }, (_, slot) => ({ occupied: !readPcBytes(saveBytes, newest, box, slot).every(byte => byte === 0) })),
+      })),
     }
   },
   readSlot(saveBytes, box, slot) {

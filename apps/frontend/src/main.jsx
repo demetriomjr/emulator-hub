@@ -112,6 +112,7 @@ function App() {
   const [pokemonHubProfile, setPokemonHubProfile] = useState(null)
   const [pokemonHubData, setPokemonHubData] = useState(null)
   const [pokemonHubError, setPokemonHubError] = useState('')
+  const [pokemonHubSelection, setPokemonHubSelection] = useState(null)
   const [fastForwardEnabled, setFastForwardEnabled] = useState(false)
   const [fastForwardSpeed, setFastForwardSpeed] = useState(1.5)
   const [profileGame, setProfileGame] = useState(null)
@@ -369,6 +370,7 @@ function App() {
   async function openPokemonHub() {
     setPokemonHubError('')
     setPokemonHubData(null)
+    setPokemonHubSelection(null)
     setPokemonHubProfile(null)
     setPokemonHubOpen(true)
     try { setPokemonHubProfiles(await getProfiles()) } catch (cause) { setPokemonHubError(cause.message) }
@@ -485,7 +487,7 @@ function App() {
         <header className="profile-header"><h2>Pokémon Hub</h2><button className="dialog-close" type="button" aria-label="Fechar Pokémon Hub" onClick={() => setPokemonHubOpen(false)}>×</button></header>
         <div className="profile-body">
           {!pokemonHubProfile && <div className="profile-list">{pokemonHubProfiles.map(profile => <div className="profile-row" key={profile.id}><button className="profile-select" type="button" onClick={() => selectPokemonHubProfile(profile)}>{profile.name}</button></div>)}</div>}
-          {pokemonHubProfile && <><button className="profile-select" type="button" onClick={() => { setPokemonHubProfile(null); setPokemonHubData(null) }}>← {pokemonHubProfile.name}</button>{pokemonHubData && <><p>Hub: {pokemonHubData.slots.filter(Boolean).length}/30</p><div className="profile-list">{pokemonHubData.games.map(game => <div className="profile-row" key={game.id}><span className="profile-select">{game.title}: {game.status}</span></div>)}</div></>}</>}
+          {pokemonHubProfile && <><button className="profile-select" type="button" onClick={() => { setPokemonHubProfile(null); setPokemonHubData(null) }}>← {pokemonHubProfile.name}</button>{pokemonHubData && <><p>Hub: {pokemonHubData.slots.filter(Boolean).length}/30</p><div className="pokemon-hub-slots" aria-label="Slots do Pokémon Hub">{pokemonHubData.slots.map((entry, slot) => <button className={`pokemon-hub-slot${entry ? ' occupied' : ''}${pokemonHubSelection === slot ? ' selected' : ''}`} type="button" key={slot} onClick={() => setPokemonHubSelection(slot)}>{entry ? `#${entry.species ?? '?'}` : '—'}</button>)}</div><div className="profile-list">{pokemonHubData.games.map(game => <div className="profile-row" key={game.id}><span className="profile-select">{game.title}: {game.status}</span></div>)}</div></>}</>}
           {pokemonHubError && <p className="profile-error" role="alert">{pokemonHubError}</p>}
         </div>
       </div>

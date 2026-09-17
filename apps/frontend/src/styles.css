@@ -55,6 +55,10 @@ button { font: inherit; }
 .profile-create button:disabled, .profile-edit:disabled, .profile-delete:disabled, .profile-edit-form button:disabled { opacity: .55; cursor: wait; }
 .profile-select:disabled { opacity: .55; cursor: not-allowed; }
 .profile-error { margin: 12px 0 0 !important; color: #ffdada !important; }
+.pokemon-hub-slots { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; margin: 14px 0; }
+.pokemon-hub-slot { min-height: 38px; border: 1px solid #397c67; color: #98b9ad; background: #0a191f; cursor: pointer; }
+.pokemon-hub-slot.occupied { color: #effff5; background: #1b473d; }
+.pokemon-hub-slot.selected { outline: 2px solid #ddffe9; outline-offset: 1px; }
 @keyframes profile-spin { to { transform: rotate(360deg); } }
 .control-panel { width: min(900px, 100%); }
 .gba-layout { position: relative; display: grid; min-height: 440px; gap: 18px; padding: 48px 74px 38px; overflow: hidden; isolation: isolate; }
