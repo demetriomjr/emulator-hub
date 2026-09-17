@@ -536,8 +536,7 @@ function App() {
     {pokemonHubOpen && <div className="pokemon-workspace" role="dialog" aria-modal="true" aria-label="Pokémon Hub">
       <header className="pokemon-workspace-header"><button className="dialog-close" type="button" aria-label="Fechar Pokémon Hub" onClick={() => setPokemonHubOpen(false)}>×</button></header>
       <div className={`pokemon-workspace-body pokemon-workspace-body-${pokemonHubPanes.length}`}>
-        {pokemonHubPanes.map((source, index) => <PokemonHubPane key={index} side={index} source={source} data={pokemonHubData} profiles={profiles} selected={pokemonHubSelection} selectedBox={pokemonHubBoxes[source?.gameId]} onSourceChange={source => selectPokemonHubPane(index, source)} onProfileChange={selectPokemonHubProfile} onBoxChange={(gameId, box) => setPokemonHubBoxes(current => ({ ...current, [gameId]: box }))} onSlotSelect={selectPokemonHubLocation} />)}
-        {pokemonHubPanes.length < 3 && <button className="pokemon-add-pane" type="button" onClick={addPokemonHubPane}>＋</button>}
+        {pokemonHubPanes.map((source, index) => <PokemonHubPane key={index} side={index} source={source} data={pokemonHubData} profiles={profiles} selected={pokemonHubSelection} selectedBox={pokemonHubBoxes[source?.gameId]} showAdd={index === pokemonHubPanes.length - 1 && pokemonHubPanes.length < 3} onAdd={addPokemonHubPane} onSourceChange={source => selectPokemonHubPane(index, source)} onProfileChange={selectPokemonHubProfile} onBoxChange={(gameId, box) => setPokemonHubBoxes(current => ({ ...current, [gameId]: box }))} onSlotSelect={selectPokemonHubLocation} />)}
       </div>
       <footer className="pokemon-workspace-footer">{pokemonHubSelection.length === 2 && <button className="control-save" type="button" disabled={pokemonHubBusy} onClick={transferSelectedPokemon}>{pokemonHubBusy ? 'Transferindo...' : 'Confirmar transferência'}</button>}{pokemonHubError && <p className="profile-error" role="alert">{pokemonHubError}</p>}</footer>
     </div>}
@@ -655,28 +654,29 @@ function App() {
   </main>
 }
 
-function PokemonHubPane({ side, source, data, profiles, selected, selectedBox, onSourceChange, onProfileChange, onBoxChange, onSlotSelect }) {
+function PokemonHubPane({ side, source, data, profiles, selected, selectedBox, showAdd, onAdd, onSourceChange, onProfileChange, onBoxChange, onSlotSelect }) {
   const games = data?.games ?? []
   const game = source?.kind === 'game' ? games.find(candidate => candidate.id === source.gameId) : null
   const boxIndex = game ? Math.min(selectedBox ?? 0, game.boxes.length - 1) : 0
   const slots = source?.kind === 'hub' ? data?.slots ?? [] : game?.boxes[boxIndex]?.slots ?? []
-  const title = source?.kind === 'hub' ? 'Pokémon Hub' : game?.title ?? 'Escolha uma fonte'
+  const title = source?.kind === 'hub' ? 'Pokémon Hub' : game?.title ?? ''
   const isSelected = location => selected.some(candidate => candidate.kind === location.kind && candidate.gameId === location.gameId && candidate.box === location.box && candidate.slot === location.slot)
   return <section className="pokemon-workspace-pane" aria-label={`Painel ${side + 1} do Pokémon Hub`}>
-    <label className="pokemon-pane-source">Tipo de perfil
-      <select value={source?.kind ?? ''} onChange={event => onSourceChange(event.target.value ? { kind: event.target.value } : null)}>
-        <option value="">Escolher…</option>
+    <div className="pokemon-pane-controls">
+      <select className="pokemon-pane-type" aria-label="Tipo de perfil" value={source?.kind ?? ''} onChange={event => onSourceChange(event.target.value ? { kind: event.target.value } : null)}>
+        <option value="">Escolher tipo de perfil</option>
         <option value="game">Perfil de save</option>
         <option value="hub">Perfil do Hub</option>
       </select>
-    </label>
+      {showAdd && <button className="pokemon-add-pane" type="button" aria-label="Adicionar painel" onClick={onAdd}>＋</button>}
+    </div>
     {source && !data && <label className="pokemon-pane-source">Perfil
       <select defaultValue="" onChange={event => { const profile = profiles.find(candidate => candidate.id === event.target.value); if (profile) onProfileChange(profile) }}><option value="" disabled>Escolher perfil…</option>{profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select>
     </label>}
     {source?.kind === 'game' && data && <label className="pokemon-pane-source">Save
       <select value={source.gameId ?? ''} onChange={event => onSourceChange({ ...source, gameId: event.target.value, profileId: data.profileId })}><option value="" disabled>Escolher save…</option>{games.map(candidate => <option key={candidate.id} value={candidate.id} disabled={candidate.status !== 'ready'}>{candidate.title} — {candidate.status}</option>)}</select>
     </label>}
-    <h3>{title}</h3>
+    {title && <h3>{title}</h3>}
     {game && <label className="pokemon-pane-source">Box do jogo
       <select value={boxIndex} onChange={event => onBoxChange(game.id, Number(event.target.value))}>
         {game.boxes.map((_box, index) => <option key={index} value={index}>Box {index + 1}</option>)}

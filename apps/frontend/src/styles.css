@@ -67,10 +67,12 @@ button { font: inherit; }
 .pokemon-workspace-header { display: flex; justify-content: end; align-items: center; min-height: 42px; padding: 4px 12px; border-bottom: 1px solid #398269; background: #10262af2; }
 .pokemon-workspace-header small { color: #a6d6c0; }
 .pokemon-workspace-header h2 { margin: 1px 0 0; font-size: 21px; }
-.pokemon-workspace-body { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; min-height: 0; background: #398269; }
+.pokemon-workspace-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; min-height: 0; background: #398269; }
 .pokemon-workspace-body-1 { grid-template-columns: minmax(0, 1fr); }
 .pokemon-workspace-body-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.pokemon-add-pane { position: absolute; top: 10px; right: 10px; z-index: 1; display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid #397c67; border-radius: 7px; color: #b8dbcd; background: #10262af2; font-size: 22px; cursor: pointer; }
+.pokemon-pane-controls { display: flex; align-items: center; gap: 6px; width: max-content; max-width: 100%; }
+.pokemon-pane-type { width: 190px; max-width: calc(100vw - 96px); min-height: 34px; border: 1px solid #397c67; border-radius: 7px; padding: 0 8px; color: #effff5; background: #0a191f; }
+.pokemon-add-pane { display: grid; place-items: center; width: 34px; height: 34px; flex: none; border: 1px solid #397c67; border-radius: 7px; color: #b8dbcd; background: #10262af2; font-size: 22px; cursor: pointer; }
 .pokemon-add-pane:hover { color: white; background: #216553; }
 .pokemon-workspace-empty { display: grid; place-content: center; gap: 12px; width: min(430px, calc(100% - 36px)); margin: auto; }
 .pokemon-workspace-empty h3, .pokemon-workspace-empty p { margin: 0; }
