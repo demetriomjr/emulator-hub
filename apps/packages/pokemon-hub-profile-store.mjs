@@ -98,7 +98,7 @@ function collectionPath(dataPath) { return join(dataPath, 'profiles.json') }
 
 function normalizeName(value) {
   const name = typeof value === 'string' ? value.normalize('NFC').trim() : ''
-  if (!name || name.length > 32 || /[\u0000-\u001F\u007F]/.test(name)) throw profileError('POKEMON_HUB_PROFILE_INVALID', 'Pokémon Hub profile name must contain 1 to 32 printable characters.')
+  if (!name || name.length > 26 || /[\u0000-\u001F\u007F]/.test(name)) throw profileError('POKEMON_HUB_PROFILE_INVALID', 'Pokémon Hub profile name must contain 1 to 26 printable characters.')
   return name
 }
 

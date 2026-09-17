@@ -27,7 +27,7 @@ The Pokémon Hub profile store persists one JSON-document collection independent
 }
 ```
 
-`name` is NFC-normalized, trimmed, 1–32 printable characters, and case-insensitively unique. `entries` is the only persisted grid state: it contains only occupied positions, keyed by their zero-based slot number, and the value is the stored Pokémon/card record for that position. Empty slots have no key and are never written. The key is the Pokémon's canonical placement in the Hub; relocating a Pokémon updates the source and destination keys atomically when transfers are introduced.
+`name` is NFC-normalized, trimmed, 1–26 printable characters, and case-insensitively unique. `entries` is the only persisted grid state: it contains only occupied positions, keyed by their zero-based slot number, and the value is the stored Pokémon/card record for that position. Empty slots have no key and are never written. The key is the Pokémon's canonical placement in the Hub; relocating a Pokémon updates the source and destination keys atomically when transfers are introduced.
 
 There is no persisted capacity, width, row count, column count, or visual layout. A new profile has `{ "entries": {} }`. The frontend derives slots from the current partition width: cards remain fixed-size squares, use no fewer than 5 and no more than 20 columns, and the grid has horizontal scrolling when five cards cannot fit. It initially covers positions 0–59 and always appends one whole, completely empty visual row after the highest occupied row. Moving a Pokémon into that final row therefore makes the frontend render another empty row immediately. The backend generates the UUID and timestamp. Existing schema-version-1 through schema-version-4 documents are migrated on load to schema version 5: occupied values and their slot keys are preserved, null placeholders and former capacity/layout values are removed.
 
@@ -71,7 +71,7 @@ DELETE /api/pokemon-hub/profiles/:hubProfileId?discardOccupied=true|false
 7. The grid derives its initial positions from sparse entries and the available partition width after workspace padding and margins. Its header and cards share one centered canvas inside a scroll frame that provides a safe inset, so a card's border, focus outline, or selection trim cannot be clipped at a scroll edge. It renders fixed-size cards, from 5 to 20 columns; when five cards do not fit, the canvas scrolls horizontally rather than shrinking the cards. It always renders a full empty row after the highest occupied row, so adding to the prior final row immediately exposes another empty row. It stores no layout measurement or empty slot.
 8. Renaming opens a modal and preserves the profile's occupied entries.
 9. Deleting always asks for confirmation. When one or more slots are occupied, the confirmation states the exact number of Pokémon that will be lost and sends the explicit discard acknowledgement to the backend.
-10. The layout remains one partition throughout this slice.
+10. The layout remains one partition throughout this slice; the later divider behavior is defined by Spec 014.
 
 ## Tests
 

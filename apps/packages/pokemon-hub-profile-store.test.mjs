@@ -29,6 +29,14 @@ test('rejects duplicate normalized Hub profile names and invalid grid dimensions
   await assert.rejects(() => store.create({ name: ' shiny collection ' }), { code: 'POKEMON_HUB_PROFILE_NAME_DUPLICATE' })
 })
 
+test('rejects Hub profile names longer than 26 characters when creating or renaming', async () => {
+  const { store } = await createStore()
+  const profile = await store.create({ name: 'Test box' })
+
+  await assert.rejects(() => store.create({ name: 'x'.repeat(27) }), { code: 'POKEMON_HUB_PROFILE_INVALID' })
+  await assert.rejects(() => store.rename(profile.hubProfileId, 'x'.repeat(27)), { code: 'POKEMON_HUB_PROFILE_INVALID' })
+})
+
 test('migrates legacy empty slots into sparse entries with no persisted layout when an existing profile is loaded', async () => {
   const { dataPath, store } = await createStore()
   const collectionPath = join(dataPath, 'profiles.json')
