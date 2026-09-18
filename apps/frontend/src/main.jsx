@@ -20,12 +20,19 @@ import { activePaneSourceKind, addWorkspacePane, choosePaneSource, createPokemon
 import { groupGamesByLayout } from '../../packages/hub-layout.mjs'
 import { getProfilePickerPlacement } from '../../packages/profile-picker-placement.mjs'
 import { appendClientDiagnosticsParameters, createClientDiagnostics, getClientDiagnosticsOptions } from '../../packages/client-diagnostics.mjs'
+import { closePlayerAfterSaveAttempts } from '../../packages/player-close.mjs'
+import { isNarrowPortraitViewport } from '../../packages/mobile-viewport.mjs'
+import { shouldReloadForFrontendRevision } from '../../packages/frontend-revision.mjs'
 import hubLayout from './hub-layout.json'
 import './styles.css'
 
 const clientDiagnosticsOptions = getClientDiagnosticsOptions(window.location.search)
 if (clientDiagnosticsOptions.enabled) {
   createClientDiagnostics({ browser: window, source: 'hub', sessionId: clientDiagnosticsOptions.sessionId })
+}
+
+function readViewport() {
+  return { width: window.innerWidth, height: window.innerHeight }
 }
 
 const gbaControls = Object.freeze({
@@ -191,7 +198,9 @@ function App() {
   const [profileError, setProfileError] = useState('')
   const [profileBusy, setProfileBusy] = useState(false)
   const [error, setError] = useState('')
+  const [installHelpOpen, setInstallHelpOpen] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
+  const [viewport, setViewport] = useState(readViewport)
   const playerShellRef = useRef(null)
   const pokemonHubSessionRef = useRef(null)
   const pokemonHubSessionOpeningRef = useRef(null)
@@ -217,6 +226,44 @@ function App() {
       })
       .finally(() => { if (active) setCatalogLoading(false) })
     return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    const updateViewport = () => setViewport(readViewport())
+    window.addEventListener('resize', updateViewport)
+    window.addEventListener('orientationchange', updateViewport)
+    window.visualViewport?.addEventListener('resize', updateViewport)
+    return () => {
+      window.removeEventListener('resize', updateViewport)
+      window.removeEventListener('orientationchange', updateViewport)
+      window.visualViewport?.removeEventListener('resize', updateViewport)
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    let revision = null
+    const checkFrontendRevision = async () => {
+      if (document.visibilityState === 'hidden') return
+      try {
+        const response = await fetch('/', { method: 'HEAD', cache: 'no-store' })
+        const nextRevision = response.headers.get('etag')
+        if (!active || !nextRevision) return
+        if (shouldReloadForFrontendRevision(revision, nextRevision)) {
+          window.location.reload()
+          return
+        }
+        revision = nextRevision
+      } catch {
+        // A temporary offline state must not disrupt an active game.
+      }
+    }
+    void checkFrontendRevision()
+    document.addEventListener('visibilitychange', checkFrontendRevision)
+    return () => {
+      active = false
+      document.removeEventListener('visibilitychange', checkFrontendRevision)
+    }
   }, [])
 
   useEffect(() => {
@@ -347,14 +394,19 @@ function App() {
   }
 
   async function closePlayer() {
-    try {
-      await Promise.all([...document.querySelectorAll('.player-grid iframe')].map(frame => flushPlayerSave(frame)))
-      if (document.fullscreenElement === playerShellRef.current) await document.exitFullscreen()
-      setActiveSessions([])
-      setFullscreen(false)
-    } catch (cause) {
-      setError(`Não foi possível sincronizar o save: ${cause.message}`)
-    }
+    const result = await closePlayerAfterSaveAttempts({
+      saveAttempts: [...document.querySelectorAll('.player-grid iframe')].map(frame => flushPlayerSave(frame)),
+      close: async () => {
+        try {
+          if (document.fullscreenElement === playerShellRef.current) await document.exitFullscreen()
+        } catch {
+          // The player still needs to close if the browser rejects leaving fullscreen.
+        }
+        setActiveSessions([])
+        setFullscreen(false)
+      },
+    })
+    if (result.failures.length > 0) setError('O emulador foi fechado, mas alguns saves não puderam ser sincronizados.')
   }
 
   function flushPlayerSave(frame) {
@@ -915,6 +967,8 @@ function App() {
 
   const activeProfileIds = new Set(activeSessions.map(session => session.profileId))
   const gameSections = groupGamesByLayout(games, hubLayout)
+  const isStandalone = window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true
+  const isNarrowPortrait = isNarrowPortraitViewport(viewport)
 
   return <main className="hub">
     <div className="hub-layout" inert={activeSessions.length || profileGame || instancePicker || controlPanelOpen || pokemonHubOpen ? true : undefined}>
@@ -922,6 +976,9 @@ function App() {
         <button className="hub-sidebar-action" type="button" aria-label="Configurar controles" title="Configurar controles" onClick={openControlPanel}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8h10M7 16h10M5 5h14v14H5zM9 8v8M15 8v8" /></svg>
         </button>
+        {!isStandalone && <button className="hub-sidebar-action hub-sidebar-install" type="button" aria-label="Instalar no iPhone" title="Instalar no iPhone" onClick={() => setInstallHelpOpen(true)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11M8 10l4 4 4-4M5 17v3h14v-3" /></svg>
+        </button>}
       </aside>
       <section className="hub-content">
         <section className="hub-section hub-section-internal" aria-labelledby="internal-applications-heading">
@@ -1103,6 +1160,19 @@ function App() {
           </form>}
           {profileError && <p className="profile-error" role="alert">{profileError}</p>}
         </div>
+      </div>
+    </div>}
+    {isNarrowPortrait && <div className="mobile-rotate-overlay" role="status" aria-live="assertive">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7a3 3 0 0 1 3 3v4M17 21h-7a3 3 0 0 1-3-3v-4M17 3l3 3-3 3M7 21l-3-3 3-3" /></svg>
+      <strong>Gire o aparelho</strong>
+      <span>A experiência de jogo funciona melhor na horizontal.</span>
+    </div>}
+    {installHelpOpen && <div className="mobile-install-overlay" role="dialog" aria-modal="true" aria-labelledby="mobile-install-title">
+      <div className="mobile-install-panel">
+        <button className="dialog-close" type="button" aria-label="Fechar instruções de instalação" onClick={() => setInstallHelpOpen(false)}>×</button>
+        <h2 id="mobile-install-title">Instalar no iPhone</h2>
+        <p>No Chrome, toque em <strong>Compartilhar</strong> e depois em <strong>Adicionar à Tela de Início</strong>.</p>
+        <p>Depois, abra o ícone “Emulator Hub” pela Tela de Início.</p>
       </div>
     </div>}
     {activeSessions.length > 0 && <div className="player-overlay" role="dialog" aria-modal="true" aria-label="Emulator">

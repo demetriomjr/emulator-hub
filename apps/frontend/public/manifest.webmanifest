@@ -1,0 +1,17 @@
+{
+  "name": "Emulator Hub",
+  "short_name": "Emulator Hub",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#08131a",
+  "theme_color": "#102b30",
+  "icons": [
+    {
+      "src": "/emulator-hub-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

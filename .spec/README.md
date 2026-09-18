@@ -1,5 +1,7 @@
 # Specifications
 
+- [Spec 032 — Mobile standalone player](032-mobile-standalone-player.md): installed-web-app metadata, mobile portrait guidance, and resilient player closing.
+
 - [Spec 031 — Mobile client diagnostics](031-mobile-client-diagnostics.md): opt-in iPhone browser failure reporting, ephemeral backend backlog, and Caddy access-log correlation.
 
 - [Spec 028 — Pokemon Hub session contract repair](028-pokemon-hub-session-contract-repair.md): active compact-session protocol, atomic attach ownership, lease reconciliation, compact corrections, and terminal browser recovery. Supersedes Spec 026's browser transfer flow and amends Spec 027.
