@@ -1,9 +1,35 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { pokemonHubRedisKeys } from './pokemon-hub-redis-keys.mjs'
+import { pokemonHubLocationKey } from './pokemon-hub-location-key.mjs'
+
+const markSaveFlushedTransition = Object.freeze({
+  lua: `
+    local raw = redis.call('GET', KEYS[1])
+    if not raw then return cjson.encode({ status = 'missing' }) end
+    local source = cjson.decode(raw)
+    if source.sourceRevision ~= tonumber(ARGV[1]) then
+      return cjson.encode({ status = 'stale', sourceRevision = source.sourceRevision })
+    end
+    source.saveRevision = tonumber(ARGV[2])
+    source.needsSaveFlush = false
+    redis.call('SET', KEYS[1], cjson.encode(source))
+    return cjson.encode({ status = 'flushed', source = source })
+  `,
+  memory: async ({ keys, arguments: values, get, set }) => {
+    const raw = await get(keys[0])
+    if (raw === null) return JSON.stringify({ status: 'missing' })
+    const source = JSON.parse(raw)
+    if (source.sourceRevision !== Number(values[0])) return JSON.stringify({ status: 'stale', sourceRevision: source.sourceRevision })
+    const updated = { ...source, saveRevision: Number(values[1]), needsSaveFlush: false }
+    await set(keys[0], JSON.stringify(updated))
+    return JSON.stringify({ status: 'flushed', source: updated })
+  },
+})
 
 const pokemonHubHandshakeIntervalMs = 3_000
 const pokemonHubMissedHandshakeLimit = 3
 
-export function createPokemonHubSnapshotCoordinator({ persistence, eventStore, now = () => new Date(), newId = randomUUID, leaseMs = pokemonHubHandshakeIntervalMs * pokemonHubMissedHandshakeLimit, validatePlacementChange = () => {} }) {
+export function createPokemonHubSnapshotCoordinator({ persistence, eventStore, logger = nullPokemonHubLogger, now = () => new Date(), newId = randomUUID, leaseMs = pokemonHubHandshakeIntervalMs * pokemonHubMissedHandshakeLimit, validatePlacementChange = () => {} }) {
   if (!persistence || typeof persistence.get !== 'function' || typeof persistence.set !== 'function' || typeof persistence.delete !== 'function' || typeof persistence.keys !== 'function') throw new TypeError('Pokemon Hub snapshot persistence is invalid')
   if (!eventStore || typeof eventStore.append !== 'function') throw new TypeError('Pokemon Hub event store is invalid')
   if (typeof validatePlacementChange !== 'function') throw new TypeError('Pokemon Hub placement validation is invalid')
@@ -114,24 +140,27 @@ export function createPokemonHubSnapshotCoordinator({ persistence, eventStore, n
       assertString(profileId, 'Profile ID'); assertString(sourceKey, 'Source key')
       const source = await readSource(profileId, sourceKey)
       if (!source) throw coordinatorError('SOURCE_NOT_ADOPTED', 'Pokemon Hub source has not been adopted.')
-      const records = new Map()
-      for (const placement of source.placements) {
-        if (!placement.pokemonInstanceId || records.has(placement.pokemonInstanceId)) continue
-        const record = await readRecord(profileId, placement.pokemonInstanceId)
+      const pokemonInstanceIds = [...new Set(source.placements.flatMap(placement => placement.pokemonInstanceId ? [placement.pokemonInstanceId] : []))]
+      const entries = await Promise.all(pokemonInstanceIds.map(async pokemonInstanceId => {
+        const record = await readRecord(profileId, pokemonInstanceId)
         if (!record) throw coordinatorError('POKEMON_UNKNOWN', 'Pokemon instance is unknown.')
-        records.set(placement.pokemonInstanceId, structuredClone(record))
-      }
+        return [pokemonInstanceId, structuredClone(record)]
+      }))
+      const records = new Map(entries)
       return { source: structuredClone(source), records }
     },
 
-    async markSaveFlushed({ profileId, sourceKey, saveRevision }) {
+    async markSaveFlushed({ profileId, sourceKey, sourceRevision, saveRevision }) {
       assertString(profileId, 'Profile ID'); assertString(sourceKey, 'Source key')
+      if (!Number.isInteger(sourceRevision) || sourceRevision < 1) throw new TypeError('Source revision is invalid')
       if (!Number.isInteger(saveRevision) || saveRevision < 1) throw new TypeError('Save revision is invalid')
-      const source = await readSource(profileId, sourceKey)
-      if (!source) throw coordinatorError('SOURCE_NOT_ADOPTED', 'Pokemon Hub source has not been adopted.')
-      const updated = { ...source, saveRevision, needsSaveFlush: false }
-      await writeSource(updated)
-      return safeSnapshot(updated)
+      const outcome = JSON.parse(await persistence.eval(markSaveFlushedTransition, {
+        keys: [sourceKeyFor(profileId, sourceKey)],
+        arguments: [String(sourceRevision), String(saveRevision)],
+      }))
+      if (outcome.status === 'missing') throw coordinatorError('SOURCE_NOT_ADOPTED', 'Pokemon Hub source has not been adopted.')
+      if (outcome.status === 'stale') throw coordinatorError('SOURCE_FLUSH_STALE', 'Pokemon Hub source changed while its save was being flushed.')
+      return safeSnapshot(outcome.source)
     },
 
     async acquire({ profileId, sourceKey, workspaceId }) {
@@ -238,90 +267,117 @@ export function createPokemonHubSnapshotCoordinator({ persistence, eventStore, n
     },
 
     async sync(request) {
-      normalizeSyncRequest(request)
-      const operationKey = syncKey(request.profileId, request.workspaceId, request.idempotencyKey)
-      const previousResult = await persistence.get(operationKey)
-      if (previousResult !== null) return structuredClone(JSON.parse(previousResult))
-
-      const sources = await verifyWorkspaceSources(request)
-      for (const { source, submitted } of sources) {
-        if (source.sourceRevision !== submitted.baseRevision) return correction('SNAPSHOT_STALE', request, sources.length ? sources : await readRequestSources(request), now().getTime())
-        assertSameLocations(source.placements, submitted.placements)
-      }
-
-      const duplicate = findDuplicate(request.sources)
-      if (duplicate) return correction('DUPLICATE_INSTANCE_CORRECTED', request, sources, now().getTime())
-      for (const submitted of request.sources) for (const placement of submitted.placements) {
-        if (placement.pokemonInstanceId && !await readRecord(request.profileId, placement.pokemonInstanceId)) throw coordinatorError('POKEMON_UNKNOWN', 'Pokemon instance is unknown.')
-      }
-
-      const prior = indexPlacements(sources.map(({ source }) => ({ sourceKey: source.sourceKey, placements: source.placements })))
-      const next = indexPlacements(request.sources)
-      for (const pokemonInstanceId of next.keys()) {
-        if (!prior.has(pokemonInstanceId)) throw coordinatorError('POKEMON_UNAUTHORIZED', 'Pokemon instance is not present in a leased snapshot source.')
-      }
-      for (const [pokemonInstanceId, destination] of next) {
-        const origin = prior.get(pokemonInstanceId)
-        if (samePlacement(origin, destination)) continue
-        await validatePlacementChange({
-          profileId: request.profileId,
-          pokemonInstanceId,
-          origin,
-          destination,
-          sourceAdapter: sourceAdapterFor(sources, origin?.sourceKey),
-          destinationAdapter: sourceAdapterFor(sources, destination.sourceKey),
-        })
-      }
-      for (const [pokemonInstanceId, origin] of prior) {
-        if (next.has(pokemonInstanceId)) continue
-        await validatePlacementChange({
-          profileId: request.profileId,
-          pokemonInstanceId,
-          origin,
-          destination: null,
-          sourceAdapter: sourceAdapterFor(sources, origin.sourceKey),
-          destinationAdapter: null,
-        })
-      }
-      const displayById = Object.assign({}, ...sources.map(({ source }) => source.pokemonDisplay ?? {}))
-      const snapshots = []
-      for (const { source, submitted } of sources.sort((left, right) => left.source.sourceKey.localeCompare(right.source.sourceKey))) {
-        const placements = clonePlacements(submitted.placements)
-        if (!placementsChanged(source.placements, placements)) {
-          snapshots.push(safeSnapshot(source))
-          continue
+      const trace = normalizePokemonHubLogger(request?.logger ?? logger)
+      trace.info('snapshot.coordinator.received', summarizeSyncRequest(request))
+      try {
+        normalizeSyncRequest(request)
+        const operationKey = syncKey(request.profileId, request.workspaceId, request.idempotencyKey)
+        const previousResult = await persistence.get(operationKey)
+        if (previousResult !== null) {
+          const replayed = structuredClone(JSON.parse(previousResult))
+          trace.info('snapshot.coordinator.replayed', { ...summarizeSyncRequest(request), status: replayed.status, code: replayed.code ?? null })
+          return replayed
         }
-        const pokemonDisplay = Object.fromEntries(placements.flatMap(placement => placement.pokemonInstanceId && displayById[placement.pokemonInstanceId] ? [[placement.pokemonInstanceId, displayById[placement.pokemonInstanceId]]] : []))
-        const updated = { ...source, sourceRevision: source.sourceRevision + 1, snapshotRevision: source.snapshotRevision + 1, needsSaveFlush: source.needsSaveFlush || placementsChanged(source.placements, placements), placements, pokemonDisplay }
-        await writeSource(updated)
-        snapshots.push(safeSnapshot(updated))
+
+        const sources = await verifyWorkspaceSources(request)
+        trace.info('snapshot.coordinator.leases-verified', { ...summarizeSyncRequest(request), sourceRevisions: sources.map(({ source }) => ({ sourceKey: source.sourceKey, sourceRevision: source.sourceRevision, snapshotRevision: source.snapshotRevision })) })
+        for (const { source, submitted } of sources) {
+          if (source.sourceRevision !== submitted.baseRevision) {
+            trace.warn('snapshot.coordinator.stale', { ...summarizeSyncRequest(request), sourceKey: source.sourceKey, expectedRevision: source.sourceRevision, submittedRevision: submitted.baseRevision })
+            return correction('SNAPSHOT_STALE', request, sources.length ? sources : await readRequestSources(request), now().getTime())
+          }
+          assertSameLocations(source.placements, submitted.placements)
+        }
+
+        const duplicate = findDuplicate(request.sources)
+        if (duplicate) {
+          trace.warn('snapshot.coordinator.duplicate-corrected', { ...summarizeSyncRequest(request) })
+          return correction('DUPLICATE_INSTANCE_CORRECTED', request, sources, now().getTime())
+        }
+        const prior = indexPlacements(sources.map(({ source }) => ({ sourceKey: source.sourceKey, placements: source.placements })))
+        const next = indexPlacements(request.sources)
+        trace.info('snapshot.coordinator.identity-validated', { ...summarizeSyncRequest(request), previousPokemonCount: prior.size, requestedPokemonCount: next.size })
+        for (const pokemonInstanceId of next.keys()) {
+          if (!prior.has(pokemonInstanceId)) throw coordinatorError('POKEMON_UNAUTHORIZED', 'Pokemon instance is not present in a leased snapshot source.')
+        }
+        rejectCrossSourceOccupiedDestinations(prior, next)
+        const changedPokemonIds = [...next].filter(([pokemonInstanceId, destination]) => !samePlacement(prior.get(pokemonInstanceId), destination)).map(([pokemonInstanceId]) => pokemonInstanceId)
+        const changedRecords = new Map()
+        for (const pokemonInstanceId of changedPokemonIds) {
+          const document = await readRecord(request.profileId, pokemonInstanceId)
+          if (!document) throw coordinatorError('POKEMON_UNKNOWN', 'Pokemon instance is unknown.')
+          changedRecords.set(pokemonInstanceId, document)
+        }
+        trace.info('snapshot.coordinator.placement-policy-started', { ...summarizeSyncRequest(request), changedPokemonCount: changedPokemonIds.length })
+        for (const [pokemonInstanceId, destination] of next) {
+          const origin = prior.get(pokemonInstanceId)
+          if (samePlacement(origin, destination)) continue
+          await validatePlacementChange({
+            profileId: request.profileId,
+            pokemonInstanceId,
+            origin,
+            destination,
+            sourceAdapter: sourceAdapterFor(sources, origin?.sourceKey),
+            destinationAdapter: sourceAdapterFor(sources, destination.sourceKey),
+          })
+        }
+        for (const [pokemonInstanceId, origin] of prior) {
+          if (next.has(pokemonInstanceId)) continue
+          await validatePlacementChange({
+            profileId: request.profileId,
+            pokemonInstanceId,
+            origin,
+            destination: null,
+            sourceAdapter: sourceAdapterFor(sources, origin.sourceKey),
+            destinationAdapter: null,
+          })
+        }
+        trace.info('snapshot.coordinator.placement-policy-finished', { ...summarizeSyncRequest(request), changedPokemonCount: changedPokemonIds.length })
+        const displayById = Object.assign({}, ...sources.map(({ source }) => source.pokemonDisplay ?? {}))
+        const snapshots = []
+        for (const { source, submitted } of sources.sort((left, right) => left.source.sourceKey.localeCompare(right.source.sourceKey))) {
+          const placements = clonePlacements(submitted.placements)
+          if (!placementsChanged(source.placements, placements)) {
+            snapshots.push(safeSnapshot(source))
+            trace.info('snapshot.coordinator.source-unchanged', { ...summarizeSyncRequest(request), sourceKey: source.sourceKey, sourceRevision: source.sourceRevision })
+            continue
+          }
+          const pokemonDisplay = Object.fromEntries(placements.flatMap(placement => placement.pokemonInstanceId && displayById[placement.pokemonInstanceId] ? [[placement.pokemonInstanceId, displayById[placement.pokemonInstanceId]]] : []))
+          const updated = { ...source, sourceRevision: source.sourceRevision + 1, snapshotRevision: source.snapshotRevision + 1, needsSaveFlush: source.needsSaveFlush || placementsChanged(source.placements, placements), placements, pokemonDisplay }
+          await writeSource(updated)
+          snapshots.push(safeSnapshot(updated))
+          trace.info('snapshot.coordinator.source-persisted', { ...summarizeSyncRequest(request), sourceKey: source.sourceKey, sourceRevision: updated.sourceRevision, snapshotRevision: updated.snapshotRevision, needsSaveFlush: updated.needsSaveFlush })
+        }
+        for (const [pokemonInstanceId, destination] of next) {
+          const origin = prior.get(pokemonInstanceId)
+          if (samePlacement(origin, destination)) continue
+          const document = changedRecords.get(pokemonInstanceId)
+          const sourceAdapter = sourceAdapterFor(sources, origin?.sourceKey) ?? document.representations[0]?.adapter
+          const destinationAdapter = sourceAdapterFor(sources, destination.sourceKey) ?? sourceAdapterFor(request.sources, destination.sourceKey) ?? sourceAdapterFor(sources, origin?.sourceKey)
+          const hash = document.representations[0]?.sha256
+          const revised = { ...document, placement: { sourceKey: destination.sourceKey, location: destination.location }, revision: document.revision + 1 }
+          await writeRecord(revised)
+          await eventStore.append({
+            profileId: request.profileId,
+            pokemonInstanceId,
+            operationId: request.idempotencyKey,
+            type: 'pokemon.placement-changed',
+            source: origin ?? destination,
+            destination,
+            sourceRevision: sourceRevisionFor(snapshots, origin?.sourceKey) ?? 0,
+            destinationRevision: sourceRevisionFor(snapshots, destination.sourceKey) ?? 0,
+            adapter: { source: sourceAdapter, destination: destinationAdapter, capabilityVersion: '1' },
+            representationHashes: { source: hash, destination: hash },
+          })
+        }
+        const result = { status: 'accepted', clientSequence: request.clientSequence, idempotencyKey: request.idempotencyKey, serverSequence: Date.parse(now().toISOString()), snapshots }
+        await persistence.set(operationKey, JSON.stringify(result), { NX: true })
+        trace.info('snapshot.coordinator.accepted', { ...summarizeSyncRequest(request), snapshotRevisions: snapshots.map(snapshot => ({ sourceKey: snapshot.sourceKey, sourceRevision: snapshot.sourceRevision, snapshotRevision: snapshot.snapshotRevision })) })
+        return result
+      } catch (error) {
+        trace.error('snapshot.coordinator.failed', { ...summarizeSyncRequest(request), error: errorDetails(error) })
+        throw error
       }
-      for (const [pokemonInstanceId, destination] of next) {
-        const origin = prior.get(pokemonInstanceId)
-        if (samePlacement(origin, destination)) continue
-        const document = await readRecord(request.profileId, pokemonInstanceId)
-        if (!document) throw coordinatorError('POKEMON_UNKNOWN', 'Pokemon instance is unknown.')
-        const sourceAdapter = sourceAdapterFor(sources, origin?.sourceKey) ?? document.representations[0]?.adapter
-        const destinationAdapter = sourceAdapterFor(sources, destination.sourceKey) ?? sourceAdapterFor(request.sources, destination.sourceKey) ?? sourceAdapterFor(sources, origin?.sourceKey)
-        const hash = document.representations[0]?.sha256
-        const revised = { ...document, placement: { sourceKey: destination.sourceKey, location: destination.location }, revision: document.revision + 1 }
-        await writeRecord(revised)
-        await eventStore.append({
-          profileId: request.profileId,
-          pokemonInstanceId,
-          operationId: request.idempotencyKey,
-          type: 'pokemon.placement-changed',
-          source: origin ?? destination,
-          destination,
-          sourceRevision: sourceRevisionFor(snapshots, origin?.sourceKey) ?? 0,
-          destinationRevision: sourceRevisionFor(snapshots, destination.sourceKey) ?? 0,
-          adapter: { source: sourceAdapter, destination: destinationAdapter, capabilityVersion: '1' },
-          representationHashes: { source: hash, destination: hash },
-        })
-      }
-      const result = { status: 'accepted', clientSequence: request.clientSequence, idempotencyKey: request.idempotencyKey, serverSequence: Date.parse(now().toISOString()), snapshots }
-      await persistence.set(operationKey, JSON.stringify(result), { NX: true })
-      return result
     },
   }
 
@@ -380,7 +436,10 @@ export function createPokemonHubSnapshotCoordinator({ persistence, eventStore, n
       if (lease?.workspaceId === request.workspaceId && lease.expiresAt > now().getTime()) active.add(lease.sourceKey)
     }
     const submitted = new Set(sources.map(({ source }) => source.sourceKey))
-    if (active.size !== submitted.size || [...active].some(sourceKey => !submitted.has(sourceKey))) throw coordinatorError('SOURCE_SET_INCOMPLETE', 'Pokemon Hub snapshot must include every leased source in the workspace.')
+    const retiring = new Set(request.retiredSourceKeys ?? [])
+    if ([...retiring].some(sourceKey => submitted.has(sourceKey))) throw coordinatorError('SNAPSHOT_INVALID', 'Pokemon Hub retired source is also submitted.')
+    const complete = new Set([...submitted, ...retiring])
+    if (active.size !== complete.size || [...active].some(sourceKey => !complete.has(sourceKey))) throw coordinatorError('SOURCE_SET_INCOMPLETE', 'Pokemon Hub snapshot must include every leased source in the workspace.')
   }
   async function readRequestSources(request) {
     const results = []
@@ -389,6 +448,36 @@ export function createPokemonHubSnapshotCoordinator({ persistence, eventStore, n
       if (source) results.push({ source, submitted })
     }
     return results
+  }
+}
+
+const nullPokemonHubLogger = Object.freeze({ info() {}, warn() {}, error() {} })
+
+function normalizePokemonHubLogger(logger) {
+  return logger && typeof logger.info === 'function' && typeof logger.warn === 'function' && typeof logger.error === 'function'
+    ? logger
+    : nullPokemonHubLogger
+}
+
+function summarizeSyncRequest(request) {
+  if (!request || typeof request !== 'object') return { requestType: request === null ? 'null' : typeof request }
+  return {
+    profileId: request.profileId ?? null,
+    workspaceId: request.workspaceId ?? null,
+    idempotencyKey: request.idempotencyKey ?? null,
+    clientSequence: request.clientSequence ?? null,
+    sourceKeys: Array.isArray(request.sources) ? request.sources.map(source => source?.sourceKey ?? null) : null,
+    retiredSourceKeys: Array.isArray(request.retiredSourceKeys) ? request.retiredSourceKeys : null,
+    placementCounts: Array.isArray(request.sources) ? request.sources.map(source => ({ sourceKey: source?.sourceKey ?? null, total: Array.isArray(source?.placements) ? source.placements.length : null, occupied: Array.isArray(source?.placements) ? source.placements.filter(placement => placement?.pokemonInstanceId).length : null })) : null,
+  }
+}
+
+function errorDetails(error) {
+  return {
+    name: error?.name ?? 'Error',
+    code: error?.code ?? null,
+    message: error?.message ?? String(error),
+    stack: error?.stack ?? null,
   }
 }
 
@@ -409,6 +498,8 @@ function normalizeRecord(record) {
 function normalizeSyncRequest(request) {
   if (!request || typeof request !== 'object' || !Array.isArray(request.sources) || !Number.isInteger(request.clientSequence) || request.clientSequence < 1) throw new TypeError('Pokemon Hub snapshot request is invalid')
   assertString(request.profileId, 'Profile ID'); assertString(request.workspaceId, 'Workspace ID'); assertString(request.idempotencyKey, 'Idempotency key')
+  if (request.retiredSourceKeys === undefined) request.retiredSourceKeys = []
+  if (!Array.isArray(request.retiredSourceKeys) || request.retiredSourceKeys.some(sourceKey => typeof sourceKey !== 'string' || sourceKey.length === 0) || new Set(request.retiredSourceKeys).size !== request.retiredSourceKeys.length) throw new TypeError('Pokemon Hub retired source set is invalid')
   for (const source of request.sources) {
     assertString(source?.sourceKey, 'Source key'); assertString(source?.sourceSessionId, 'Source session ID'); assertString(source?.leaseToken, 'Lease token')
     if (!Number.isInteger(source.baseRevision) || source.baseRevision < 0 || !Array.isArray(source.placements)) throw new TypeError('Pokemon Hub source snapshot is invalid')
@@ -434,14 +525,14 @@ function safeSnapshot(source) {
 }
 
 function clonePlacements(placements) { return placements.map(placement => ({ location: normalizeLocation(placement.location), pokemonInstanceId: placement.pokemonInstanceId ?? null })) }
-function placementsChanged(current, next) { return current.length !== next.length || current.some((placement, index) => placement.pokemonInstanceId !== next[index].pokemonInstanceId || locationKey(placement.location) !== locationKey(next[index].location)) }
+function placementsChanged(current, next) { return current.length !== next.length || current.some((placement, index) => placement.pokemonInstanceId !== next[index].pokemonInstanceId || pokemonHubLocationKey(placement.location) !== pokemonHubLocationKey(next[index].location)) }
 function normalizeLocation(location) {
   if (!location || typeof location !== 'object' || !Number.isInteger(location.slot) || location.slot < 0) throw new TypeError('Pokemon Hub placement location is invalid')
   return structuredClone(location)
 }
 function assertSameLocations(expected, actual) {
-  const expectedKeys = new Set(expected.map(placement => locationKey(placement.location)))
-  if (expectedKeys.size !== actual.length || actual.some(placement => !expectedKeys.delete(locationKey(placement.location)))) throw coordinatorError('SNAPSHOT_INVALID', 'Pokemon Hub snapshot locations are invalid.')
+  const expectedKeys = new Set(expected.map(placement => pokemonHubLocationKey(placement.location)))
+  if (expectedKeys.size !== actual.length || actual.some(placement => !expectedKeys.delete(pokemonHubLocationKey(placement.location)))) throw coordinatorError('SNAPSHOT_INVALID', 'Pokemon Hub snapshot locations are invalid.')
 }
 function findDuplicate(sources) {
   const seen = new Set()
@@ -456,7 +547,18 @@ function indexPlacements(sources) {
   for (const source of sources) for (const placement of source.placements) if (placement.pokemonInstanceId) result.set(placement.pokemonInstanceId, { sourceKey: source.sourceKey, location: placement.location })
   return result
 }
-function samePlacement(left, right) { return left?.sourceKey === right?.sourceKey && locationKey(left?.location) === locationKey(right?.location) }
+function rejectCrossSourceOccupiedDestinations(prior, next) {
+  const priorOccupants = new Map([...prior].map(([pokemonInstanceId, placement]) => [placementKey(placement), pokemonInstanceId]))
+  for (const [pokemonInstanceId, destination] of next) {
+    const origin = prior.get(pokemonInstanceId)
+    const displacedPokemonInstanceId = priorOccupants.get(placementKey(destination))
+    if (origin && displacedPokemonInstanceId && displacedPokemonInstanceId !== pokemonInstanceId && origin.sourceKey !== destination.sourceKey) {
+      throw coordinatorError('CROSS_SOURCE_OCCUPIED', 'Pokemon cannot replace an occupied slot in another source.')
+    }
+  }
+}
+function placementKey(placement) { return `${placement.sourceKey}\u0000${pokemonHubLocationKey(placement.location)}` }
+function samePlacement(left, right) { return left?.sourceKey === right?.sourceKey && pokemonHubLocationKey(left?.location) === pokemonHubLocationKey(right?.location) }
 function sourceAdapterFor(sources, sourceKey) { return sources.find(item => (item.source?.sourceKey ?? item.sourceKey) === sourceKey)?.source?.adapter ?? sources.find(item => item.sourceKey === sourceKey)?.adapter ?? null }
 function sourceRevisionFor(snapshots, sourceKey) { return snapshots.find(snapshot => snapshot.sourceKey === sourceKey)?.sourceRevision ?? null }
 function correction(code, request, sources, serverSequence) {
@@ -464,11 +566,11 @@ function correction(code, request, sources, serverSequence) {
   return { status: 'corrected', code, clientSequence: request.clientSequence, idempotencyKey: request.idempotencyKey, serverSequence, snapshots }
 }
 function sha256(bytes) { return createHash('sha256').update(bytes).digest('hex') }
-function sourceKeyFor(profileId, sourceKey) { return `pokemon-hub:snapshot-source:${encodeURIComponent(profileId)}:${encodeURIComponent(sourceKey)}` }
-function recordKey(profileId, pokemonInstanceId) { return `pokemon-hub:snapshot-record:${encodeURIComponent(profileId)}:${encodeURIComponent(pokemonInstanceId)}` }
-function leaseKey(profileId, sourceKey) { return `pokemon-hub:snapshot-lease:${encodeURIComponent(profileId)}:${encodeURIComponent(sourceKey)}` }
-function workspaceLeaseIndexKey(profileId, workspaceId) { return `pokemon-hub:snapshot-workspace-lease:${encodeURIComponent(profileId)}:${encodeURIComponent(workspaceId)}` }
-function expiringLeaseIndexKey() { return 'pokemon-hub:snapshot-expiring-lease' }
+function sourceKeyFor(profileId, sourceKey) { return pokemonHubRedisKeys.source(profileId, sourceKey) }
+function recordKey(profileId, pokemonInstanceId) { return pokemonHubRedisKeys.record(profileId, pokemonInstanceId) }
+function leaseKey(profileId, sourceKey) { return pokemonHubRedisKeys.lease(profileId, sourceKey) }
+function workspaceLeaseIndexKey(profileId, workspaceId) { return pokemonHubRedisKeys.workspaceLease(profileId, workspaceId) }
+function expiringLeaseIndexKey() { return pokemonHubRedisKeys.expiringLeaseIndex() }
 function leaseMember(profileId, sourceKey) { return JSON.stringify([profileId, sourceKey]) }
 function parseLeaseMember(member) {
   try {
@@ -476,7 +578,6 @@ function parseLeaseMember(member) {
     return typeof profileId === 'string' && profileId.length > 0 && typeof sourceKey === 'string' && sourceKey.length > 0 ? { profileId, sourceKey } : null
   } catch { return null }
 }
-function syncKey(profileId, workspaceId, idempotencyKey) { return `pokemon-hub:snapshot-sync:${encodeURIComponent(profileId)}:${encodeURIComponent(workspaceId)}:${encodeURIComponent(idempotencyKey)}` }
-function locationKey(location) { return JSON.stringify(location ?? null) }
+function syncKey(profileId, workspaceId, idempotencyKey) { return pokemonHubRedisKeys.snapshotSync(profileId, workspaceId, idempotencyKey) }
 function assertString(value, label) { if (typeof value !== 'string' || value.length === 0) throw new TypeError(`${label} is required`) }
 function coordinatorError(code, message) { const error = new Error(message); error.code = code; return error }

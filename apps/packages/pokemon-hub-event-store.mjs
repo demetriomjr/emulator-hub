@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { pokemonHubRedisKeys } from './pokemon-hub-redis-keys.mjs'
 
 const eventTypes = new Set([
   'pokemon.observed',
@@ -123,11 +124,11 @@ function eventIdentifier(profileId, pokemonInstanceId, operationId) {
 }
 
 function eventPrefix(profileId, pokemonInstanceId) {
-  return `pokemon-hub:event:${encodeURIComponent(profileId)}:${encodeURIComponent(pokemonInstanceId)}:`
+  return pokemonHubRedisKeys.eventPrefix(profileId, pokemonInstanceId)
 }
 
 function eventKey(profileId, pokemonInstanceId, eventId) {
-  return `${eventPrefix(profileId, pokemonInstanceId)}${eventId}`
+  return pokemonHubRedisKeys.event(profileId, pokemonInstanceId, eventId)
 }
 
 function assertNonEmptyString(value, label) {

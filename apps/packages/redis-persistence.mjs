@@ -24,9 +24,17 @@ export function createRedisPersistence({ url, namespace = defaultNamespace, clie
     try { return await redis[method](...args) } catch (error) { throw persistenceError('REDIS_OPERATION_FAILED', 'Redis operation failed.', error) }
   }
 
+  async function evalScript(transition, { keys = [], arguments: scriptArguments = [] } = {}) {
+    const script = normalizeLuaTransition(transition).lua
+    if (!Array.isArray(keys) || keys.some(keyName => typeof keyName !== 'string' || keyName.length === 0)) throw persistenceError('REDIS_SCRIPT_KEYS_INVALID', 'Redis script keys are invalid.')
+    if (!Array.isArray(scriptArguments) || scriptArguments.some(argument => typeof argument !== 'string' && !Buffer.isBuffer(argument))) throw persistenceError('REDIS_SCRIPT_ARGUMENTS_INVALID', 'Redis script arguments are invalid.')
+    return call('eval', script, { keys: keys.map(key), arguments: scriptArguments })
+  }
+
   return {
     async connect() { await connect() },
     async close() { if (redis.isOpen) await redis.quit() },
+    async eval(script, options) { return evalScript(script, options) },
     async get(name) { return call('get', key(name)) },
     async set(name, value, options) { return call('set', key(name), value, options) },
     async delete(name) { return call('del', key(name)) },
@@ -50,19 +58,45 @@ export function createRedisPersistence({ url, namespace = defaultNamespace, clie
 export function createMemoryRedisPersistence({ namespace = defaultNamespace } = {}) {
   const values = new Map()
   const sortedSets = new Map()
+  const namespacePrefix = `${namespace}:`
+  let evalTail = Promise.resolve()
+  const fullKey = name => name.startsWith(namespacePrefix) ? name : `${namespacePrefix}${name}`
+  const logicalKey = name => name.startsWith(namespacePrefix) ? name.slice(namespacePrefix.length) : name
+  const runEval = async (transition, options = {}) => {
+    const script = normalizeLuaTransition(transition).memory
+    const keys = options.keys ?? []
+    const scriptArguments = options.arguments ?? []
+    if (!Array.isArray(keys) || keys.some(keyName => typeof keyName !== 'string' || keyName.length === 0)) throw persistenceError('REDIS_SCRIPT_KEYS_INVALID', 'Redis script keys are invalid.')
+    if (!Array.isArray(scriptArguments) || scriptArguments.some(argument => typeof argument !== 'string' && !Buffer.isBuffer(argument))) throw persistenceError('REDIS_SCRIPT_ARGUMENTS_INVALID', 'Redis script arguments are invalid.')
+    const run = evalTail.then(async () => script({
+      keys: keys.map(fullKey),
+      arguments: scriptArguments,
+      async get(name) { return values.get(fullKey(name)) ?? null },
+      async set(name, value, setOptions = {}) {
+        const target = fullKey(name)
+        if (setOptions.NX && values.has(target)) return null
+        values.set(target, value)
+        return 'OK'
+      },
+      async delete(name) { return values.delete(fullKey(name)) ? 1 : 0 },
+    }))
+    evalTail = run.catch(() => {})
+    return run
+  }
   return {
     async connect() {},
     async close() {},
-    async get(name) { return values.get(`${namespace}:${name}`) ?? null },
+    async eval(script, options) { return runEval(script, options) },
+    async get(name) { return values.get(fullKey(name)) ?? null },
     async set(name, value, options = {}) {
-      const key = `${namespace}:${name}`
+      const key = fullKey(name)
       if (options.NX && values.has(key)) return null
       values.set(key, value)
       return 'OK'
     },
-    async delete(name) { return values.delete(`${namespace}:${name}`) ? 1 : 0 },
+    async delete(name) { return values.delete(fullKey(name)) ? 1 : 0 },
     async addToSet(name, member) {
-      const key = `${namespace}:${name}`
+      const key = fullKey(name)
       const members = values.get(key) ?? new Set()
       if (!(members instanceof Set)) throw new TypeError('Persistence key is not a set.')
       const size = members.size
@@ -71,20 +105,20 @@ export function createMemoryRedisPersistence({ namespace = defaultNamespace } = 
       return members.size - size
     },
     async removeFromSet(name, member) {
-      const members = values.get(`${namespace}:${name}`)
+      const members = values.get(fullKey(name))
       if (!(members instanceof Set)) return 0
       const removed = members.delete(member) ? 1 : 0
-      if (members.size === 0) values.delete(`${namespace}:${name}`)
+      if (members.size === 0) values.delete(fullKey(name))
       return removed
     },
     async members(name) {
-      const members = values.get(`${namespace}:${name}`)
+      const members = values.get(fullKey(name))
       if (members === undefined) return []
       if (!(members instanceof Set)) throw new TypeError('Persistence key is not a set.')
       return [...members]
     },
     async addToSortedSet(name, member, score) {
-      const key = `${namespace}:${name}`
+      const key = fullKey(name)
       const members = sortedSets.get(key) ?? new Map()
       const existed = members.has(member)
       members.set(member, score)
@@ -92,7 +126,7 @@ export function createMemoryRedisPersistence({ namespace = defaultNamespace } = 
       return existed ? 0 : 1
     },
     async removeFromSortedSet(name, member) {
-      const key = `${namespace}:${name}`
+      const key = fullKey(name)
       const members = sortedSets.get(key)
       if (!members) return 0
       const removed = members.delete(member) ? 1 : 0
@@ -100,15 +134,21 @@ export function createMemoryRedisPersistence({ namespace = defaultNamespace } = 
       return removed
     },
     async rangeByScore(name, minimum, maximum) {
-      const members = sortedSets.get(`${namespace}:${name}`)
+      const members = sortedSets.get(fullKey(name))
       if (!members) return []
       return [...members.entries()]
         .filter(([, score]) => score >= minimum && score <= maximum)
         .sort(([leftMember, leftScore], [rightMember, rightScore]) => leftScore - rightScore || leftMember.localeCompare(rightMember))
         .map(([member]) => member)
     },
-    async keys(prefix) { return [...values.keys()].filter(key => key.startsWith(`${namespace}:${prefix}`)).map(key => key.slice(namespace.length + 1)) },
+    async keys(prefix) { return [...values.keys()].filter(key => key.startsWith(fullKey(prefix))).map(logicalKey) },
   }
+}
+
+function normalizeLuaTransition(transition) {
+  if (typeof transition === 'string' && transition.length > 0) return { lua: transition, memory: null }
+  if (!transition || typeof transition !== 'object' || typeof transition.lua !== 'string' || transition.lua.length === 0 || typeof transition.memory !== 'function') throw persistenceError('REDIS_SCRIPT_INVALID', 'Redis atomic transition must provide Lua and memory handlers.')
+  return transition
 }
 
 export function persistenceError(code, message, cause) {

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { createServer } from 'node:http'
 import { lstat, readFile } from 'node:fs/promises'
@@ -24,6 +24,7 @@ import { createPokemonHubSaveFlushService } from '../packages/pokemon-hub-save-f
 import { createPokemonSaveAdapterRegistry } from '../packages/pokemon-save-adapter-registry.mjs'
 import { pokemonGen3Adapter } from '../packages/pokemon-gen3-adapter.mjs'
 import { getPokemonSaveLayout } from '../packages/pokemon-save-layouts.mjs'
+import { pokemonHubLocationKey } from '../packages/pokemon-hub-location-key.mjs'
 import { createRomDiscovery } from '../packages/rom-discovery.mjs'
 import { createRedisRomRegistry } from '../packages/rom-registry.mjs'
 import { createRedisPersistence } from '../packages/redis-persistence.mjs'
@@ -66,6 +67,7 @@ export function createHubServer(options = {}) {
   const romRegistryPath = options.romRegistryPath ?? (options.catalogPath ? join(dirname(options.catalogPath), 'data', 'rom-registry.json') : defaultRomRegistryPath)
   const persistence = options.persistence ?? createRedisPersistence(redisConfiguration(options))
   const config = {
+    persistence,
     catalogPath: options.catalogPath ?? defaultCatalogPath,
     romsDirectory: options.romsDirectory ?? options.romsDir ?? defaultRomsDirectory,
     persistence,
@@ -81,11 +83,12 @@ export function createHubServer(options = {}) {
     pokemonHubSnapshots: options.pokemonHubSnapshots ?? createPokemonHubSnapshotStore(),
     pokemonSaveAdapters: options.pokemonSaveAdapters ?? createPokemonSaveAdapterRegistry([pokemonGen3Adapter]),
     pokemonHubEventStore: options.pokemonHubEventStore ?? createPokemonHubEventStore({ persistence }),
+    pokemonHubLogger: normalizePokemonHubLogger(options.pokemonHubLogger),
   }
-  config.pokemonHubSnapshotCoordinator = options.pokemonHubSnapshotCoordinator ?? createPokemonHubSnapshotCoordinator({ persistence, eventStore: config.pokemonHubEventStore, validatePlacementChange: validatePokemonHubTransferPlacement })
+  config.pokemonHubSnapshotCoordinator = options.pokemonHubSnapshotCoordinator ?? createPokemonHubSnapshotCoordinator({ persistence, eventStore: config.pokemonHubEventStore, logger: config.pokemonHubLogger, validatePlacementChange: validatePokemonHubTransferPlacement })
   const canCreatePokemonHubSessionService = ['getSnapshot', 'renew', 'release', 'sync', 'reconcileWorkspaceLeases'].every(method => typeof config.pokemonHubSnapshotCoordinator[method] === 'function')
   config.pokemonHubSessionService = options.pokemonHubSessionService ?? (canCreatePokemonHubSessionService
-    ? createPokemonHubSessionService({ persistence, coordinator: config.pokemonHubSnapshotCoordinator })
+    ? createPokemonHubSessionService({ persistence, coordinator: config.pokemonHubSnapshotCoordinator, logger: config.pokemonHubLogger })
     : null)
   config.pokemonHubGridTransferService = options.pokemonHubGridTransferService
     ?? (typeof config.pokemonHubSnapshotCoordinator.ensureHubSource === 'function'
@@ -108,6 +111,7 @@ export function createHubServer(options = {}) {
 
   const server = createServer((request, response) => {
     handleRequest(request, response, config).catch((error) => {
+      config.pokemonHubLogger.error('backend.http.unhandled-error', { method: request.method, url: request.url, error: errorDetails(error) })
       if (response.headersSent) {
         response.destroy(error)
         return
@@ -186,6 +190,32 @@ async function handleRequest(request, response, config) {
   const saveRoute = parseSaveRoute(route.pathname)
   const pokemonHubRoute = parsePokemonHubRoute(route.pathname)
   const pokemonHubSessionRoute = parsePokemonHubSessionRoute(route.pathname)
+  const pokemonHubSessionRequestLogger = ['snapshot', 'heartbeat'].includes(pokemonHubSessionRoute?.kind)
+    ? childPokemonHubLogger(config.pokemonHubLogger, {
+      requestId: randomUUID(),
+      method: request.method,
+      route: pokemonHubSessionRoute.kind,
+      requestType: pokemonHubSessionRoute.kind === 'snapshot' ? 'snapshot-command' : 'heartbeat',
+      profileId: pokemonHubSessionRoute.profileId,
+      sessionId: pokemonHubSessionRoute.sessionId,
+      idempotencyKey: pokemonHubSessionRoute.kind === 'snapshot' ? request.headers['idempotency-key'] ?? null : null,
+    })
+    : null
+  if (pokemonHubSessionRequestLogger) {
+    const startedAt = performance.now()
+    let responseFinished = false
+    const logEvent = `${pokemonHubSessionRoute.kind}.http`
+    if (pokemonHubSessionRoute.kind === 'snapshot') pokemonHubSessionRequestLogger.info(`${logEvent}.received`, { contentLength: request.headers['content-length'] ?? null, contentType: request.headers['content-type'] ?? null })
+    request.once('aborted', () => pokemonHubSessionRequestLogger.error(`${logEvent}.request-aborted`, { elapsedMs: elapsedMilliseconds(startedAt) }))
+    request.once('error', error => pokemonHubSessionRequestLogger.error(`${logEvent}.request-error`, { elapsedMs: elapsedMilliseconds(startedAt), error: errorDetails(error) }))
+    response.once('finish', () => {
+      responseFinished = true
+      if (pokemonHubSessionRoute.kind === 'snapshot') pokemonHubSessionRequestLogger.info(`${logEvent}.response`, { status: response.statusCode, elapsedMs: elapsedMilliseconds(startedAt), headersSent: response.headersSent, writableEnded: response.writableEnded })
+    })
+    response.once('close', () => {
+      if (!responseFinished) pokemonHubSessionRequestLogger.error(`${logEvent}.response-closed`, { status: response.statusCode, elapsedMs: elapsedMilliseconds(startedAt), headersSent: response.headersSent, writableEnded: response.writableEnded })
+    })
+  }
   const saveLayoutRoute = parseSaveLayoutRoute(route.pathname)
   const isSaveProfileGamesRoute = route.pathname === '/api/pokemon-hub/save-profile-games'
   const pokemonHubProfilesRoute = route.pathname === '/api/pokemon-hub/profiles'
@@ -197,7 +227,7 @@ async function handleRequest(request, response, config) {
     || ((request.method === 'PATCH' || request.method === 'DELETE') && pokemonHubProfileRoute)
     || (request.method === 'PUT' && (isControlProfileRoute || saveRoute))
     || (request.method === 'POST' && ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute?.kind))
-    || (pokemonHubSessionRoute && ((request.method === 'POST' && ['open', 'attach', 'heartbeat', 'snapshot'].includes(pokemonHubSessionRoute.kind)) || (request.method === 'DELETE' && ['detach', 'close'].includes(pokemonHubSessionRoute.kind))))
+    || (pokemonHubSessionRoute && ((request.method === 'POST' && ['open', 'attach', 'heartbeat', 'snapshot', 'close-command'].includes(pokemonHubSessionRoute.kind)) || (request.method === 'DELETE' && ['detach', 'close'].includes(pokemonHubSessionRoute.kind))))
     || (request.method === 'PATCH' && gameProfileRoute)
     || (request.method === 'DELETE' && gameProfileRoute)
   if (!supportedMethod) {
@@ -243,7 +273,7 @@ async function handleRequest(request, response, config) {
   }
 
   if (pokemonHubSessionRoute) {
-    await handlePokemonHubSession(request, response, config, pokemonHubSessionRoute)
+    await handlePokemonHubSession(request, response, config, pokemonHubSessionRoute, pokemonHubSessionRequestLogger)
     return
   }
 
@@ -651,7 +681,7 @@ function parsePokemonHubRoute(pathname) {
 }
 
 function parsePokemonHubSessionRoute(pathname) {
-  const match = /^\/api\/profiles\/([^/]+)\/pokemon-hub\/sessions(?:\/([^/]+)(?:\/(sources)(?:\/([^/]+))?|\/(heartbeat|snapshots))?)?$/.exec(pathname)
+  const match = /^\/api\/profiles\/([^/]+)\/pokemon-hub\/sessions(?:\/([^/]+)(?:\/(sources)(?:\/([^/]+))?|\/(heartbeat|snapshots|close))?)?$/.exec(pathname)
   if (!match) return null
   const [, profileId, sessionId, sources, sourceId, action] = match
   if (!sessionId) return { profileId, kind: 'open' }
@@ -659,6 +689,7 @@ function parsePokemonHubSessionRoute(pathname) {
   if (sources) return { profileId, sessionId, kind: 'attach' }
   if (action === 'heartbeat') return { profileId, sessionId, kind: 'heartbeat' }
   if (action === 'snapshots') return { profileId, sessionId, kind: 'snapshot' }
+  if (action === 'close') return { profileId, sessionId, kind: 'close-command' }
   return { profileId, sessionId, kind: 'close' }
 }
 
@@ -685,7 +716,22 @@ async function getSaveLayout(response, config, { gameId, profileId }) {
   }
   try {
     const inspection = adapter.inspect(save.bytes, layout)
-    json(response, 200, { layout: { id: layout.id, party: { slots: layout.party.slots }, boxes: layout.boxes }, party: inspection.party, boxes: inspection.boxes })
+    let snapshot
+    try {
+      snapshot = await config.pokemonHubSnapshotCoordinator.getSnapshot({ profileId, sourceKey: `save:${profileId}:${gameId}` })
+    } catch (error) {
+      if (error.code !== 'SOURCE_NOT_ADOPTED') throw error
+      if (typeof adapter.readAllSlots === 'function') snapshot = await adoptPokemonHubSave({ coordinator: config.pokemonHubSnapshotCoordinator, profileId, gameId, saved: save, adapter, layout })
+    }
+    const pokemonInstanceIds = new Map((snapshot?.placements ?? []).map(placement => [pokemonHubLocationKey(placement.location), placement.pokemonInstanceId]))
+    const withPokemonId = (slot, location) => slot.occupied && pokemonInstanceIds.get(pokemonHubLocationKey(location))
+      ? { ...slot, pokemonInstanceId: pokemonInstanceIds.get(pokemonHubLocationKey(location)) }
+      : slot
+    json(response, 200, {
+      layout: { id: layout.id, party: { slots: layout.party.slots }, boxes: layout.boxes },
+      party: inspection.party.map((slot, index) => withPokemonId(slot, { kind: 'game', area: 'party', slot: index })),
+      boxes: inspection.boxes.map((box, boxIndex) => ({ ...box, slots: box.slots.map((slot, index) => withPokemonId(slot, { kind: 'game', area: 'box', box: boxIndex, slot: index })) })),
+    })
   } catch (error) {
     console.error('[Pokemon Hub] save layout inspection failed', { gameId, profileId, code: error.code ?? 'SAVE_LAYOUT_READ_FAILED', message: error.message })
     json(response, 409, { error: 'Save layout could not be read.', code: error.code ?? 'SAVE_LAYOUT_READ_FAILED' })
@@ -731,7 +777,8 @@ async function handlePokemonHub(request, response, config, route) {
   } catch (error) { jsonPokemonHubError(response, error) }
 }
 
-async function handlePokemonHubSession(request, response, config, route) {
+async function handlePokemonHubSession(request, response, config, route, logger = null) {
+  const trace = logger ?? config.pokemonHubLogger
   try {
     if (!config.pokemonHubSessionService) throw serverError('POKEMON_HUB_SESSION_UNAVAILABLE', 'Pokemon Hub sessions are unavailable.')
     if (route.kind === 'open') {
@@ -758,7 +805,41 @@ async function handlePokemonHubSession(request, response, config, route) {
       return
     }
 
-    const body = await readJsonBody(request, route.kind === 'snapshot' ? pokemonHubSnapshotMaximumBytes : defaultJsonBodyMaximumBytes)
+    let body
+    try {
+      body = await readJsonBody(request, ['snapshot', 'close-command'].includes(route.kind) ? pokemonHubSnapshotMaximumBytes : defaultJsonBodyMaximumBytes)
+    } catch (error) {
+      if (route.kind === 'snapshot' && typeof config.pokemonHubSessionService.getCanonicalSnapshot === 'function') {
+        trace.error('snapshot.http.body-read-failed', { error: errorDetails(error) })
+        try {
+          const snapshot = await config.pokemonHubSessionService.getCanonicalSnapshot({ profileId: route.profileId, sessionId: route.sessionId })
+          trace.warn('snapshot.http.corrected-after-body-read-failure', { snapshot: summarizeCanonicalSnapshot(snapshot) })
+          json(response, 409, snapshot)
+          return
+        } catch (correctionError) {
+          trace.error('snapshot.http.correction-read-failed', { bodyError: errorDetails(error), correctionError: errorDetails(correctionError) })
+          throw correctionError
+        }
+      }
+      throw error
+    }
+    if (route.kind === 'close-command') {
+      const idempotencyKey = request.headers['idempotency-key']
+      if (typeof idempotencyKey !== 'string' || idempotencyKey.length === 0) throw serverError('IDEMPOTENCY_KEY_REQUIRED', 'Pokemon Hub close idempotency key is required.')
+      const result = await config.pokemonHubSessionService.closeCanonicalSession({
+        profileId: route.profileId,
+        sessionId: route.sessionId,
+        snapshot: body,
+        idempotencyKey,
+        logger: trace,
+        acquireSource: sourceKey => acquirePokemonHubSnapshot(config, route.profileId, { sourceKey, workspaceId: route.sessionId }, trace),
+        flushOutgoingSource: source => flushPokemonHubSessionSource(config, route.profileId, source, trace),
+        releaseSource: source => releasePokemonHubSessionSourceLease(config, route.profileId, route.sessionId, source, trace),
+      })
+      if (result.status === 'corrected') json(response, 409, result.snapshot)
+      else empty(response, 200)
+      return
+    }
     if (route.kind === 'attach') {
       json(response, 200, await config.pokemonHubSessionService.attach({
         profileId: route.profileId,
@@ -769,26 +850,78 @@ async function handlePokemonHubSession(request, response, config, route) {
       return
     }
     if (route.kind === 'heartbeat') {
-      json(response, 200, await config.pokemonHubSessionService.heartbeat({ profileId: route.profileId, sessionId: route.sessionId, sequence: body.sequence }))
+      const result = await config.pokemonHubSessionService.heartbeat({ profileId: route.profileId, sessionId: route.sessionId, sequence: body.sequence })
+      json(response, 200, result)
       return
     }
-    const result = await config.pokemonHubSessionService.syncSnapshot({ profileId: route.profileId, sessionId: route.sessionId, snapshot: body })
-    const { dirtySourceKeys = [], ...payload } = result
-    for (const sourceKey of dirtySourceKeys) config.pokemonHubSaveFlush.markDirty({ profileId: route.profileId, sourceKey })
-    json(response, 200, payload)
-  } catch (error) { jsonPokemonHubError(response, error) }
+    const idempotencyKey = request.headers['idempotency-key']
+    if (typeof idempotencyKey !== 'string' || idempotencyKey.length === 0) throw serverError('SNAPSHOT_IDEMPOTENCY_REQUIRED', 'Snapshot idempotency key is required.')
+    trace.info('snapshot.http.body-read', { snapshot: summarizeCanonicalSnapshot(body) })
+    let result
+    try {
+      result = await config.pokemonHubSessionService.syncCanonicalSnapshot({
+        profileId: route.profileId,
+        sessionId: route.sessionId,
+        snapshot: body,
+        idempotencyKey,
+        logger: trace,
+        acquireSource: sourceKey => acquirePokemonHubSnapshot(config, route.profileId, { sourceKey, workspaceId: route.sessionId }, trace),
+        flushOutgoingSource: source => flushPokemonHubSessionSource(config, route.profileId, source, trace),
+        releaseSource: source => releasePokemonHubSessionSourceLease(config, route.profileId, route.sessionId, source, trace),
+      })
+    } catch (error) {
+      trace.error('snapshot.http.session-sync-failed', { error: errorDetails(error) })
+      throw error
+    }
+    if (result.status === 'accepted') {
+      for (const sourceKey of result.dirtySourceKeys ?? []) config.pokemonHubSaveFlush.markDirty({ profileId: route.profileId, sourceKey })
+      trace.info('snapshot.http.accepted', { dirtySourceKeys: result.dirtySourceKeys ?? [] })
+      empty(response, 200)
+      return
+    }
+    trace.warn('snapshot.http.corrected', { snapshot: summarizeCanonicalSnapshot(result.snapshot) })
+    json(response, 409, result.snapshot)
+  } catch (error) {
+    if (route.kind === 'snapshot') trace.error('snapshot.http.failed', { error: errorDetails(error) })
+    if (route.kind === 'heartbeat') trace.error('heartbeat.http.failed', { error: errorDetails(error) })
+    jsonPokemonHubError(response, error)
+  }
 }
 
 async function releasePokemonHubSessionSources(config, profileId, sessionId, sources, { ignoreLeaseInvalid = false } = {}) {
   for (const source of sources) {
-    const flushed = await config.pokemonHubSaveFlush.flushSource({ profileId, sourceKey: source.sourceKey })
-    if (flushed.status === 'failed') throw serverError('SAVE_FLUSH_FAILED', 'Pokemon Hub save could not be flushed before source release.')
+    await flushPokemonHubSessionSource(config, profileId, source)
     try {
       await config.pokemonHubSnapshotCoordinator.release({ profileId, sourceKey: source.sourceKey, workspaceId: sessionId, sourceSessionId: source.sourceSessionId, leaseToken: source.leaseToken })
     } catch (error) {
       // An expired workspace no longer owns a lease that another cleanup path has already released.
       if (!ignoreLeaseInvalid || error.code !== 'LEASE_INVALID') throw error
     }
+  }
+}
+
+async function flushPokemonHubSessionSource(config, profileId, source, logger = config.pokemonHubLogger, generation) {
+  if (!source.sourceKey.startsWith(`save:${profileId}:`)) return
+  logger.info('snapshot.http.save-flush-started', { profileId, sourceKey: source.sourceKey })
+  try {
+    const flushed = await config.pokemonHubSaveFlush.flushSource({ profileId, sourceKey: source.sourceKey, ...(generation === undefined ? {} : { generation }) })
+    logger.info('snapshot.http.save-flush-finished', { profileId, sourceKey: source.sourceKey, status: flushed.status })
+    if (flushed.status === 'failed') throw serverError('SAVE_FLUSH_FAILED', 'Pokemon Hub save could not be flushed before source release.')
+  } catch (error) {
+    logger.error('snapshot.http.save-flush-failed', { profileId, sourceKey: source.sourceKey, error: errorDetails(error) })
+    throw error
+  }
+}
+
+async function releasePokemonHubSessionSourceLease(config, profileId, sessionId, source, logger = config.pokemonHubLogger) {
+  logger.info('snapshot.http.lease-release-started', { profileId, sessionId, sourceKey: source.sourceKey })
+  try {
+    const released = await config.pokemonHubSnapshotCoordinator.release({ profileId, sourceKey: source.sourceKey, workspaceId: sessionId, sourceSessionId: source.sourceSessionId, leaseToken: source.leaseToken })
+    logger.info('snapshot.http.lease-release-finished', { profileId, sessionId, sourceKey: source.sourceKey, released: released.released ?? null })
+    return released
+  } catch (error) {
+    logger.error('snapshot.http.lease-release-failed', { profileId, sessionId, sourceKey: source.sourceKey, error: errorDetails(error) })
+    throw error
   }
 }
 
@@ -844,7 +977,7 @@ function jsonPokemonHubProfileError(response, error) {
 }
 
 function jsonPokemonHubError(response, error) {
-  const status = error.code === 'PROFILE_NOT_FOUND' || error.code === 'SOURCE_NOT_ADOPTED' ? 404 : error.code === 'SESSION_INVALID' ? 410 : error.code === 'POKEMON_HUB_REVISION_CONFLICT' || error.code === 'SNAPSHOT_STALE' ? 412 : error.code === 'SOURCE_RESERVED' || error.code === 'LEASE_INVALID' || error.code === 'SESSION_SOURCE_INVALID' || error.code === 'POKEMON_HUB_GAME_ACTIVE' || error.code === 'POKEMON_HUB_DESTINATION_OCCUPIED' || error.code === 'POKEMON_HUB_SOURCE_EMPTY' ? 409 : 400
+  const status = error.code === 'PROFILE_NOT_FOUND' || error.code === 'SOURCE_NOT_ADOPTED' ? 404 : error.code === 'SESSION_INVALID' ? 410 : error.code === 'POKEMON_HUB_REVISION_CONFLICT' || error.code === 'SNAPSHOT_STALE' ? 412 : error.code === 'SOURCE_RESERVED' || error.code === 'LEASE_INVALID' || error.code === 'SESSION_SOURCE_INVALID' || error.code === 'POKEMON_HUB_GAME_ACTIVE' || error.code === 'POKEMON_HUB_DESTINATION_OCCUPIED' || error.code === 'POKEMON_HUB_SOURCE_EMPTY' || error.code === 'CLOSE_IDEMPOTENCY_CONFLICT' || error.code === 'CLOSE_IN_PROGRESS' || error.code === 'CLOSE_GENERATION_FENCED' || error.code === 'SESSION_TRANSITION_IN_PROGRESS' || error.code === 'SESSION_TRANSITION_FENCED' ? 409 : 400
   json(response, status, { error: error.message, ...(typeof error.code === 'string' ? { code: error.code } : {}) })
 }
 
@@ -871,7 +1004,7 @@ async function handleSave(request, response, config, { profileId, gameId }) {
   try {
     const saved = await config.saveStore.put(profileId, gameId, bytes, expectedRevision)
     await adoptSaveIfSupported(config, profileId, entry, { bytes, revision: saved.revision })
-    json(response, expectedRevision === null ? 201 : 200, saved)
+    json(response, expectedRevision === null ? 201 : 200, { revision: saved.revision, sha256: saved.sha256 })
   } catch (error) {
     json(response, error.code === 'SAVE_REVISION_CONFLICT' ? 412 : 400, { error: error.message })
   }
@@ -1156,6 +1289,16 @@ if (isMainModule()) {
   void startMainServer()
 }
 
+function empty(response, status) {
+  response.writeHead(status, {
+    'Cache-Control': 'no-store',
+    'Content-Length': 0,
+    'X-Emulator-Hub-Backend': '1',
+    'X-Content-Type-Options': 'nosniff',
+  })
+  response.end()
+}
+
 async function readProjectedPokemonHubProfiles(config) {
   const profiles = await config.pokemonHubProfileStore.list()
   if (typeof config.pokemonHubSnapshotCoordinator.getSnapshot !== 'function') return profiles
@@ -1194,32 +1337,62 @@ async function resolvePokemonHubSaveSource(config, { profileId, sourceKey }) {
   return { gameId, adapter, layout }
 }
 
-async function acquirePokemonHubSnapshot(config, profileId, request) {
+async function acquirePokemonHubSnapshot(config, profileId, request, logger = config.pokemonHubLogger) {
   const input = { ...request, profileId }
-  try { return await config.pokemonHubSnapshotCoordinator.acquire(input) } catch (error) {
+  logger.info('snapshot.http.lease-acquire-started', { profileId, workspaceId: request.workspaceId ?? null, sourceKey: request.sourceKey })
+  try {
+    const acquired = await config.pokemonHubSnapshotCoordinator.acquire(input)
+    logger.info('snapshot.http.lease-acquired', { profileId, workspaceId: request.workspaceId ?? null, sourceKey: request.sourceKey, expiresAt: acquired.expiresAt ?? null })
+    return acquired
+  } catch (error) {
+    logger.warn('snapshot.http.lease-acquire-initial-failed', { profileId, workspaceId: request.workspaceId ?? null, sourceKey: request.sourceKey, error: errorDetails(error) })
     if (error.code === 'SOURCE_FLUSH_PENDING') {
-      await config.pokemonHubSaveFlush.flushExpiredLeases()
-      return config.pokemonHubSnapshotCoordinator.acquire(input)
+      try {
+        logger.info('snapshot.http.expired-lease-flush-started', { profileId, sourceKey: request.sourceKey })
+        await config.pokemonHubSaveFlush.flushExpiredLeases()
+        const acquired = await config.pokemonHubSnapshotCoordinator.acquire(input)
+        logger.info('snapshot.http.lease-acquired-after-expired-flush', { profileId, workspaceId: request.workspaceId ?? null, sourceKey: request.sourceKey, expiresAt: acquired.expiresAt ?? null })
+        return acquired
+      } catch (retryError) {
+        logger.error('snapshot.http.lease-acquire-after-expired-flush-failed', { profileId, workspaceId: request.workspaceId ?? null, sourceKey: request.sourceKey, error: errorDetails(retryError) })
+        throw retryError
+      }
     }
     if (error.code !== 'SOURCE_NOT_ADOPTED') throw error
     const hubProfileId = hubProfileIdFromSourceKey(request.sourceKey)
     if (hubProfileId) {
-      await config.pokemonHubProfileStore.bindOwner(hubProfileId, profileId)
-      await config.pokemonHubSnapshotCoordinator.ensureHubSource({
-        profileId,
-        sourceKey: request.sourceKey,
-        hubProfileId,
-        minimumSlotCount: 60,
-      })
-      return config.pokemonHubSnapshotCoordinator.acquire(input)
+      try {
+        logger.info('snapshot.http.hub-source-adoption-started', { profileId, sourceKey: request.sourceKey, hubProfileId })
+        await config.pokemonHubProfileStore.bindOwner(hubProfileId, profileId)
+        await config.pokemonHubSnapshotCoordinator.ensureHubSource({
+          profileId,
+          sourceKey: request.sourceKey,
+          hubProfileId,
+          minimumSlotCount: 60,
+        })
+        const acquired = await config.pokemonHubSnapshotCoordinator.acquire(input)
+        logger.info('snapshot.http.hub-source-adopted', { profileId, workspaceId: request.workspaceId ?? null, sourceKey: request.sourceKey, expiresAt: acquired.expiresAt ?? null })
+        return acquired
+      } catch (adoptionError) {
+        logger.error('snapshot.http.hub-source-adoption-failed', { profileId, workspaceId: request.workspaceId ?? null, sourceKey: request.sourceKey, error: errorDetails(adoptionError) })
+        throw adoptionError
+      }
     }
-    const target = await resolvePokemonHubSaveSource(config, { profileId, sourceKey: request.sourceKey })
-    if (!target) throw error
-    if (await config.profileStore.get(target.gameId, profileId) === null) throw serverError('PROFILE_NOT_FOUND', 'Profile was not found.')
-    const saved = await config.saveStore.get(profileId, target.gameId)
-    if (!saved) throw serverError('SAVE_MISSING', 'Save was not found.')
-    await adoptPokemonHubSave({ coordinator: config.pokemonHubSnapshotCoordinator, profileId, gameId: target.gameId, saved, adapter: target.adapter, layout: target.layout })
-    return config.pokemonHubSnapshotCoordinator.acquire(input)
+    try {
+      logger.info('snapshot.http.save-source-adoption-started', { profileId, workspaceId: request.workspaceId ?? null, sourceKey: request.sourceKey })
+      const target = await resolvePokemonHubSaveSource(config, { profileId, sourceKey: request.sourceKey })
+      if (!target) throw error
+      if (await config.profileStore.get(target.gameId, profileId) === null) throw serverError('PROFILE_NOT_FOUND', 'Profile was not found.')
+      const saved = await config.saveStore.get(profileId, target.gameId)
+      if (!saved) throw serverError('SAVE_MISSING', 'Save was not found.')
+      await adoptPokemonHubSave({ coordinator: config.pokemonHubSnapshotCoordinator, profileId, gameId: target.gameId, saved, adapter: target.adapter, layout: target.layout })
+      const acquired = await config.pokemonHubSnapshotCoordinator.acquire(input)
+      logger.info('snapshot.http.save-source-adopted', { profileId, workspaceId: request.workspaceId ?? null, sourceKey: request.sourceKey, gameId: target.gameId, expiresAt: acquired.expiresAt ?? null })
+      return acquired
+    } catch (adoptionError) {
+      logger.error('snapshot.http.save-source-adoption-failed', { profileId, workspaceId: request.workspaceId ?? null, sourceKey: request.sourceKey, error: errorDetails(adoptionError) })
+      throw adoptionError
+    }
   }
 }
 
@@ -1229,28 +1402,110 @@ function hubProfileIdFromSourceKey(sourceKey) {
   return hubProfileId.length > 0 && !hubProfileId.includes(':') ? hubProfileId : null
 }
 
+function normalizePokemonHubLogger(logger) {
+  if (logger && typeof logger.info === 'function' && typeof logger.warn === 'function' && typeof logger.error === 'function') {
+    return {
+      info() {},
+      warn() {},
+      error(event, context = {}) { logger.error(event, context) },
+    }
+  }
+  return {
+    info() {},
+    warn() {},
+    error(event, context = {}) { console.error(pokemonHubLogLabel(context), { timestamp: new Date().toISOString(), level: 'error', event, ...context }) },
+  }
+}
+
+function pokemonHubLogLabel(context) {
+  return context.requestType ? `[Pokemon Hub ${context.requestType}]` : '[Pokemon Hub internal]'
+}
+
+function childPokemonHubLogger(logger, context) {
+  const parent = normalizePokemonHubLogger(logger)
+  return {
+    info(event, details = {}) { parent.info(event, { ...context, ...details }) },
+    warn(event, details = {}) { parent.warn(event, { ...context, ...details }) },
+    error(event, details = {}) { parent.error(event, { ...context, ...details }) },
+  }
+}
+
+function summarizeCanonicalSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return { type: snapshot === null ? 'null' : typeof snapshot }
+  const panes = Array.isArray(snapshot.panes) ? snapshot.panes : null
+  return {
+    revision: Number.isInteger(snapshot.revision) ? snapshot.revision : null,
+    paneCount: panes?.length ?? null,
+    panes: panes?.map(pane => pane === null ? null : {
+      pane: pane.pane ?? null,
+      profileType: pane.profile?.type ?? null,
+      gameId: pane.profile?.gameId ?? null,
+      hubProfileId: pane.profile?.hubProfileId ?? null,
+      partyCount: Array.isArray(pane.party) ? pane.party.length : null,
+      boxCount: Array.isArray(pane.boxes) ? pane.boxes.length : null,
+      hubCount: Array.isArray(pane.hub) ? pane.hub.length : null,
+    }) ?? null,
+  }
+}
+
+function errorDetails(error) {
+  return {
+    name: error?.name ?? 'Error',
+    code: error?.code ?? null,
+    message: error?.message ?? String(error),
+    stack: error?.stack ?? null,
+  }
+}
+
+function elapsedMilliseconds(startedAt) {
+  return Math.round((performance.now() - startedAt) * 100) / 100
+}
+
 function serverError(code, message) { const error = new Error(message); error.code = code; return error }
+
+export async function bootstrapHubServer({
+  persistence,
+  host,
+  port,
+  legacyMigrationOptions,
+  migrateLegacy = migrateLegacyJsonData,
+  makeServer = () => createHubServer({ persistence }),
+  onListenError = error => reportListenFailure({ error, host, port, persistence }),
+  onListening = () => {},
+} = {}) {
+  if (!persistence) throw new TypeError('Persistence is required to bootstrap the backend.')
+  try {
+    await persistence.connect()
+    await migrateLegacy({ persistence, ...legacyMigrationOptions })
+    const server = makeServer()
+    server.once('error', error => { void onListenError(error) })
+    server.listen(port, host, onListening)
+    return server
+  } catch (error) {
+    try { await persistence.close() } catch (closeError) { console.error('[Emulator Hub] Redis connection cleanup failed', { message: closeError.message }) }
+    throw error
+  }
+}
 
 async function startMainServer() {
   const port = Number.parseInt(process.env.PORT ?? '3000', 10)
   const host = process.env.HOST ?? '127.0.0.1'
   const persistence = createRedisPersistence(redisConfiguration())
   try {
-    await persistence.connect()
-    await migrateLegacyJsonData({
+    await bootstrapHubServer({
       persistence,
-      profilesPath: defaultProfilesPath,
-      controlProfilePath: defaultControlProfilePath,
-      pokemonHubProfilesPath: defaultPokemonHubProfilesPath,
-      pokemonHubPath: defaultPokemonHubPath,
-      romRegistryPath: defaultRomRegistryPath,
-    })
-    const server = createHubServer({ persistence })
-    server.once('error', error => {
-      void reportListenFailure({ error, host, port, persistence })
-    })
-    server.listen(port, host, () => {
-      console.log(`Emulator Hub backend listening on http://${host}:${port}`)
+      host,
+      port,
+      legacyMigrationOptions: {
+        profilesPath: defaultProfilesPath,
+        controlProfilePath: defaultControlProfilePath,
+        pokemonHubProfilesPath: defaultPokemonHubProfilesPath,
+        pokemonHubPath: defaultPokemonHubPath,
+        romRegistryPath: defaultRomRegistryPath,
+      },
+      onListening: () => {
+        console.log(`Emulator Hub backend listening on http://${host}:${port}`)
+      },
     })
   } catch (error) {
     console.error(error.message)

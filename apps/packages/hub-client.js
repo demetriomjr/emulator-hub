@@ -101,16 +101,51 @@ export function heartbeatPokemonHubSession(profileId, sessionId, sequence) {
   return postPokemonHubSession(profileId, `/${encodeURIComponent(sessionId)}/heartbeat`, { sequence })
 }
 
-export function syncPokemonHubSessionSnapshot(profileId, sessionId, snapshot) {
-  return postPokemonHubSession(profileId, `/${encodeURIComponent(sessionId)}/snapshots`, snapshot)
+export async function syncPokemonHubSessionSnapshot(profileId, sessionId, snapshot, idempotencyKey) {
+  if (typeof idempotencyKey !== 'string' || idempotencyKey.length === 0) throw new TypeError('Pokemon Hub snapshot idempotency key is required')
+  const response = await fetch(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/sessions/${encodeURIComponent(sessionId)}/snapshots`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(snapshot),
+  })
+  if (response.status === 409) return response.json()
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    const error = new Error(body.error || `Request failed (${response.status})`)
+    if (typeof body.code === 'string') error.code = body.code
+    throw error
+  }
+  if (response.status !== 200 || await response.text() !== '') throw new Error('Invalid Pokemon Hub snapshot response')
+  return null
 }
 
 export async function detachPokemonHubSessionSource(profileId, sessionId, sourceId) {
   return deletePokemonHubSession(profileId, `/${encodeURIComponent(sessionId)}/sources/${encodeURIComponent(sourceId)}`)
 }
 
-export async function closePokemonHubSession(profileId, sessionId) {
-  return deletePokemonHubSession(profileId, `/${encodeURIComponent(sessionId)}`)
+export async function closePokemonHubSession(profileId, sessionId, snapshot, idempotencyKey) {
+  if (!snapshot || typeof snapshot !== 'object' || !Number.isInteger(snapshot.revision) || !Array.isArray(snapshot.panes)) throw new TypeError('Pokemon Hub close snapshot is required')
+  if (typeof idempotencyKey !== 'string' || idempotencyKey.length === 0) throw new TypeError('Pokemon Hub close idempotency key is required')
+  const response = await fetch(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/sessions/${encodeURIComponent(sessionId)}/close`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(snapshot),
+  })
+  if (response.status === 409) {
+    const body = await response.json()
+    if (Number.isInteger(body?.revision) && Array.isArray(body?.panes)) return body
+    const error = new Error(body?.error || 'Pokemon Hub session close conflicted')
+    if (typeof body?.code === 'string') error.code = body.code
+    throw error
+  }
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    const error = new Error(body.error || `Request failed (${response.status})`)
+    if (typeof body.code === 'string') error.code = body.code
+    throw error
+  }
+  if (response.status !== 200 || await response.text() !== '') throw new Error('Invalid Pokemon Hub close response')
+  return null
 }
 
 function profileCollectionUrl(gameId) {

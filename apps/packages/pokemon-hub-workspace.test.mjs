@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { addWorkspacePane, choosePaneSource, createPokemonHubWorkspaceState, hasAvailableSaveProfile, isPaneSourceAvailable, removeWorkspacePane } from './pokemon-hub-workspace.mjs'
+import { addWorkspacePane, choosePaneSource, createPokemonHubWorkspaceState, hasAvailableSaveProfile, isCompletePaneSource, isPaneSourceAvailable, removeWorkspacePane } from './pokemon-hub-workspace.mjs'
 
 test('opens directly into an empty Hub workspace without selecting an Emulator Hub profile', () => {
   assert.deepEqual(createPokemonHubWorkspaceState(), { profile: null, panes: [null], boxes: {} })
@@ -83,4 +83,13 @@ test('releases a removed source and ignores incomplete source type choices when 
   const reused = choosePaneSource([...released, null], 1, existing)
   assert.equal(reused.error, '')
   assert.deepEqual(reused.panes, [null, existing])
+})
+
+test('keeps an incomplete source choice out of structural workspace submission', () => {
+  assert.equal(isCompletePaneSource(null), false)
+  assert.equal(isCompletePaneSource({ kind: 'game' }), false)
+  assert.equal(isCompletePaneSource({ kind: 'game', gameId: 'pokemon-emerald' }), false)
+  assert.equal(isCompletePaneSource({ kind: 'game', gameId: 'pokemon-emerald', profileId: 'may' }), true)
+  assert.equal(isCompletePaneSource({ kind: 'hub' }), false)
+  assert.equal(isCompletePaneSource({ kind: 'hub', hubProfileId: 'living-dex' }), true)
 })

@@ -75,3 +75,67 @@ test('flattens batched Redis scan results into namespaced persistence keys', asy
     'pokemon-hub:snapshot-lease:profile-b:save-b',
   ])
 })
+
+test('namespaces every key passed to a shared Lua and memory transition descriptor', async () => {
+  const calls = []
+  const client = {
+    isOpen: false,
+    on() {},
+    async connect() { this.isOpen = true },
+    async quit() { this.isOpen = false },
+    async eval(script, options) { calls.push([script, options]); return ['accepted', '1'] },
+  }
+  const persistence = createRedisPersistence({ url: 'redis://example.test:6379', namespace: 'test-namespace', client })
+
+  const transition = {
+    lua: 'return { ARGV[1], KEYS[1] }',
+    memory: async () => ['memory'],
+  }
+  const result = await persistence.eval(transition, {
+    keys: ['pokemon-hub:v2:{ph:profile}:session:session-1', 'pokemon-hub:v2:{ph:profile}:record:pokemon-1'],
+    arguments: ['operation-1'],
+  })
+
+  assert.deepEqual(result, ['accepted', '1'])
+  assert.deepEqual(calls, [[
+    'return { ARGV[1], KEYS[1] }',
+    {
+      keys: [
+        'test-namespace:pokemon-hub:v2:{ph:profile}:session:session-1',
+        'test-namespace:pokemon-hub:v2:{ph:profile}:record:pokemon-1',
+      ],
+      arguments: ['operation-1'],
+    },
+  ]])
+})
+
+test('memory EVAL handlers execute atomically across concurrent transitions', async () => {
+  const { createMemoryRedisPersistence } = await import('./redis-persistence.mjs')
+  const persistence = createMemoryRedisPersistence({ namespace: 'test-namespace' })
+  await persistence.set('counter', '0')
+
+  const increment = {
+    lua: 'return 1',
+    memory: async ({ keys, get, set }) => {
+    const value = Number(await get(keys[0]))
+    await Promise.resolve()
+    await set(keys[0], String(value + 1))
+    return value + 1
+    },
+  }
+
+  const results = await Promise.all(Array.from({ length: 20 }, () => persistence.eval(increment, { keys: ['counter'] })))
+
+  assert.equal(new Set(results).size, 20)
+  assert.equal(await persistence.get('counter'), '20')
+})
+
+test('memory set cleanup uses the normalized key when called with a namespaced key', async () => {
+  const { createMemoryRedisPersistence } = await import('./redis-persistence.mjs')
+  const persistence = createMemoryRedisPersistence({ namespace: 'test-namespace' })
+  await persistence.addToSet('set', 'member')
+  await persistence.removeFromSet('test-namespace:set', 'member')
+
+  assert.deepEqual(await persistence.members('set'), [])
+  assert.deepEqual(await persistence.keys(''), [])
+})

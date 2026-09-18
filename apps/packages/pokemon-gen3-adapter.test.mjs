@@ -154,6 +154,27 @@ test('extracts complete native Party and PC records for backend-only adoption', 
   assert.equal(records.find(slot => slot.location.area === 'party' && slot.location.slot === 1).record, null)
 })
 
+test('writes a compact full Party and clears its unused native records', () => {
+  const bytes = buildGen3Save({ firstIndex: 3, secondIndex: 7 })
+  const layout = { sectionId: 1, countOffset: 0x234, offset: 0x238, slots: 6, recordBytes: 100 }
+  const first = Buffer.alloc(100, 0xa1)
+  const second = Buffer.alloc(100, 0xb2)
+  buildPcRecord({ personality: 0, originalTrainerId: 0x56781234, species: 25 }).copy(first)
+  buildPcRecord({ personality: 0, originalTrainerId: 0x56781234, species: 64 }).copy(second)
+  writePartyCount(bytes, 0xe000, layout.countOffset, 1)
+  writePartyRecord(bytes, 0xe000, layout.offset, 0, Buffer.alloc(100, 0xcc))
+  writePartyRecord(bytes, 0xe000, layout.offset, 4, Buffer.alloc(100, 0xdd))
+  refreshCopyChecksums(bytes, 0xe000)
+
+  const rewritten = pokemonGen3Adapter.writeParty(bytes, layout, [first, second])
+
+  assert.deepEqual(rewritten.subarray(0xe000 + 0x1000 + layout.countOffset, 0xe000 + 0x1000 + layout.countOffset + 4), Buffer.from([2, 0, 0, 0]))
+  assert.deepEqual(rewritten.subarray(0xe000 + 0x1000 + layout.offset, 0xe000 + 0x1000 + layout.offset + 100), first)
+  assert.deepEqual(rewritten.subarray(0xe000 + 0x1000 + layout.offset + 100, 0xe000 + 0x1000 + layout.offset + 200), second)
+  assert.ok(rewritten.subarray(0xe000 + 0x1000 + layout.offset + 200, 0xe000 + 0x1000 + layout.offset + 600).every(byte => byte === 0))
+  assert.deepEqual(pokemonGen3Adapter.inspect(rewritten, { party: layout }).party.map(slot => slot.species), [25, 64, undefined, undefined, undefined, undefined])
+})
+
 function buildGen3Save({ firstIndex, secondIndex }) {
   const bytes = Buffer.alloc(0x20000, 0xff)
   writeCopy(bytes, 0, firstIndex)

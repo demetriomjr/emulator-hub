@@ -3,6 +3,8 @@ import test from 'node:test'
 
 import { createPokemonHubEventStore } from './pokemon-hub-event-store.mjs'
 import { createPokemonHubSnapshotCoordinator } from './pokemon-hub-snapshot-coordinator.mjs'
+import { validatePokemonHubTransferPlacement } from './pokemon-hub-transfer-placement-policy.mjs'
+import { pokemonHubRedisKeys } from './pokemon-hub-redis-keys.mjs'
 import { createMemoryRedisPersistence } from './redis-persistence.mjs'
 
 const profileId = 'profile-may'
@@ -118,9 +120,56 @@ test('persists a pending save flush until the materialized revision is acknowled
     }],
   })
 
+  const pending = await coordinator.getSaveFlushPlan({ profileId, sourceKey: source.sourceKey })
+  assert.equal(pending.source.needsSaveFlush, true)
+  await assert.rejects(
+    () => coordinator.markSaveFlushed({ profileId, sourceKey: source.sourceKey, sourceRevision: pending.source.sourceRevision - 1, saveRevision: 5 }),
+    error => error.code === 'SOURCE_FLUSH_STALE',
+  )
   assert.equal((await coordinator.getSaveFlushPlan({ profileId, sourceKey: source.sourceKey })).source.needsSaveFlush, true)
-  await coordinator.markSaveFlushed({ profileId, sourceKey: source.sourceKey, saveRevision: 5 })
+  await coordinator.markSaveFlushed({ profileId, sourceKey: source.sourceKey, sourceRevision: pending.source.sourceRevision, saveRevision: 5 })
   assert.equal((await coordinator.getSaveFlushPlan({ profileId, sourceKey: source.sourceKey })).source.needsSaveFlush, false)
+})
+
+test('loads occupied records for a save flush concurrently', async () => {
+  const basePersistence = createMemoryRedisPersistence()
+  let measureRecordReads = false
+  let activeRecordReads = 0
+  let maximumConcurrentRecordReads = 0
+  const persistence = {
+    ...basePersistence,
+    async get(key) {
+      if (measureRecordReads && key.includes(':record:')) {
+        activeRecordReads += 1
+        maximumConcurrentRecordReads = Math.max(maximumConcurrentRecordReads, activeRecordReads)
+        await new Promise(resolve => setImmediate(resolve))
+        activeRecordReads -= 1
+      }
+      return basePersistence.get(key)
+    },
+  }
+  const coordinator = createPokemonHubSnapshotCoordinator({
+    persistence,
+    eventStore: createPokemonHubEventStore({ persistence }),
+    newId: (() => { let value = 0; return () => `record-${++value}` })(),
+  })
+  const source = await coordinator.adopt({
+    profileId,
+    sourceKey: 'save:profile-may:emerald',
+    sourceRevision: 1,
+    adapter: 'gen3-gba-v1',
+    slots: [
+      { location: party(0), record: record(1, { species: 1 }) },
+      { location: party(1), record: record(2, { species: 2 }) },
+      { location: party(2), record: record(3, { species: 3 }) },
+    ],
+  })
+
+  measureRecordReads = true
+  const plan = await coordinator.getSaveFlushPlan({ profileId, sourceKey: source.sourceKey })
+
+  assert.equal(plan.records.size, 3)
+  assert.equal(maximumConcurrentRecordReads, 3)
 })
 
 test('accepts a complete two-source placement snapshot and emits one movement event', async () => {
@@ -159,12 +208,92 @@ test('accepts a complete two-source placement snapshot and emits one movement ev
   assert.equal(movementEvents.filter(event => event.type === 'pokemon.placement-changed').length, 1)
 })
 
+test('accepts a Hub slot reorder while a save pane remains open in the same snapshot', async () => {
+  const { coordinator } = await fixture({ validatePlacementChange: validatePokemonHubTransferPlacement })
+  const game = await coordinator.adopt({
+    profileId,
+    sourceKey: 'save:profile-may:emerald',
+    sourceRevision: 4,
+    adapter: 'gen3-gba-v1',
+    slots: [{ location: { kind: 'game', area: 'box', box: 0, slot: 0 }, record: record(7, { species: 289, shiny: false }) }],
+  })
+  const hubProfileId = '11111111-1111-4111-8111-111111111111'
+  const hubSourceKey = `hub:${hubProfileId}`
+  const hubSnapshot = await coordinator.ensureHubSource({ profileId, sourceKey: hubSourceKey, hubProfileId, minimumSlotCount: 2 })
+  const [gameLease, hubLease] = await Promise.all([
+    coordinator.acquire({ profileId, sourceKey: game.sourceKey, workspaceId: 'workspace-a' }),
+    coordinator.acquire({ profileId, sourceKey: hubSourceKey, workspaceId: 'workspace-a' }),
+  ])
+  const pokemonInstanceId = game.placements[0].pokemonInstanceId
+  const deposited = await coordinator.sync({
+    profileId,
+    workspaceId: 'workspace-a',
+    clientSequence: 1,
+    idempotencyKey: 'move-into-hub',
+    sources: [
+      { sourceKey: game.sourceKey, sourceSessionId: gameLease.sourceSessionId, leaseToken: gameLease.leaseToken, baseRevision: game.sourceRevision, placements: [{ location: { kind: 'game', area: 'box', box: 0, slot: 0 }, pokemonInstanceId: null }] },
+      { sourceKey: hubSourceKey, sourceSessionId: hubLease.sourceSessionId, leaseToken: hubLease.leaseToken, baseRevision: hubSnapshot.sourceRevision, placements: [{ location: hub(hubProfileId, 0), pokemonInstanceId }, { location: hub(hubProfileId, 1), pokemonInstanceId: null }] },
+    ],
+  })
+  const depositedGame = deposited.snapshots.find(snapshot => snapshot.sourceKey === game.sourceKey)
+  const depositedHub = deposited.snapshots.find(snapshot => snapshot.sourceKey === hubSourceKey)
+
+  const reordered = await coordinator.sync({
+    profileId,
+    workspaceId: 'workspace-a',
+    clientSequence: 2,
+    idempotencyKey: 'reorder-hub-slot',
+    sources: [
+      { sourceKey: game.sourceKey, sourceSessionId: gameLease.sourceSessionId, leaseToken: gameLease.leaseToken, baseRevision: depositedGame.sourceRevision, placements: depositedGame.placements },
+      { sourceKey: hubSourceKey, sourceSessionId: hubLease.sourceSessionId, leaseToken: hubLease.leaseToken, baseRevision: depositedHub.sourceRevision, placements: [{ location: hub(hubProfileId, 0), pokemonInstanceId: null }, { location: hub(hubProfileId, 1), pokemonInstanceId }] },
+    ],
+  })
+
+  assert.equal(reordered.status, 'accepted')
+  assert.deepEqual((await coordinator.getSnapshot({ profileId, sourceKey: hubSourceKey })).placements.map(placement => placement.pokemonInstanceId), [null, pokemonInstanceId])
+})
+
+test('rejects a swap into an occupied destination belonging to another source', async () => {
+  const { coordinator } = await fixture({ validatePlacementChange: validatePokemonHubTransferPlacement })
+  const game = await coordinator.adopt({
+    profileId,
+    sourceKey: 'save:profile-may:emerald',
+    sourceRevision: 4,
+    adapter: 'gen3-gba-v1',
+    slots: [{ location: { kind: 'game', area: 'box', box: 0, slot: 0 }, record: record(7, { species: 289, shiny: false }) }],
+  })
+  const hubProfileId = '11111111-1111-4111-8111-111111111111'
+  const hubSourceKey = `hub:${hubProfileId}`
+  const hubSource = await coordinator.adopt({
+    profileId,
+    sourceKey: hubSourceKey,
+    sourceRevision: 0,
+    adapter: 'hub-grid-v1',
+    slots: [{ location: hub(hubProfileId, 0), record: record(8, { species: 25, shiny: false }) }],
+  })
+  const [gameLease, hubLease] = await Promise.all([
+    coordinator.acquire({ profileId, sourceKey: game.sourceKey, workspaceId: 'workspace-a' }),
+    coordinator.acquire({ profileId, sourceKey: hubSourceKey, workspaceId: 'workspace-a' }),
+  ])
+
+  await assert.rejects(() => coordinator.sync({
+    profileId,
+    workspaceId: 'workspace-a',
+    clientSequence: 1,
+    idempotencyKey: 'cross-source-swap',
+    sources: [
+      { sourceKey: game.sourceKey, sourceSessionId: gameLease.sourceSessionId, leaseToken: gameLease.leaseToken, baseRevision: game.sourceRevision, placements: [{ location: { kind: 'game', area: 'box', box: 0, slot: 0 }, pokemonInstanceId: hubSource.placements[0].pokemonInstanceId }] },
+      { sourceKey: hubSourceKey, sourceSessionId: hubLease.sourceSessionId, leaseToken: hubLease.leaseToken, baseRevision: hubSource.sourceRevision, placements: [{ location: hub(hubProfileId, 0), pokemonInstanceId: game.placements[0].pokemonInstanceId }] },
+    ],
+  }), { code: 'CROSS_SOURCE_OCCUPIED' })
+})
+
 test('validates a synchronized workspace through its lease index without scanning the Redis keyspace', async () => {
   const memory = createMemoryRedisPersistence()
   const persistence = {
     ...memory,
     async keys(prefix) {
-      if (prefix.startsWith('pokemon-hub:snapshot-lease:')) throw new Error('Request-path lease scans are forbidden')
+      if (prefix.startsWith(pokemonHubRedisKeys.lease(profileId, 'ignored').slice(0, -'ignored'.length))) throw new Error('Request-path lease scans are forbidden')
       return memory.keys(prefix)
     },
   }
@@ -207,7 +336,7 @@ test('returns a corrected snapshot rather than accepting a duplicated instance',
   assert.equal(corrected.snapshots[1].placements[0].pokemonInstanceId, null)
 })
 
-test('rejects an identifier that was not adopted by the backend', async () => {
+test('rejects an identifier that is not authorized by a leased source', async () => {
   const { coordinator } = await fixture()
   const source = await coordinator.adopt({ profileId, sourceKey: 'save:profile-may:emerald', sourceRevision: 4, adapter: 'gen3-gba-v1', slots: [{ location: party(0), record: null }] })
   const lease = await coordinator.acquire({ profileId, sourceKey: source.sourceKey, workspaceId: 'workspace-a' })
@@ -215,7 +344,44 @@ test('rejects an identifier that was not adopted by the backend', async () => {
   await assert.rejects(() => coordinator.sync({
     profileId, workspaceId: 'workspace-a', clientSequence: 1, idempotencyKey: 'sync-invented',
     sources: [{ sourceKey: source.sourceKey, sourceSessionId: lease.sourceSessionId, leaseToken: lease.leaseToken, baseRevision: 4, placements: [{ location: party(0), pokemonInstanceId: 'invented' }] }],
-  }), error => error.code === 'POKEMON_UNKNOWN')
+  }), error => error.code === 'POKEMON_UNAUTHORIZED')
+})
+
+test('authorizes membership before record access and skips records for unchanged placements', async () => {
+  const { coordinator, persistence } = await fixture()
+  const source = await coordinator.adopt({
+    profileId,
+    sourceKey: 'save:profile-may:emerald',
+    sourceRevision: 4,
+    adapter: 'gen3-gba-v1',
+    slots: [{ location: party(0), record: record(7, { species: 289, shiny: false }) }],
+  })
+  const lease = await coordinator.acquire({ profileId, sourceKey: source.sourceKey, workspaceId: 'workspace-read-count' })
+  const originalGet = persistence.get.bind(persistence)
+  let recordReads = 0
+  persistence.get = async key => {
+    if (key.includes(':record:')) recordReads += 1
+    return originalGet(key)
+  }
+
+  await coordinator.sync({
+    profileId,
+    workspaceId: 'workspace-read-count',
+    clientSequence: 1,
+    idempotencyKey: 'unchanged-no-record-read',
+    sources: [{ sourceKey: source.sourceKey, sourceSessionId: lease.sourceSessionId, leaseToken: lease.leaseToken, baseRevision: source.sourceRevision, placements: lease.placements }],
+  })
+  assert.equal(recordReads, 0)
+
+  recordReads = 0
+  await assert.rejects(() => coordinator.sync({
+    profileId,
+    workspaceId: 'workspace-read-count',
+    clientSequence: 2,
+    idempotencyKey: 'invented-before-record-read',
+    sources: [{ sourceKey: source.sourceKey, sourceSessionId: lease.sourceSessionId, leaseToken: lease.leaseToken, baseRevision: source.sourceRevision, placements: [{ location: party(0), pokemonInstanceId: 'invented-id' }] }],
+  }), error => error.code === 'POKEMON_UNAUTHORIZED')
+  assert.equal(recordReads, 0)
 })
 
 test('rejects a known instance when its current source is not part of the leased snapshot', async () => {
@@ -260,7 +426,7 @@ test('keeps the logical snapshot revision independent from a flushed save revisi
   const { coordinator } = await fixture()
   await coordinator.adopt({ profileId, sourceKey: 'save:profile-may:emerald', sourceRevision: 4, adapter: 'gen3-gba-v1', slots: [{ location: party(0), record: null }] })
 
-  await coordinator.markSaveFlushed({ profileId, sourceKey: 'save:profile-may:emerald', saveRevision: 9 })
+  await coordinator.markSaveFlushed({ profileId, sourceKey: 'save:profile-may:emerald', sourceRevision: 4, saveRevision: 9 })
   const flushed = await coordinator.getSaveFlushPlan({ profileId, sourceKey: 'save:profile-may:emerald' })
   await coordinator.adopt({ profileId, sourceKey: 'save:profile-may:emerald', sourceRevision: 10, adapter: 'gen3-gba-v1', slots: [{ location: party(0), record: null }] })
   const reimported = await coordinator.getSaveFlushPlan({ profileId, sourceKey: 'save:profile-may:emerald' })

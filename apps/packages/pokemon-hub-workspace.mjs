@@ -12,6 +12,13 @@ export function isPaneSourceAvailable(panes, index, nextSource) {
   return !panes.some((source, candidate) => candidate !== index && sameSource(source, nextSource))
 }
 
+export function isCompletePaneSource(source) {
+  if (source?.kind === 'hub') return typeof source.hubProfileId === 'string' && source.hubProfileId.length > 0
+  return source?.kind === 'game'
+    && typeof source.gameId === 'string' && source.gameId.length > 0
+    && typeof source.profileId === 'string' && source.profileId.length > 0
+}
+
 export function hasAvailableSaveProfile(panes, index, gameId, profiles) {
   return Array.isArray(profiles) && profiles.some(profile => (
     profile && typeof profile.id === 'string'

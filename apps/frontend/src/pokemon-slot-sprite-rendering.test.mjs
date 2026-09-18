@@ -58,14 +58,22 @@ test('uses one DnD provider with a six-pixel pointer threshold and a session sna
   assert.match(source, /schedulePokemonHubSnapshot\(\)/)
 })
 
-test('persists cross-kind drops through one compact session snapshot', async () => {
+test('persists cross-kind drops through one canonical session snapshot', async () => {
   const source = await readFile(sourceFile, 'utf8')
 
   assert.match(source, /function completePokemonHubDrag\(event\)/)
   assert.match(source, /onDragEnd=\{completePokemonHubDrag\}/)
   assert.match(source, /applyLocalSessionMove\(sourceSnapshot, targetSnapshot, fromSlot, toSlot, pokemonInstanceId\)/)
-  assert.match(source, /await syncPokemonHubSessionSnapshot\(session\.profileId, session\.sessionId, session\.pendingSnapshot\)/)
-  assert.match(source, /applyCompactSessionSnapshot\(response\.snapshot, response\.pokemonDisplay\)/)
+  assert.match(source, /createCanonicalPokemonHubSnapshot\(session, pokemonHubPanesRef\.current, pokemonHubSnapshotsRef\.current\)/)
+  assert.match(source, /send: request => syncPokemonHubSessionSnapshot\(session\.profileId, session\.sessionId, request\.snapshot, request\.idempotencyKey\)/)
+  assert.match(source, /onCorrection: snapshot =>/)
+})
+
+test('opens a Hub profile through the canonical snapshot without the legacy attach route', async () => {
+  const source = await readFile(sourceFile, 'utf8')
+
+  assert.doesNotMatch(source, /attachPokemonHubSessionSource/)
+  assert.match(source, /sourceProjectionFromHubProfile\(profile\)/)
 })
 
 test('keeps display metadata with the instance during an optimistic cross-source move', async () => {
@@ -75,12 +83,30 @@ test('keeps display metadata with the instance during an optimistic cross-source
   assert.match(source, /\? \{ \.\.\.snapshot\.pokemonDisplay, \[pokemonInstanceId\]: movedPokemonDisplay \}/)
 })
 
-test('orders compact session sources and ends the local session after a terminal snapshot error', async () => {
+test('keeps canonical candidates and ends the local session after a terminal snapshot error', async () => {
   const source = await readFile(sourceFile, 'utf8')
 
-  assert.match(source, /Object\.values\(snapshots\)\.sort\(\(left, right\) => left\.sourceId\.localeCompare\(right\.sourceId\)\)/)
-  assert.match(source, /session\.pendingSnapshot = null/)
+  assert.match(source, /function createCanonicalPokemonHubSnapshot\(session, panes, snapshots\)/)
+  assert.match(source, /revision: session\.version/)
+  assert.match(source, /createPokemonHubSnapshotFlight/)
   assert.match(source, /endPokemonHubSessionLocally\(cause\)/)
+})
+
+test('visibly confirms an accepted empty snapshot response without changing its payload', async () => {
+  const source = await readFile(sourceFile, 'utf8')
+
+  assert.match(source, /setPokemonHubSnapshotStatus\('Snapshot sincronizado\.'\)/)
+  assert.match(source, /pokemonHubSnapshotStatus && <p className="pokemon-hub-snapshot-status" role="status">\{pokemonHubSnapshotStatus\}<\/p>/)
+})
+
+test('closes the entire workspace with the latest visible snapshot without draining the flight', async () => {
+  const source = await readFile(sourceFile, 'utf8')
+
+  assert.match(source, /async function closePokemonHub\(\)/)
+  assert.doesNotMatch(source, /snapshotFlight\.beginClose\(\)/)
+  assert.match(source, /const finalSnapshot = createCanonicalPokemonHubSnapshot\(session, pokemonHubPanesRef\.current, pokemonHubSnapshotsRef\.current\)/)
+  assert.match(source, /await closePokemonHubSession\(session\.profileId, session\.sessionId, finalSnapshot, session\.pendingCloseIdempotencyKey/)
+  assert.doesNotMatch(source, /submitStructuralPokemonHubPaneChange\(\[null, null, null\]/)
 })
 
 test('styles read-only drag targets and the pointer-transparent overlay', async () => {

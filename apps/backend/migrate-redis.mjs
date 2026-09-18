@@ -8,7 +8,7 @@ const persistence = createRedisPersistence({ url: process.env.REDIS_URL, namespa
 
 try {
   await persistence.connect()
-  const result = await migrateLegacyJsonData({
+  const legacyResult = await migrateLegacyJsonData({
     persistence,
     profilesPath: join(backendDirectory, 'data', 'profiles'),
     controlProfilePath: join(backendDirectory, 'data', 'control-profile.json'),
@@ -16,7 +16,7 @@ try {
     pokemonHubPath: join(backendDirectory, 'data', 'pokemon-hub'),
     romRegistryPath: join(backendDirectory, 'data', 'rom-registry.json'),
   })
-  console.log(result.migrated ? `Imported ${result.imported} legacy Redis documents.` : 'Legacy Redis import was already completed.')
+  console.log(legacyResult.migrated ? `Imported ${legacyResult.imported} legacy Redis documents.` : 'Legacy Redis import was already completed.')
 } finally {
   await persistence.close()
 }

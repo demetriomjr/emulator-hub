@@ -51,6 +51,26 @@ export const pokemonGen3Adapter = Object.freeze({
     }
     return copy
   },
+  writeParty(saveBytes, party, records) {
+    validatePartyLayout(party)
+    if (!Array.isArray(records) || records.length === 0 || records.length > party.slots) throw invalidSave('Gen III Party records are invalid.')
+    const newest = selectNewestCopy(saveBytes)
+    const copy = Buffer.from(saveBytes)
+    const section = newest.sectors.get(party.sectionId)
+    const length = party.sectionId === 13 ? 2000 : 3968
+    if (!section || party.countOffset + 4 > length) throw invalidSave('Gen III Party layout is invalid.')
+
+    for (let slot = 0; slot < party.slots; slot += 1) {
+      const record = records[slot] ?? Buffer.alloc(party.recordBytes)
+      if (!Buffer.isBuffer(record) || record.length !== party.recordBytes) throw invalidSave('A Gen III Party record is invalid.')
+      writePartyBytes(copy, newest, party, slot, record)
+    }
+    copy.writeUInt32LE(records.length, section.offset + party.countOffset)
+    for (const { offset: sectorOffset, sectionId } of newest.sectors.values()) {
+      copy.writeUInt16LE(sectorChecksum(copy, sectorOffset, sectionId), sectorOffset + 0xff6)
+    }
+    return copy
+  },
 })
 
 function nativeSlot(location, bytes, kind) {
@@ -173,8 +193,10 @@ function readPartyCount(bytes, save, party) {
   validatePartyLayout(party)
   const section = save.sectors.get(party.sectionId)
   const length = party.sectionId === 13 ? 2000 : 3968
-  if (!section || party.countOffset >= length) throw invalidSave('Gen III Party layout is invalid.')
-  return Math.min(Buffer.from(bytes)[section.offset + party.countOffset], party.slots)
+  if (!section || party.countOffset + 4 > length) throw invalidSave('Gen III Party layout is invalid.')
+  const count = Buffer.from(bytes).readUInt32LE(section.offset + party.countOffset)
+  if (count > party.slots) throw invalidSave('Gen III Party count is invalid.')
+  return count
 }
 
 function validatePartyLayout(party) {
@@ -184,6 +206,15 @@ function validatePartyLayout(party) {
 function writePcBytes(bytes, save, box, slot, record) {
   let read = 0
   for (const span of pcSpans(save, box, slot)) { record.copy(bytes, span.offset, read, read + span.count); read += span.count }
+}
+
+function writePartyBytes(bytes, save, party, slot, record) {
+  validatePartyLayout(party)
+  const section = save.sectors.get(party.sectionId)
+  const length = party.sectionId === 13 ? 2000 : 3968
+  const offset = party.offset + slot * party.recordBytes
+  if (!section || offset + party.recordBytes > length) throw invalidSave('Gen III Party layout is invalid.')
+  record.copy(bytes, section.offset + offset)
 }
 
 function sectorChecksum(bytes, offset, sectionId) {
