@@ -296,6 +296,29 @@ export async function putCloudSave(url, bytes, revision, lease) {
   return body
 }
 
+export async function getEmulatorSnapshot(url, lease) {
+  const response = await fetch(url, { cache: 'no-store', headers: leaseHeaders(lease) })
+  if (response.status === 404) return null
+  if (!response.ok) throw new Error(`Snapshot request failed (${response.status})`)
+  const revision = /^"(\d+)"$/.exec(response.headers.get('etag') ?? '')?.[1]
+  if (!revision) throw new Error('Snapshot response is missing a revision.')
+  const { decodeSnapshotBundle } = await import('./emulator-snapshot.mjs')
+  const snapshot = await decodeSnapshotBundle(new Uint8Array(await response.arrayBuffer()))
+  return { ...snapshot, revision: Number(revision) }
+}
+
+export async function putEmulatorSnapshot(url, bundle, revision, lease) {
+  const { encodeSnapshotBundle } = await import('./emulator-snapshot.mjs')
+  const response = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/vnd.emulator-hub.snapshot', 'If-Match': revision === null ? '*' : `"${revision}"`, ...leaseHeaders(lease) },
+    body: await encodeSnapshotBundle(bundle),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.error || `Snapshot upload failed (${response.status})`)
+  return body
+}
+
 function leaseHeaders(lease) {
   if (!lease) return {}
   return { 'X-Player-Session-Id': lease.sessionId, 'X-Player-Lease-Generation': String(lease.generation) }

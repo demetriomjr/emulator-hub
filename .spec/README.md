@@ -1,5 +1,9 @@
 # Specifications
 
+- [Spec 034 — Global emulator snapshots](034-global-emulator-snapshots.md): one authoritative cross-device EmulatorJS state per profile/game, atomic state-plus-save bundles, and preflight before engine startup.
+
+- [Spec 034 implementation plan](034-global-emulator-snapshots-plan.md): test-first tasks for the snapshot envelope, backend resource, preflight, and player lifecycle.
+
 - [Spec 032 — Mobile standalone player](032-mobile-standalone-player.md): installed-web-app metadata, mobile portrait guidance, and resilient player closing.
 
 - [Spec 031 — Mobile client diagnostics](031-mobile-client-diagnostics.md): opt-in iPhone browser failure reporting, ephemeral backend backlog, and Caddy access-log correlation.

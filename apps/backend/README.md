@@ -46,6 +46,7 @@ The supported system/extension pairs are `gb`/`.gb`, `gbc`/`.gbc`, and `gba`/`.g
 - `GET /api/profiles` returns `{ "profiles": [...] }`. `POST /api/profiles` accepts `{ "name": string }` and creates a profile. Profiles persist in Git-ignored `data/profiles.json`.
 - `GET /api/games/:id/launch?profileId=:profileId` requires an existing profile and returns the verified launch descriptor `{ id, title, core, profileId, gameId, romUrl, saveUrl }`. `gameId` is stable per profile/title pair so EmulatorJS separates its browser-managed saves.
 - `GET`/`PUT /api/profiles/:profileId/games/:gameId/save` restores and accepts the selected profile's binary in-game save. Uploads require a revision precondition and return the accepted revision and SHA-256.
+- `GET`/`PUT /api/profiles/:profileId/games/:gameId/snapshot` stores one lease-protected global EmulatorJS state per profile/game. The binary envelope contains raw state plus the capture-time `.sav`; a newer snapshot replaces the only slot.
 - `GET /roms/:id` returns the verified ROM bytes with `Cache-Control: no-store`.
 - `HEAD /roms/:id` returns the same verified ROM metadata without a body; EmulatorJS uses this when checking a previously loaded game.
 

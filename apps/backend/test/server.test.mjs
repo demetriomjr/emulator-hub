@@ -7,6 +7,7 @@ import { afterEach, describe, test } from 'node:test'
 
 import { bootstrapHubServer, createHubServer, createListenFailureDiagnostic } from '../server.mjs'
 import { createMemoryRedisPersistence } from '../../packages/redis-persistence.mjs'
+import { encodeSnapshotBundle } from '../../packages/emulator-snapshot.mjs'
 
 const liveServers = new Set()
 const liveFixtures = new Set()
@@ -119,6 +120,29 @@ async function acquirePlayerLease(baseUrl, gameId, profileId, sessionId = 'playe
 }
 
 describe('hub backend HTTP contract', () => {
+  test('serves one lease-protected global snapshot slot from the launch descriptor', async () => {
+    const rom = Buffer.from('snapshot game')
+    const { baseUrl } = await startFixture([{ id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom) }], { 'pokemon-red.gb': rom })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Red' }) }))
+    const lease = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id)
+    const headers = { Cookie: lease.cookie, 'X-Player-Session-Id': 'player-session-a', 'X-Player-Lease-Generation': String(lease.body.leaseGeneration) }
+
+    assert.match(lease.body.snapshotUrl, /\/snapshot$/)
+    assert.equal(lease.body.romSha256, sha256(rom))
+    assert.equal(typeof lease.body.runtimeId, 'string')
+    assert.equal((await fetch(`${baseUrl}${lease.body.snapshotUrl}`, { headers })).status, 404)
+
+    const body = await encodeSnapshotBundle({
+      metadata: { profileId: profile.id, gameId: 'pokemon-red', core: 'gambatte', romSha256: sha256(rom), runtimeId: lease.body.runtimeId },
+      state: new Uint8Array([1]), save: new Uint8Array([2]),
+    })
+    const written = await fetch(`${baseUrl}${lease.body.snapshotUrl}`, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/vnd.emulator-hub.snapshot', 'If-Match': '*' }, body })
+    assert.equal(written.status, 201)
+    const read = await fetch(`${baseUrl}${lease.body.snapshotUrl}`, { headers })
+    assert.equal(read.status, 200)
+    assert.equal(read.headers.get('etag'), '"1"')
+  })
+
   test('fences a stale player session and rejects a foreign device while the lease is alive', async () => {
     const rom = Buffer.from('leased game')
     const { baseUrl } = await startFixture([{ id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom) }], { 'pokemon-red.gb': rom })
@@ -1135,13 +1159,16 @@ describe('hub backend HTTP contract', () => {
     assert.equal(first.status, 200)
     assert.deepEqual(await jsonResponse(first), await jsonResponse(second))
     const descriptor = await (await fetch(launchUrl)).json()
-    assert.deepEqual(Object.keys(descriptor).sort(), ['core', 'gameId', 'id', 'profileId', 'romUrl', 'saveUrl', 'title'])
+    assert.deepEqual(Object.keys(descriptor).sort(), ['core', 'gameId', 'id', 'profileId', 'romSha256', 'romUrl', 'runtimeId', 'saveUrl', 'snapshotUrl', 'title'])
     assert.equal(descriptor.id, 'pokemon-red')
     assert.equal(descriptor.title, 'Pokémon Red')
     assert.equal(descriptor.core, 'gambatte')
     assert.equal(descriptor.romUrl, '/roms/pokemon-red')
     assert.equal(descriptor.profileId, profile.id)
     assert.equal(descriptor.saveUrl, `/api/profiles/${profile.id}/games/pokemon-red/save`)
+    assert.equal(descriptor.snapshotUrl, `/api/profiles/${profile.id}/games/pokemon-red/snapshot`)
+    assert.equal(descriptor.romSha256, sha256(rom))
+    assert.equal(descriptor.runtimeId, 'emulatorjs-4.2.3')
     assert.equal(Number.isInteger(descriptor.gameId), true)
 
     const unknown = await fetch(`${baseUrl}/api/games/no-such-game/launch?profileId=${profile.id}`)

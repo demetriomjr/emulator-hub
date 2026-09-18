@@ -1,4 +1,4 @@
-import { getCloudSave, getControlProfile, getPlayerLeaseLaunch, heartbeatPlayerLease, putCloudSave } from '../../packages/hub-client.js'
+import { getCloudSave, getControlProfile, getEmulatorSnapshot, getPlayerLeaseLaunch, heartbeatPlayerLease, putCloudSave, putEmulatorSnapshot } from '../../packages/hub-client.js'
 import { createCloudSaveSynchronizer } from '../../packages/cloud-save-sync.mjs'
 import { createEmulatorGamepadInput } from '../../packages/gamepad-input.mjs'
 import { createClientDiagnostics, getClientDiagnosticsOptions } from '../../packages/client-diagnostics.mjs'
@@ -15,7 +15,7 @@ const game = document.getElementById('game')
 // The upstream `latest` channel keeps stable cores while receiving runtime
 // fixes ahead of the pinned 4.2.3 release. This branch exercises it against
 // the known iPhone WebKit rendering stall.
-const dataUrl = 'https://cdn.emulatorjs.org/latest/data/'
+const dataUrl = 'https://cdn.emulatorjs.org/4.2.3/data/'
 const clientDiagnosticsOptions = getClientDiagnosticsOptions(location.search)
 const clientDiagnostics = clientDiagnosticsOptions.enabled
   ? createClientDiagnostics({ browser: window, source: 'player', sessionId: clientDiagnosticsOptions.sessionId })
@@ -30,7 +30,9 @@ if (!Number.isFinite(fastForwardRequest.speed) || fastForwardRequest.speed < 1.5
 }
 
 let fastForwardRevision = 0
-let savedState = null
+let savedSnapshot = null
+let snapshotRevision = null
+let launchDescriptor = null
 let gamepadInput = null
 let gamepadBindings = []
 let cloudSaveSynchronizer = null
@@ -111,14 +113,30 @@ function applyFastForward() {
 }
 
 async function saveEmulatorState() {
-  const state = await window.EJS_emulator?.gameManager?.getState?.()
-  if (!state) return
-  savedState = new Uint8Array(state)
+  const manager = window.EJS_emulator?.gameManager
+  if (leaseLost || !manager || !launchDescriptor) return false
+  manager.saveSaveFiles?.()
+  await synchronizeCloudSave()
+  const save = manager.getSaveFile?.()
+  const state = manager.getState?.()
+  if (!state || !save) throw new Error('Emulator snapshot bytes are unavailable.')
+  const accepted = await putEmulatorSnapshot(launchDescriptor.snapshotUrl, {
+    metadata: { profileId, gameId: id, core: launchDescriptor.core, romSha256: launchDescriptor.romSha256, runtimeId: launchDescriptor.runtimeId },
+    state: new Uint8Array(state), save: new Uint8Array(save),
+  }, snapshotRevision, { sessionId, generation: leaseGeneration })
+  snapshotRevision = accepted.revision
+  savedSnapshot = { state: new Uint8Array(state), save: new Uint8Array(save) }
+  return true
 }
 
 function loadEmulatorState() {
-  if (!savedState) return
-  window.EJS_emulator?.gameManager?.loadState?.(new Uint8Array(savedState))
+  if (!savedSnapshot) return false
+  const manager = window.EJS_emulator?.gameManager
+  if (!manager) return false
+  manager.FS.writeFile(manager.getSaveFilePath(), savedSnapshot.save)
+  manager.loadSaveFiles()
+  manager.loadState(new Uint8Array(savedSnapshot.state))
+  return true
 }
 
 window.addEventListener('message', event => {
@@ -162,15 +180,26 @@ async function start() {
   startLeaseHeartbeat()
   const [launch, controlProfile] = await Promise.all([getPlayerLeaseLaunch(sessionId, { profileId, gameId: id, generation: leaseGeneration }), getControlProfile()])
   if (!launch.romUrl || !launch.core) throw new Error('Incomplete launch configuration')
+  launchDescriptor = launch
   cloudSaveSynchronizer = createCloudSaveSynchronizer({
     load: () => getCloudSave(launch.saveUrl, { sessionId, generation: leaseGeneration }),
     upload: (bytes, revision) => putCloudSave(launch.saveUrl, bytes, revision, { sessionId, generation: leaseGeneration }),
     hash: hashSave,
   })
-  await cloudSaveSynchronizer.load()
+  const [_, snapshot, romResponse] = await Promise.all([
+    cloudSaveSynchronizer.load(),
+    getEmulatorSnapshot(launch.snapshotUrl, { sessionId, generation: leaseGeneration }),
+    fetch(launch.romUrl, { cache: 'no-store' }),
+  ])
+  if (!romResponse.ok) throw new Error(`ROM request failed (${romResponse.status})`)
+  const romBytes = new Uint8Array(await romResponse.arrayBuffer())
+  if (await hashSave(romBytes) !== launch.romSha256) throw new Error('ROM bytes did not match the launch descriptor.')
+  if (snapshot && (snapshot.metadata.profileId !== profileId || snapshot.metadata.gameId !== id || snapshot.metadata.core !== launch.core || snapshot.metadata.romSha256 !== launch.romSha256 || snapshot.metadata.runtimeId !== launch.runtimeId)) throw new Error('Snapshot is incompatible with this launch.')
+  savedSnapshot = snapshot ? { state: snapshot.state, save: snapshot.save } : null
+  snapshotRevision = snapshot?.revision ?? null
   window.EJS_player = '#game'
   window.EJS_core = launch.core
-  window.EJS_gameUrl = launch.romUrl
+  window.EJS_gameUrl = URL.createObjectURL(new Blob([romBytes]))
   window.EJS_gameName = launch.title
   window.EJS_gameID = launch.gameId
   window.EJS_defaultControls = { 0: controlProfile.bindings, 1: {}, 2: {}, 3: {} }
@@ -233,7 +262,7 @@ async function start() {
     })
     gamepadInput = createEmulatorGamepadInput(window.EJS_emulator, controlProfile.bindings)
     gamepadInput.update(gamepadBindings)
-    cloudSaveSynchronizer.restore(window.EJS_emulator.gameManager)
+    if (!loadEmulatorState()) cloudSaveSynchronizer.restore(window.EJS_emulator.gameManager)
     cloudSaveInterval = window.setInterval(() => synchronizeCloudSave().catch(() => {}), 15000)
     stopFrameProgressMonitor?.()
     if (clientDiagnostics) {
