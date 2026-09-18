@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { addWorkspacePane, choosePaneSource, createPokemonHubWorkspaceState, firstAvailableSaveSource, hasAvailableSaveProfile, isCompletePaneSource, isPaneSourceAvailable, removeWorkspacePane } from './pokemon-hub-workspace.mjs'
+import { addWorkspacePane, choosePaneSource, createPokemonHubWorkspaceState, firstAvailableHubSource, firstAvailableSaveSource, hasAvailableSaveProfile, isCompletePaneSource, isPaneSourceAvailable, removeWorkspacePane } from './pokemon-hub-workspace.mjs'
 
 test('opens directly into an empty Hub workspace without selecting an Emulator Hub profile', () => {
   assert.deepEqual(createPokemonHubWorkspaceState(), { profile: null, panes: [null], boxes: {} })
@@ -49,6 +49,16 @@ test('opens an empty save selector when no loadable profile remains for the pane
     [{ id: 'pokemon-emerald' }],
     { 'pokemon-emerald': [{ id: 'may', name: 'May' }] },
   ), { kind: 'game' })
+})
+
+test('opens an empty Hub selector when every Hub profile is already open elsewhere', () => {
+  const occupied = { kind: 'hub', hubProfileId: 'general' }
+
+  assert.deepEqual(firstAvailableHubSource(
+    [occupied, null],
+    1,
+    [{ hubProfileId: 'general', name: 'General' }],
+  ), { kind: 'hub' })
 })
 
 test('a pending save selection exclusively activates the save source mode', async () => {

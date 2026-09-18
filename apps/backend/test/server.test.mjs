@@ -881,7 +881,7 @@ describe('hub backend HTTP contract', () => {
     const id = `rom-${sha1}`
 
     assert.deepEqual(await jsonResponse(await fetch(`${baseUrl}/api/games`)), {
-      games: [{ id, title: 'Pokémon FireRed Version', system: 'gba', core: 'gba', status: 'ready', region: 'wor', coverUrl: 'https://retrocollection.example/firered.png', profiles: [] }],
+      games: [{ id, title: 'Pokémon FireRed Version', system: 'gba', core: 'gba', status: 'ready', region: 'wor', coverUrl: 'https://retrocollection.example/firered.png', pokemonHubSaveSupported: false, profiles: [] }],
     })
     const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/${id}/profiles`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Leaf' }),
@@ -921,6 +921,7 @@ describe('hub backend HTTP contract', () => {
           system: 'gb',
           core: 'gambatte',
           status: 'ready',
+          pokemonHubSaveSupported: false,
           profiles: [],
         },
         {
@@ -929,6 +930,7 @@ describe('hub backend HTTP contract', () => {
           system: 'gb',
           core: 'gambatte',
           status: 'unavailable',
+          pokemonHubSaveSupported: false,
           reason: 'ROM file was not found.',
           profiles: [],
         },
@@ -969,7 +971,7 @@ describe('hub backend HTTP contract', () => {
 
     const catalog = await jsonResponse(await fetch(`${baseUrl}/api/games`))
 
-    assert.deepEqual(catalog.games[0].profiles, [profile])
+    assert.deepEqual(catalog.games[0].profiles, [{ ...profile, hasSave: false }])
   })
 
   test('lists only loadable save profiles before the workspace selector opens them', async () => {
@@ -996,11 +998,17 @@ describe('hub backend HTTP contract', () => {
     liveServers.add(server)
     const baseUrl = `http://127.0.0.1:${server.address().port}`
 
+    const catalogResponse = await fetch(`${baseUrl}/api/games`)
     const response = await fetch(`${baseUrl}/api/pokemon-hub/save-profile-games`)
 
+    assert.equal(catalogResponse.status, 200)
+    assert.deepEqual((await jsonResponse(catalogResponse)).games[0].profiles, [
+      { ...profiles['pokemon-emerald'][0], hasSave: true },
+      { ...profiles['pokemon-emerald'][1], hasSave: false },
+    ])
     assert.equal(response.status, 200)
     assert.deepEqual(await jsonResponse(response), {
-      games: [{ id: 'pokemon-emerald', title: 'Pokemon Emerald', system: 'gba', status: 'ready', profiles: [profiles['pokemon-emerald'][0]] }],
+      games: [{ id: 'pokemon-emerald', title: 'Pokemon Emerald', system: 'gba', status: 'ready', pokemonHubSaveSupported: true, profiles: [{ ...profiles['pokemon-emerald'][0], hasSave: true }] }],
     })
   })
 

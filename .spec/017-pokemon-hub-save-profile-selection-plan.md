@@ -1,5 +1,14 @@
 # Pokemon Hub Save Profile Selection Implementation Plan
 
+> **Status: superseded.** The workspace-only catalog request described below is
+> no longer authoritative. The active contract in
+> `.spec/017-pokemon-hub-save-profile-selection.md` reuses the application-wide
+> `GET /api/games` state, derives Save choices through
+> `apps/packages/save-profile-catalog.mjs`, and validates the HTTP envelope
+> through `apps/packages/game-catalog-contract.mjs`. Keep the legacy
+> `/api/pokemon-hub/save-profile-games` route for compatibility only; do not use
+> it from new frontend flows.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let each Pokemon Hub pane select a trusted ROM with profiles and then one existing save profile for that ROM, without loading box content.

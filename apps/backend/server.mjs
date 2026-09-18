@@ -5,7 +5,9 @@ import { lstat, readFile } from 'node:fs/promises'
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import { backendListenConfiguration } from './runtime-configuration.mjs'
 import { createGameMetadataLoader } from '../packages/game-metadata.mjs'
+import { createGameCatalogResponse } from '../packages/game-catalog-contract.mjs'
 import { createRedisProfileStore } from '../packages/profile-store.mjs'
 import { createRedisControlProfileStore } from '../packages/control-profile-store.mjs'
 import { createSaveStore } from '../packages/save-store.mjs'
@@ -524,6 +526,7 @@ async function listGames(response, config) {
       system: entry.system,
       core: entry.core,
       status: verification.ok ? 'ready' : 'unavailable',
+      pokemonHubSaveSupported: Boolean(getPokemonSaveLayout(entry.pokemonSave?.layoutProfile, entry.pokemonSave?.adapter) && config.pokemonSaveAdapters.get(entry.pokemonSave?.adapter)),
     }
 
     if (!verification.ok) {
@@ -541,12 +544,20 @@ async function listGames(response, config) {
       }
     }
 
-    game.profiles = verification.ok ? await config.profileStore.list(entry.id) : []
+    if (verification.ok) {
+      const profiles = await config.profileStore.list(entry.id)
+      game.profiles = await Promise.all(profiles.map(async profile => ({
+        ...profile,
+        hasSave: await config.saveStore.get(profile.id, entry.id) !== null,
+      })))
+    } else {
+      game.profiles = []
+    }
 
     games.push(game)
   }
 
-  json(response, 200, { games })
+  json(response, 200, createGameCatalogResponse(games))
 }
 
 export async function createListenFailureDiagnostic({ error, host, port, runtime = process, lookupListeners = lookupListeningProcesses } = {}) {
@@ -612,17 +623,17 @@ async function listSaveProfileGames(response, config) {
     if (!verification.ok) continue
     const profiles = await config.profileStore.list(entry.id)
     const savedProfiles = await Promise.all(profiles.map(async profile => ({ profile, saved: await config.saveStore.get(profile.id, entry.id) !== null })))
-    const loadableProfiles = savedProfiles.flatMap(({ profile, saved }) => saved ? [profile] : [])
+    const loadableProfiles = savedProfiles.flatMap(({ profile, saved }) => saved ? [{ ...profile, hasSave: true }] : [])
     if (loadableProfiles.length === 0) continue
 
-    const game = { id: entry.id, title: entry.title, system: entry.system, status: 'ready', profiles: loadableProfiles }
+    const game = { id: entry.id, title: entry.title, system: entry.system, status: 'ready', pokemonHubSaveSupported: true, profiles: loadableProfiles }
     if (entry.region && entry.region !== 'legacy') game.region = entry.region
     if (entry.coverUrl) game.coverUrl = entry.coverUrl
     games.push(game)
   }
 
   games.sort((left, right) => left.title.localeCompare(right.title) || left.id.localeCompare(right.id))
-  json(response, 200, { games })
+  json(response, 200, createGameCatalogResponse(games))
 }
 
 async function launchGame(response, config, encodedId, profileId) {
@@ -1495,8 +1506,7 @@ export async function bootstrapHubServer({
 }
 
 async function startMainServer() {
-  const port = Number.parseInt(process.env.PORT ?? '3000', 10)
-  const host = process.env.HOST ?? '127.0.0.1'
+  const { host, port } = backendListenConfiguration()
   const persistence = createRedisPersistence(redisConfiguration())
   try {
     await bootstrapHubServer({

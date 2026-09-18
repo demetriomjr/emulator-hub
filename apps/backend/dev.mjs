@@ -2,14 +2,15 @@ import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
+import { backendListenConfiguration } from './runtime-configuration.mjs'
 
 const execFileAsync = promisify(execFile)
 const backendIdentityHeader = 'x-emulator-hub-backend'
 const backendIdentityValue = '1'
 
 export async function reclaimOwnBackend({
-  host = process.env.HOST ?? '127.0.0.1',
-  port = Number.parseInt(process.env.PORT ?? '3000', 10),
+  host = backendListenConfiguration().host,
+  port = backendListenConfiguration().port,
   legacyWatcherPids = findWindowsManagedWatcherPids,
   listenerPid = findWindowsListenerPid,
   watcherRootPid = findWindowsWatcherRootPid,
@@ -80,8 +81,7 @@ async function waitForListenerRelease(port, listenerPid) {
 }
 
 async function startDevelopmentServer() {
-  const host = process.env.HOST ?? '127.0.0.1'
-  const port = Number.parseInt(process.env.PORT ?? '3000', 10)
+  const { host, port } = backendListenConfiguration()
   const reclamation = await reclaimOwnBackend({ host, port })
   if (reclamation.status === 'foreign-listener' || reclamation.status === 'unidentified-listener') {
     throw new Error(`Port ${port} is already in use by a process that was not identified as Emulator Hub. It was left untouched.`)

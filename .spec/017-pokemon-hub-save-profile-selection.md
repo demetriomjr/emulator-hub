@@ -81,15 +81,17 @@ GET /api/games
          status: 'ready' | 'unavailable',
          region?: string,
          coverUrl?: string,
-         profiles: Array<{ id: string, name: string, createdAt: string }>
+         profiles: Array<{ id: string, name: string, createdAt: string, hasSave: boolean }>
        }>
      }
 ```
 
 The backend continues to own catalog verification and queries each verified
-ROM's generic profile collection once while constructing this response. An
-unavailable ROM has `profiles: []`; it never exposes a profile from an
-unverified ROM. This projection contains profile identity and display metadata
+ROM's generic profile collection once while constructing this response.
+`hasSave` reports only whether that profile currently has persisted save bytes;
+it does not expose those bytes or their metadata. An unavailable ROM has
+`profiles: []`; it never exposes a profile from an unverified ROM. This
+projection contains profile identity, display metadata, and save availability
 only: it never exposes save bytes, hashes, filesystem paths, registry payloads,
 or adapter internals.
 
@@ -134,12 +136,16 @@ global collection because generic profiles are deliberately scoped by `gameId`.
 
 ## State and package boundaries
 
-`apps/packages/hub-client.js` validates the expanded `GET /api/games` profile
-projection before React consumes it. `getSaveProfileLayout` remains the only
-Save-source fetch initiated by a completed Pokemon Hub selection.
+`apps/packages/game-catalog-contract.mjs` is the runtime wire contract for the
+catalog envelope and its safe profile projection. The backend validates the
+response through that package before sending it, and `apps/packages/hub-client.js`
+parses the same contract before React consumes the returned game array.
+`getSaveProfileLayout` remains the only Save-source fetch initiated by a
+completed Pokemon Hub selection.
 
 `apps/packages/save-profile-catalog.mjs` derives the ready-ROM-with-profiles
-projection and profiles-by-ROM map from the shared catalog. `apps/packages/
+projection and profiles-by-ROM map by retaining only profiles whose shared
+contract has `hasSave: true`. `apps/packages/
 pokemon-hub-workspace.mjs` remains the pure source-identity and duplicate
 boundary. It must continue to accept incomplete `{ kind: 'game' }` and
 `{ kind: 'game', gameId }` states, and treat only a complete

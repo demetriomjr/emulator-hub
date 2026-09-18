@@ -36,6 +36,13 @@ export function firstAvailableSaveSource(panes, index, games, profilesByGame) {
   return { kind: 'game' }
 }
 
+export function firstAvailableHubSource(panes, index, profiles) {
+  const profile = (profiles ?? []).find(candidate => (
+    isPaneSourceAvailable(panes, index, { kind: 'hub', hubProfileId: candidate.hubProfileId })
+  ))
+  return profile ? { kind: 'hub', hubProfileId: profile.hubProfileId } : { kind: 'hub' }
+}
+
 export function activePaneSourceKind(source, selectionDraft) {
   return selectionDraft?.kind ?? source?.kind ?? null
 }

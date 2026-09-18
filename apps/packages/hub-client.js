@@ -1,3 +1,5 @@
+import { parseGameCatalogResponse } from './game-catalog-contract.mjs'
+
 async function getJson(url) {
   const response = await fetch(url, { cache: 'no-store' })
   const body = await response.json().catch(() => ({}))
@@ -10,18 +12,11 @@ async function getJson(url) {
 }
 
 export async function getGames() {
-  const body = await getJson('/api/games')
-  if (!Array.isArray(body.games)) throw new Error('Invalid catalog response')
-  return body.games.map(game => {
-    if (!Array.isArray(game.profiles) || game.profiles.some(profile => !profile || typeof profile.id !== 'string' || typeof profile.name !== 'string' || typeof profile.createdAt !== 'string')) throw new Error('Invalid catalog profile response')
-    return game
-  })
+  return parseGameCatalogResponse(await getJson('/api/games'))
 }
 
 export async function getSaveProfileGames() {
-  const body = await getJson('/api/pokemon-hub/save-profile-games')
-  if (!Array.isArray(body.games)) throw new Error('Invalid save-profile game response')
-  return body.games
+  return parseGameCatalogResponse(await getJson('/api/pokemon-hub/save-profile-games'))
 }
 
 export async function getSaveProfileLayout(gameId, profileId) {

@@ -49,6 +49,6 @@ The supported system/extension pairs are `gb`/`.gb`, `gbc`/`.gbc`, and `gba`/`.g
 - `GET /roms/:id` returns the verified ROM bytes with `Cache-Control: no-store`.
 - `HEAD /roms/:id` returns the same verified ROM metadata without a body; EmulatorJS uses this when checking a previously loaded game.
 
-Start the service with `npm start` from this directory. It listens on `127.0.0.1:3000` by default; `HOST` and `PORT` can override that address.
+Start the service with `npm start` from this directory. Its local address is configured in `.env`; the provided default is `http://127.0.0.1:3001`. Copy `.env.example` when setting up another checkout.
 
 Run the backend checks with `npm test`.

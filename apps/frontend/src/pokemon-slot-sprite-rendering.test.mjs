@@ -109,12 +109,15 @@ test('isolates heartbeat in-flight state between old and newly opened sessions',
   assert.match(source, /if \(!session \|\| session\.heartbeatInFlight\) return/)
 })
 
-test('stores the save-profile game array returned by the client without unwrapping it twice', async () => {
+test('derives Save selectors from the global catalog without a second Hub catalog request', async () => {
   const source = await readFile(sourceFile, 'utf8')
 
-  assert.match(source, /const games = await getSaveProfileGames\(\)/)
-  assert.match(source, /setLoadableSaveCatalog\(games\)/)
-  assert.doesNotMatch(source, /setLoadableSaveCatalog\(response\.games\)/)
+  assert.match(source, /deriveSaveProfileCatalog\(games\)/)
+  assert.doesNotMatch(source, /getSaveProfileGames/)
+  assert.doesNotMatch(source, /loadableSaveCatalog/)
+  assert.doesNotMatch(source, /loadPokemonHubSaveCatalog/)
+  assert.match(source, /saveProfileGamesLoading=\{catalogLoading\}/)
+  assert.match(source, /saveProfileGamesError=\{catalogError\}/)
 })
 
 test('visibly confirms an accepted empty snapshot response without changing its payload', async () => {
