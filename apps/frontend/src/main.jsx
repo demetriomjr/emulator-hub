@@ -984,37 +984,32 @@ function App() {
         <section className="hub-section hub-section-internal" aria-labelledby="internal-applications-heading">
           <header className="hub-section-header"><h2 id="internal-applications-heading">Aplicações internas</h2></header>
           <div className="boxes">
-          <div className="box pokemon-hub-card">
+          <button className="box pokemon-hub-card" type="button" aria-label="Abrir Pokémon Hub" onClick={openPokemonHub}>
             <div className="cover">
-              <button className="hub-button" type="button" aria-label="Abrir Pokémon Hub" onClick={openPokemonHub}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" /></svg>
-              </button>
             </div>
             <div className="title"><small>Pokémon Hub</small></div>
-          </div>
+          </button>
           </div>
         </section>
         {gameSections.map(section => <section className="hub-section hub-section-games" key={section.id} aria-labelledby={`${section.id}-heading`}>
           <header className="hub-section-header"><h2 id={`${section.id}-heading`}>{section.title}</h2></header>
           <div className="boxes">
-          {section.games.map(game => <div className="box" key={game.id}>
+          {section.games.map(game => <button
+            className="box"
+            key={game.id}
+            type="button"
+            aria-label={`Iniciar ${game.title}`}
+            disabled={game.status !== 'ready'}
+            onClick={event => {
+              const card = event.currentTarget.getBoundingClientRect()
+              openProfilePicker(game, 'launch', { left: card.left, top: card.top, bottom: card.bottom })
+            }}
+          >
             <div className="cover">
               {game.coverUrl && <img className="cover-image" src={game.coverUrl} alt={`Capa de ${game.title}`} />}
-              <button
-                className="play-button"
-                aria-label={`Play ${game.title}`}
-                disabled={game.status !== 'ready'}
-                onClick={event => {
-                  const playButton = event.currentTarget.getBoundingClientRect()
-                  const card = event.currentTarget.closest('.box')?.getBoundingClientRect()
-                  openProfilePicker(game, 'launch', { left: card?.left ?? playButton.left, top: playButton.top, bottom: playButton.bottom })
-                }}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l13-7.5z" /></svg>
-              </button>
             </div>
             {game.language && <div className="title"><small>{game.language}</small></div>}
-          </div>)}
+          </button>)}
           </div>
         </section>)}
         {error && <p className="error" role="alert">{error}</p>}
@@ -1120,13 +1115,15 @@ function App() {
         </div>
       </div>
     </div>}
-    {profileGame && <div className={`profile-overlay${profilePickerPlacement ? ' profile-picker-overlay' : ''}`} role="dialog" aria-modal="true" aria-label="Selecionar perfil">
-      <div className={`profile-panel${profilePickerPlacement ? ' profile-picker-panel' : ''}`} style={profilePickerPlacement ?? undefined}>
+    {profileGame && <div className={`profile-overlay${profilePickerPlacement ? ' profile-picker-overlay' : ''} profile-picker-mobile`} role="dialog" aria-modal="true" aria-label="Selecionar perfil">
+      <div className={`profile-panel${profilePickerPlacement ? ' profile-picker-panel' : ''}`} style={profilePickerPlacement ? profilePickerPlacement : undefined}>
         <header className="profile-header">
           <h2>{profileGame.title}</h2>
           <button className="dialog-close" type="button" aria-label="Fechar seleção de perfil" onClick={() => { setProfileGame(null); setProfilePickerPlacement(null); setCreatingProfile(false) }}>×</button>
         </header>
         <div className="profile-body">
+          <div className="profile-picker-content">
+          <div className="profile-picker-profiles">
           {profiles.length > 0 && <div className="profile-list">
             {profiles.map(profile => {
               const isRunning = activeProfileIds.has(profile.id)
@@ -1151,6 +1148,8 @@ function App() {
               </button>
             </div>})}
           </div>}
+          </div>
+          <div className="profile-picker-create">
           {!creatingProfile && <button className="profile-add" type="button" aria-label="Criar novo perfil" onClick={() => setCreatingProfile(true)}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
           </button>}
@@ -1159,6 +1158,8 @@ function App() {
             <button type="submit" disabled={profileBusy}>{profileBusy ? '...' : 'Criar'}</button>
           </form>}
           {profileError && <p className="profile-error" role="alert">{profileError}</p>}
+          </div>
+          </div>
         </div>
       </div>
     </div>}
