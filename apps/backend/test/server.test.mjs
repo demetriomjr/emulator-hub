@@ -7,6 +7,7 @@ import { afterEach, describe, test } from 'node:test'
 
 import { bootstrapHubServer, createHubServer, createListenFailureDiagnostic } from '../server.mjs'
 import { createMemoryRedisPersistence } from '../../packages/redis-persistence.mjs'
+import { encodeSnapshotBundle } from '../../packages/emulator-snapshot.mjs'
 
 const liveServers = new Set()
 const liveFixtures = new Set()
@@ -111,13 +112,111 @@ async function jsonResponse(response) {
   return response.json()
 }
 
+async function acquirePlayerLease(baseUrl, gameId, profileId, sessionId = 'player-session-a', cookie = '') {
+  const response = await fetch(`${baseUrl}/api/games/${gameId}/player-leases`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) }, body: JSON.stringify({ profileId, sessionId }),
+  })
+  return { response, body: await jsonResponse(response), cookie: response.headers.get('set-cookie')?.split(';')[0] }
+}
+
 describe('hub backend HTTP contract', () => {
+  test('serves one lease-protected global snapshot slot from the launch descriptor', async () => {
+    const rom = Buffer.from('snapshot game')
+    const { baseUrl } = await startFixture([{ id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom) }], { 'pokemon-red.gb': rom })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Red' }) }))
+    const lease = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id)
+    const headers = { Cookie: lease.cookie, 'X-Player-Session-Id': 'player-session-a', 'X-Player-Lease-Generation': String(lease.body.leaseGeneration) }
+
+    assert.match(lease.body.snapshotUrl, /\/snapshot$/)
+    assert.equal(lease.body.romSha256, sha256(rom))
+    assert.equal(typeof lease.body.runtimeId, 'string')
+    assert.equal((await fetch(`${baseUrl}${lease.body.snapshotUrl}`, { headers })).status, 404)
+
+    const body = await encodeSnapshotBundle({
+      metadata: { profileId: profile.id, gameId: 'pokemon-red', core: 'gambatte', romSha256: sha256(rom), runtimeId: lease.body.runtimeId },
+      state: new Uint8Array([1]), save: new Uint8Array([2]),
+    })
+    const written = await fetch(`${baseUrl}${lease.body.snapshotUrl}`, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/vnd.emulator-hub.snapshot', 'If-Match': '*' }, body })
+    assert.equal(written.status, 201)
+    const read = await fetch(`${baseUrl}${lease.body.snapshotUrl}`, { headers })
+    assert.equal(read.status, 200)
+    assert.equal(read.headers.get('etag'), '"1"')
+  })
+
+  test('fences a stale player session and rejects a foreign device while the lease is alive', async () => {
+    const rom = Buffer.from('leased game')
+    const { baseUrl } = await startFixture([{ id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom) }], { 'pokemon-red.gb': rom })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Red' }) }))
+    const first = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'session-one')
+    assert.equal(first.response.status, 200)
+    const blocked = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'foreign-session', 'emulator_hub_device=foreign-device-id')
+    assert.equal(blocked.response.status, 409)
+    const replacement = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'session-two', first.cookie)
+    assert.equal(replacement.response.status, 200)
+    assert.equal(replacement.body.leaseGeneration, first.body.leaseGeneration + 1)
+    const staleHeartbeat = await fetch(`${baseUrl}/api/player-leases/session-one/heartbeat`, { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: first.cookie }, body: JSON.stringify({ profileId: profile.id, gameId: 'pokemon-red', generation: first.body.leaseGeneration }) })
+    assert.equal(staleHeartbeat.status, 410)
+    const staleWrite = await fetch(`${baseUrl}/api/profiles/${profile.id}/games/pokemon-red/save`, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream', 'If-Match': '*', Cookie: first.cookie, 'X-Player-Session-Id': 'session-one', 'X-Player-Lease-Generation': String(first.body.leaseGeneration) }, body: Buffer.from([1]) })
+    assert.equal(staleWrite.status, 410)
+  })
+
   test('identifies Emulator Hub responses for the development supervisor', async () => {
     const { baseUrl } = await startFixture([])
 
     const response = await fetch(`${baseUrl}/api/games`)
 
     assert.equal(response.headers.get('x-emulator-hub-backend'), '1')
+  })
+
+  test('keeps a sanitized, session-filtered backlog of client diagnostics', async () => {
+    const fixture = await createFixture([])
+    const logged = []
+    const server = createHubServer({
+      ...fixture,
+      clientDiagnosticLogger: { info: (event, context) => logged.push({ event, context }) },
+    })
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+    liveServers.add(server)
+    const baseUrl = `http://127.0.0.1:${server.address().port}`
+
+    const accepted = await fetch(`${baseUrl}/api/debug/client-events`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'ios-session-1', source: 'player', kind: 'network-error', message: 'request failed',
+        page: '/player.html?profileId=private', request: { method: 'GET', path: '/api/games?private=1', status: 503 },
+      }),
+    })
+    assert.equal(accepted.status, 204)
+    assert.equal(await accepted.text(), '')
+
+    await fetch(`${baseUrl}/api/debug/client-events`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: 'ios-session-2', source: 'hub', kind: 'uncaught-error', message: 'catalog failed' }),
+    })
+
+    const response = await fetch(`${baseUrl}/api/debug/client-events?sessionId=ios-session-1`)
+    assert.equal(response.status, 200)
+    const { events } = await jsonResponse(response)
+    assert.equal(events.length, 1)
+    assert.equal(events[0].page, '/player.html')
+    assert.deepEqual(events[0].request, { method: 'GET', path: '/api/games', status: 503 })
+    assert.equal(logged.length, 2)
+    assert.equal(logged[0].event, 'mobile.client-diagnostic')
+  })
+
+  test('rejects malformed and unsupported client diagnostic requests', async () => {
+    const { baseUrl } = await startFixture([])
+
+    const malformed = await fetch(`${baseUrl}/api/debug/client-events`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: 'ios-session-1', source: 'unknown', kind: 'uncaught-error' }),
+    })
+    assert.equal(malformed.status, 400)
+    assert.deepEqual(await jsonResponse(malformed), { error: 'Client diagnostic is invalid.' })
+
+    const unsupported = await fetch(`${baseUrl}/api/debug/client-events`, { method: 'PUT' })
+    assert.equal(unsupported.status, 405)
+    assert.equal(unsupported.headers.get('allow'), 'GET, POST')
   })
 
   test('reports the conflicting listener when the backend cannot bind its endpoint', async () => {
@@ -636,9 +735,10 @@ describe('hub backend HTTP contract', () => {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'May' }),
     }))
     const bytes = Buffer.from([7, 8, 9])
+    const lease = await acquirePlayerLease(baseUrl, 'pokemon-emerald', profile.id)
 
     const saved = await fetch(`${baseUrl}/api/profiles/${profile.id}/games/pokemon-emerald/save`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/octet-stream', 'If-Match': '*' }, body: bytes,
+      method: 'PUT', headers: { 'Content-Type': 'application/octet-stream', 'If-Match': '*', Cookie: lease.cookie, 'X-Player-Session-Id': 'player-session-a', 'X-Player-Lease-Generation': String(lease.body.leaseGeneration) }, body: bytes,
     })
 
     assert.equal(saved.status, 201)
@@ -738,8 +838,9 @@ describe('hub backend HTTP contract', () => {
     assert.equal((await fetch(saveUrl)).status, 404)
 
     const firstSave = Buffer.from([1, 2, 3, 4])
+    const lease = await acquirePlayerLease(baseUrl, 'pokemon-emerald', profile.id)
     const created = await fetch(saveUrl, {
-      method: 'PUT', headers: { 'Content-Type': 'application/octet-stream', 'If-Match': '*' }, body: firstSave,
+      method: 'PUT', headers: { 'Content-Type': 'application/octet-stream', 'If-Match': '*', Cookie: lease.cookie, 'X-Player-Session-Id': 'player-session-a', 'X-Player-Lease-Generation': String(lease.body.leaseGeneration) }, body: firstSave,
     })
     assert.equal(created.status, 201)
     assert.deepEqual(await jsonResponse(created), { revision: 1, sha256: sha256(firstSave) })
@@ -752,7 +853,7 @@ describe('hub backend HTTP contract', () => {
 
     const changedSave = Buffer.from([4, 3, 2, 1])
     const updated = await fetch(saveUrl, {
-      method: 'PUT', headers: { 'Content-Type': 'application/octet-stream', 'If-Match': '"1"' }, body: changedSave,
+      method: 'PUT', headers: { 'Content-Type': 'application/octet-stream', 'If-Match': '"1"', Cookie: lease.cookie, 'X-Player-Session-Id': 'player-session-a', 'X-Player-Lease-Generation': String(lease.body.leaseGeneration) }, body: changedSave,
     })
     assert.equal(updated.status, 200)
     assert.deepEqual(await jsonResponse(updated), { revision: 2, sha256: sha256(changedSave) })
@@ -799,7 +900,7 @@ describe('hub backend HTTP contract', () => {
     assert.equal(profile.name, 'Dawn')
 
     const listed = await fetch(`${baseUrl}/api/games/pokemon-red/profiles`)
-    assert.deepEqual(await jsonResponse(listed), { profiles: [profile] })
+    assert.deepEqual(await jsonResponse(listed), { profiles: [{ ...profile, leaseActive: false }] })
 
     const renamed = await fetch(`${baseUrl}/api/games/pokemon-red/profiles/${profile.id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Dawn II' }),
@@ -853,8 +954,8 @@ describe('hub backend HTTP contract', () => {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Leaf' }),
     }))
 
-    assert.deepEqual(await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`)), { profiles: [redProfile] })
-    assert.deepEqual(await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-blue/profiles`)), { profiles: [blueProfile] })
+    assert.deepEqual(await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`)), { profiles: [{ ...redProfile, leaseActive: false }] })
+    assert.deepEqual(await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-blue/profiles`)), { profiles: [{ ...blueProfile, leaseActive: false }] })
     assert.equal((await fetch(`${baseUrl}/api/games/pokemon-blue/launch?profileId=${redProfile.id}`)).status, 404)
     assert.equal((await fetch(`${baseUrl}/api/profiles/${redProfile.id}/games/pokemon-blue/save`)).status, 404)
   })
@@ -971,7 +1072,7 @@ describe('hub backend HTTP contract', () => {
 
     const catalog = await jsonResponse(await fetch(`${baseUrl}/api/games`))
 
-    assert.deepEqual(catalog.games[0].profiles, [{ ...profile, hasSave: false }])
+    assert.deepEqual(catalog.games[0].profiles, [{ ...profile, hasSave: false, leaseActive: false }])
   })
 
   test('lists only loadable save profiles before the workspace selector opens them', async () => {
@@ -1003,8 +1104,8 @@ describe('hub backend HTTP contract', () => {
 
     assert.equal(catalogResponse.status, 200)
     assert.deepEqual((await jsonResponse(catalogResponse)).games[0].profiles, [
-      { ...profiles['pokemon-emerald'][0], hasSave: true },
-      { ...profiles['pokemon-emerald'][1], hasSave: false },
+      { ...profiles['pokemon-emerald'][0], hasSave: true, leaseActive: false },
+      { ...profiles['pokemon-emerald'][1], hasSave: false, leaseActive: false },
     ])
     assert.equal(response.status, 200)
     assert.deepEqual(await jsonResponse(response), {
@@ -1058,13 +1159,16 @@ describe('hub backend HTTP contract', () => {
     assert.equal(first.status, 200)
     assert.deepEqual(await jsonResponse(first), await jsonResponse(second))
     const descriptor = await (await fetch(launchUrl)).json()
-    assert.deepEqual(Object.keys(descriptor).sort(), ['core', 'gameId', 'id', 'profileId', 'romUrl', 'saveUrl', 'title'])
+    assert.deepEqual(Object.keys(descriptor).sort(), ['core', 'gameId', 'id', 'profileId', 'romSha256', 'romUrl', 'runtimeId', 'saveUrl', 'snapshotUrl', 'title'])
     assert.equal(descriptor.id, 'pokemon-red')
     assert.equal(descriptor.title, 'Pokémon Red')
     assert.equal(descriptor.core, 'gambatte')
     assert.equal(descriptor.romUrl, '/roms/pokemon-red')
     assert.equal(descriptor.profileId, profile.id)
     assert.equal(descriptor.saveUrl, `/api/profiles/${profile.id}/games/pokemon-red/save`)
+    assert.equal(descriptor.snapshotUrl, `/api/profiles/${profile.id}/games/pokemon-red/snapshot`)
+    assert.equal(descriptor.romSha256, sha256(rom))
+    assert.equal(descriptor.runtimeId, 'emulatorjs-4.2.3')
     assert.equal(Number.isInteger(descriptor.gameId), true)
 
     const unknown = await fetch(`${baseUrl}/api/games/no-such-game/launch?profileId=${profile.id}`)

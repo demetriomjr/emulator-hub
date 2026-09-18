@@ -12,6 +12,7 @@ test('frontend development server and backend proxy use frontend environment set
 
   assert.equal(configuration.server.host, '127.0.0.1')
   assert.equal(configuration.server.port, 5174)
+  assert.equal(configuration.server.strictPort, true)
   assert.equal(configuration.server.proxy['/api'], 'http://127.0.0.1:3001')
   assert.equal(configuration.server.proxy['/roms'], 'http://127.0.0.1:3001')
 })

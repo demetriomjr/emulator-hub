@@ -1,5 +1,13 @@
 # Specifications
 
+- [Spec 034 — Global emulator snapshots](034-global-emulator-snapshots.md): one authoritative cross-device EmulatorJS state per profile/game, atomic state-plus-save bundles, and preflight before engine startup.
+
+- [Spec 034 implementation plan](034-global-emulator-snapshots-plan.md): test-first tasks for the snapshot envelope, backend resource, preflight, and player lifecycle.
+
+- [Spec 032 — Mobile standalone player](032-mobile-standalone-player.md): installed-web-app metadata, mobile portrait guidance, and resilient player closing.
+
+- [Spec 031 — Mobile client diagnostics](031-mobile-client-diagnostics.md): opt-in iPhone browser failure reporting, ephemeral backend backlog, and Caddy access-log correlation.
+
 - [Spec 028 — Pokemon Hub session contract repair](028-pokemon-hub-session-contract-repair.md): active compact-session protocol, atomic attach ownership, lease reconciliation, compact corrections, and terminal browser recovery. Supersedes Spec 026's browser transfer flow and amends Spec 027.
 
 - [Spec 026 — Persistent Hub grid transfers](026-pokemon-hub-persistent-grid-transfers.md): authoritative game Box and Hub grid placement transfers through the snapshot coordinator.

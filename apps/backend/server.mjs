@@ -11,6 +11,8 @@ import { createGameCatalogResponse } from '../packages/game-catalog-contract.mjs
 import { createRedisProfileStore } from '../packages/profile-store.mjs'
 import { createRedisControlProfileStore } from '../packages/control-profile-store.mjs'
 import { createSaveStore } from '../packages/save-store.mjs'
+import { createSnapshotStore } from '../packages/snapshot-store.mjs'
+import { decodeSnapshotBundle, encodeSnapshotBundle } from '../packages/emulator-snapshot.mjs'
 import { createRedisPokemonHubStore } from '../packages/pokemon-hub-store.mjs'
 import { createRedisPokemonHubProfileStore } from '../packages/pokemon-hub-profile-store.mjs'
 import { createPokemonHubSessionStore } from '../packages/pokemon-hub-session-store.mjs'
@@ -31,6 +33,8 @@ import { createRomDiscovery } from '../packages/rom-discovery.mjs'
 import { createRedisRomRegistry } from '../packages/rom-registry.mjs'
 import { createRedisPersistence } from '../packages/redis-persistence.mjs'
 import { migrateLegacyJsonData } from '../packages/redis-legacy-migration.mjs'
+import { createClientDiagnosticStore } from '../packages/client-diagnostic-store.mjs'
+import { createPlayerLeaseCoordinator } from '../packages/player-lease-coordinator.mjs'
 
 const backendDirectory = dirname(fileURLToPath(import.meta.url))
 const defaultCatalogPath = join(backendDirectory, 'catalog.json')
@@ -38,6 +42,7 @@ const defaultRomsDirectory = join(backendDirectory, 'roms')
 const defaultProfilesPath = join(backendDirectory, 'data', 'profiles')
 const defaultControlProfilePath = join(backendDirectory, 'data', 'control-profile.json')
 const defaultSavesPath = join(backendDirectory, 'data', 'saves')
+const defaultSnapshotsPath = join(backendDirectory, 'data', 'snapshots')
 const defaultPokemonHubPath = join(backendDirectory, 'data', 'pokemon-hub')
 const defaultPokemonHubProfilesPath = join(backendDirectory, 'data', 'pokemon-hub-profiles')
 const defaultRomRegistryPath = join(backendDirectory, 'data', 'rom-registry.json')
@@ -79,6 +84,7 @@ export function createHubServer(options = {}) {
     profileStore: options.profileStore ?? createRedisProfileStore({ persistence }),
     controlProfileStore: options.controlProfileStore ?? createRedisControlProfileStore({ persistence }),
     saveStore: options.saveStore ?? createSaveStore({ dataPath: options.savesPath ?? defaultSavesPath }),
+    snapshotStore: options.snapshotStore ?? createSnapshotStore({ dataPath: options.snapshotsPath ?? defaultSnapshotsPath }),
     pokemonHubStore: options.pokemonHubStore ?? createRedisPokemonHubStore({ persistence }),
     pokemonHubProfileStore: options.pokemonHubProfileStore ?? createRedisPokemonHubProfileStore({ persistence }),
     pokemonHubSessions: options.pokemonHubSessions ?? createPokemonHubSessionStore(),
@@ -86,7 +92,11 @@ export function createHubServer(options = {}) {
     pokemonSaveAdapters: options.pokemonSaveAdapters ?? createPokemonSaveAdapterRegistry([pokemonGen3Adapter]),
     pokemonHubEventStore: options.pokemonHubEventStore ?? createPokemonHubEventStore({ persistence }),
     pokemonHubLogger: normalizePokemonHubLogger(options.pokemonHubLogger),
+    clientDiagnosticStore: options.clientDiagnosticStore ?? createClientDiagnosticStore(),
+    clientDiagnosticLogger: normalizeClientDiagnosticLogger(options.clientDiagnosticLogger),
+    playerLeases: options.playerLeases ?? createPlayerLeaseCoordinator({ persistence }),
   }
+  config.saveStore = invalidateSnapshotAfterSave(config.saveStore, config.snapshotStore)
   config.pokemonHubSnapshotCoordinator = options.pokemonHubSnapshotCoordinator ?? createPokemonHubSnapshotCoordinator({ persistence, eventStore: config.pokemonHubEventStore, logger: config.pokemonHubLogger, validatePlacementChange: validatePokemonHubTransferPlacement })
   const canCreatePokemonHubSessionService = ['getSnapshot', 'renew', 'release', 'sync', 'reconcileWorkspaceLeases'].every(method => typeof config.pokemonHubSnapshotCoordinator[method] === 'function')
   config.pokemonHubSessionService = options.pokemonHubSessionService ?? (canCreatePokemonHubSessionService
@@ -190,6 +200,8 @@ async function handleRequest(request, response, config) {
   const gameProfileRoute = parseGameProfileRoute(route.pathname)
   const isControlProfileRoute = route.pathname === '/api/control-profile'
   const saveRoute = parseSaveRoute(route.pathname)
+  const snapshotRoute = parseSnapshotRoute(route.pathname)
+  const playerLeaseRoute = parsePlayerLeaseRoute(route.pathname)
   const pokemonHubRoute = parsePokemonHubRoute(route.pathname)
   const pokemonHubSessionRoute = parsePokemonHubSessionRoute(route.pathname)
   const pokemonHubSessionRequestLogger = ['snapshot', 'heartbeat'].includes(pokemonHubSessionRoute?.kind)
@@ -222,24 +234,32 @@ async function handleRequest(request, response, config) {
   const isSaveProfileGamesRoute = route.pathname === '/api/pokemon-hub/save-profile-games'
   const pokemonHubProfilesRoute = route.pathname === '/api/pokemon-hub/profiles'
   const pokemonHubProfileRoute = parsePokemonHubProfileRoute(route.pathname)
+  const isClientDiagnosticsRoute = route.pathname === '/api/debug/client-events'
   const supportedMethod = request.method === 'GET'
     || (request.method === 'HEAD' && isRomRoute)
     || (request.method === 'POST' && gameProfilesRoute)
     || (request.method === 'POST' && pokemonHubProfilesRoute)
     || ((request.method === 'PATCH' || request.method === 'DELETE') && pokemonHubProfileRoute)
-    || (request.method === 'PUT' && (isControlProfileRoute || saveRoute))
+    || (request.method === 'PUT' && (isControlProfileRoute || saveRoute || snapshotRoute))
+    || (playerLeaseRoute && ((request.method === 'POST' && ['acquire', 'heartbeat'].includes(playerLeaseRoute.kind)) || (request.method === 'DELETE' && playerLeaseRoute.kind === 'release') || (request.method === 'GET' && playerLeaseRoute.kind === 'launch')))
     || (request.method === 'POST' && ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute?.kind))
     || (pokemonHubSessionRoute && ((request.method === 'POST' && ['open', 'attach', 'heartbeat', 'snapshot', 'close-command'].includes(pokemonHubSessionRoute.kind)) || (request.method === 'DELETE' && ['detach', 'close'].includes(pokemonHubSessionRoute.kind))))
     || (request.method === 'PATCH' && gameProfileRoute)
     || (request.method === 'DELETE' && gameProfileRoute)
+    || (isClientDiagnosticsRoute && request.method === 'POST')
   if (!supportedMethod) {
-    response.setHeader('Allow', pokemonHubSessionRoute ? pokemonHubSessionRoute.kind === 'detach' || pokemonHubSessionRoute.kind === 'close' ? 'DELETE' : 'POST' : pokemonHubRoute ? ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute.kind) ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'PATCH, DELETE' : pokemonHubProfilesRoute || gameProfilesRoute ? 'GET, POST' : saveRoute || isControlProfileRoute ? 'GET, PUT' : gameProfileRoute ? 'PATCH, DELETE' : isRomRoute ? 'GET, HEAD' : 'GET')
+    response.setHeader('Allow', isClientDiagnosticsRoute ? 'GET, POST' : pokemonHubSessionRoute ? pokemonHubSessionRoute.kind === 'detach' || pokemonHubSessionRoute.kind === 'close' ? 'DELETE' : 'POST' : pokemonHubRoute ? ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute.kind) ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'PATCH, DELETE' : pokemonHubProfilesRoute || gameProfilesRoute ? 'GET, POST' : snapshotRoute || saveRoute || isControlProfileRoute ? 'GET, PUT' : gameProfileRoute ? 'PATCH, DELETE' : isRomRoute ? 'GET, HEAD' : 'GET')
     json(response, 405, { error: 'Method is not supported for this route.' })
     return
   }
 
   if (gameProfilesRoute) {
     await handleGameProfiles(request, response, config, gameProfilesRoute.gameId)
+    return
+  }
+
+  if (isClientDiagnosticsRoute) {
+    await handleClientDiagnostics(request, response, config, route.searchParams)
     return
   }
 
@@ -271,6 +291,16 @@ async function handleRequest(request, response, config) {
 
   if (saveRoute) {
     await handleSave(request, response, config, saveRoute)
+    return
+  }
+
+  if (snapshotRoute) {
+    await handleSnapshot(request, response, config, snapshotRoute)
+    return
+  }
+
+  if (playerLeaseRoute) {
+    await handlePlayerLease(request, response, config, playerLeaseRoute, route.searchParams)
     return
   }
 
@@ -387,6 +417,9 @@ async function handleGameProfiles(request, response, config, encodedGameId) {
 async function handleGameProfile(request, response, config, route) {
   const entry = await findProfileGame(response, config, route.gameId)
   if (entry === null) return
+  if (await config.playerLeases.isActive({ profileId: route.profileId, gameId: entry.id })) {
+    return json(response, 409, { error: 'This profile is open in an active player session.', code: 'PLAYER_LEASE_HELD' })
+  }
   if (request.method === 'PATCH') await updateProfile(request, response, config, entry.id, route.profileId)
   else await deleteProfile(response, config, entry.id, route.profileId)
 }
@@ -410,7 +443,8 @@ async function findProfileGame(response, config, encodedGameId) {
 }
 
 async function listProfiles(response, config, gameId) {
-  json(response, 200, { profiles: await config.profileStore.list(gameId) })
+  const profiles = await config.profileStore.list(gameId)
+  json(response, 200, { profiles: await Promise.all(profiles.map(async profile => ({ ...profile, leaseActive: await config.playerLeases.isActive({ profileId: profile.id, gameId }) }))) })
 }
 
 async function getControlProfile(response, config) {
@@ -549,6 +583,7 @@ async function listGames(response, config) {
       game.profiles = await Promise.all(profiles.map(async profile => ({
         ...profile,
         hasSave: await config.saveStore.get(profile.id, entry.id) !== null,
+        leaseActive: await config.playerLeases.isActive({ profileId: profile.id, gameId: entry.id }),
       })))
     } else {
       game.profiles = []
@@ -684,6 +719,9 @@ async function launchGame(response, config, encodedId, profileId) {
     gameId: stableGameId(`${profile.id}:${entry.id}`),
     romUrl: `/roms/${encodeURIComponent(entry.id)}`,
     saveUrl: `/api/profiles/${encodeURIComponent(profile.id)}/games/${encodeURIComponent(entry.id)}/save`,
+    snapshotUrl: `/api/profiles/${encodeURIComponent(profile.id)}/games/${encodeURIComponent(entry.id)}/snapshot`,
+    romSha256: entry.sha256,
+    runtimeId: 'emulatorjs-4.2.3',
   })
 }
 
@@ -999,6 +1037,38 @@ function jsonPokemonHubError(response, error) {
   json(response, status, { error: error.message, ...(typeof error.code === 'string' ? { code: error.code } : {}) })
 }
 
+async function handleSnapshot(request, response, config, { profileId, gameId }) {
+  const entry = await findEntry(config, gameId)
+  if (entry === null) return json(response, 404, { error: 'Game was not found.' })
+  if (await config.profileStore.get(entry.id, profileId) === null) return json(response, 404, { error: 'Profile was not found.' })
+  let lease
+  try {
+    lease = playerLeaseHeaders(request)
+    await config.playerLeases.assertWrite({ profileId, gameId, ...lease })
+  } catch (error) { return json(response, 410, { error: error.message, ...(error.code ? { code: error.code } : {}) }) }
+  if (request.method === 'GET') {
+    const snapshot = await config.snapshotStore.get(profileId, gameId)
+    if (!snapshot) return json(response, 404, { error: 'Snapshot was not found.' })
+    const bytes = await encodeSnapshotBundle({ metadata: { ...snapshot.metadata, profileId, gameId }, state: snapshot.state, save: snapshot.save })
+    response.writeHead(200, { 'Cache-Control': 'no-store', 'Content-Length': bytes.length, 'Content-Type': 'application/vnd.emulator-hub.snapshot', ETag: `"${snapshot.metadata.revision}"`, 'X-Snapshot-Sha256': snapshot.metadata.sha256, 'X-Content-Type-Options': 'nosniff' })
+    response.end(bytes)
+    return
+  }
+  let decoded
+  try { decoded = await decodeSnapshotBundle(await readBinaryBody(request, 'application/vnd.emulator-hub.snapshot', 35 * 1024 * 1024)) } catch (error) { return json(response, error.code === 'REQUEST_BODY_TOO_LARGE' ? 413 : 400, { error: error.message, ...(error.code ? { code: error.code } : {}) }) }
+  const expectedRevision = parseExpectedRevision(request.headers['if-match'])
+  if (expectedRevision === undefined) return json(response, 428, { error: 'If-Match is required.' })
+  const runtimeId = 'emulatorjs-4.2.3'
+  if (decoded.metadata.profileId !== profileId || decoded.metadata.gameId !== gameId || decoded.metadata.core !== entry.core || decoded.metadata.romSha256 !== entry.sha256 || decoded.metadata.runtimeId !== runtimeId) return json(response, 400, { error: 'Snapshot metadata is incompatible with this launch.' })
+  try {
+    const saved = await config.snapshotStore.put(profileId, gameId, decoded, expectedRevision, { fenceGeneration: lease.generation })
+    json(response, expectedRevision === null ? 201 : 200, saved)
+  } catch (error) {
+    const status = error.code === 'SNAPSHOT_REVISION_CONFLICT' ? 412 : error.code === 'SNAPSHOT_FENCE_CONFLICT' ? 409 : 400
+    json(response, status, { error: error.message, ...(error.code ? { code: error.code } : {}) })
+  }
+}
+
 async function handleSave(request, response, config, { profileId, gameId }) {
   const entry = await findEntry(config, gameId)
   if (entry === null) return json(response, 404, { error: 'Game was not found.' })
@@ -1020,17 +1090,20 @@ async function handleSave(request, response, config, { profileId, gameId }) {
   const expectedRevision = parseExpectedRevision(request.headers['if-match'])
   if (expectedRevision === undefined) return json(response, 428, { error: 'If-Match is required.' })
   try {
-    const saved = await config.saveStore.put(profileId, gameId, bytes, expectedRevision)
+    const lease = playerLeaseHeaders(request)
+    await config.playerLeases.assertWrite({ profileId, gameId, ...lease })
+    const saved = await config.saveStore.put(profileId, gameId, bytes, expectedRevision, { fenceGeneration: lease.generation })
     await adoptSaveIfSupported(config, profileId, entry, { bytes, revision: saved.revision })
     json(response, expectedRevision === null ? 201 : 200, { revision: saved.revision, sha256: saved.sha256 })
   } catch (error) {
-    json(response, error.code === 'SAVE_REVISION_CONFLICT' ? 412 : 400, { error: error.message })
+    const status = error.code === 'SAVE_REVISION_CONFLICT' ? 412 : error.code === 'PLAYER_LEASE_INVALID' ? 410 : error.code === 'SAVE_FENCE_CONFLICT' ? 409 : 400
+    json(response, status, { error: error.message, ...(error.code ? { code: error.code } : {}) })
   }
 }
 
-async function readBinaryBody(request) {
-  if (request.headers['content-type']?.toLowerCase() !== 'application/octet-stream') {
-    const error = new Error('Content-Type must be application/octet-stream.')
+async function readBinaryBody(request, expectedContentType = 'application/octet-stream', maximumBytes = 2 * 1024 * 1024) {
+  if (request.headers['content-type']?.toLowerCase() !== expectedContentType) {
+    const error = new Error(`Content-Type must be ${expectedContentType}.`)
     error.code = 'UNSUPPORTED_CONTENT_TYPE'
     throw error
   }
@@ -1038,7 +1111,7 @@ async function readBinaryBody(request) {
   let length = 0
   for await (const chunk of request) {
     length += chunk.length
-    if (length > 2 * 1024 * 1024) {
+    if (length > maximumBytes) {
       const error = new Error('Request body is too large.')
       error.code = 'REQUEST_BODY_TOO_LARGE'
       throw error
@@ -1287,6 +1360,103 @@ async function readJsonBody(request, maximumBytes = defaultJsonBodyMaximumBytes)
   }
 }
 
+function invalidateSnapshotAfterSave(saveStore, snapshotStore) {
+  return {
+    ...saveStore,
+    async put(profileId, gameId, bytes, expectedRevision, options) {
+      const saved = await saveStore.put(profileId, gameId, bytes, expectedRevision, options)
+      await snapshotStore.delete(profileId, gameId)
+      return saved
+    },
+  }
+}
+
+function parseSnapshotRoute(pathname) {
+  const match = /^\/api\/profiles\/([^/]+)\/games\/([^/]+)\/snapshot$/.exec(pathname)
+  return match ? { profileId: match[1], gameId: match[2] } : null
+}
+
+function parsePlayerLeaseRoute(pathname) {
+  const acquire = /^\/api\/games\/([^/]+)\/player-leases$/.exec(pathname)
+  if (acquire) return { kind: 'acquire', gameId: acquire[1] }
+  const session = /^\/api\/player-leases\/([^/]+)(?:\/(launch|heartbeat))?$/.exec(pathname)
+  if (!session) return null
+  return { kind: session[2] ?? 'release', sessionId: session[1] }
+}
+
+async function handlePlayerLease(request, response, config, route, searchParams) {
+  const deviceId = playerDeviceId(request, response)
+  if (route.kind === 'acquire') {
+    let body
+    try { body = await readJsonBody(request) } catch (error) { return json(response, 400, { error: error.message }) }
+    const entry = await findEntry(config, decodeId(route.gameId))
+    if (!entry) return json(response, 404, { error: 'Game was not found.' })
+    if (await config.profileStore.get(entry.id, body.profileId) === null) return json(response, 404, { error: 'Profile was not found.' })
+    const verification = await verifyRom(entry, config.romsDirectory)
+    if (!verification.ok) return json(response, 409, { error: verification.reason })
+    try {
+      const lease = await config.playerLeases.acquire({ profileId: body.profileId, gameId: entry.id, deviceId, sessionId: body.sessionId })
+      try { await config.saveStore.advanceFence(body.profileId, entry.id, lease.generation) } catch (error) { if (error.code !== 'SAVE_MISSING') throw error }
+      try { await config.snapshotStore.advanceFence(body.profileId, entry.id, lease.generation) } catch (error) { if (error.code !== 'SNAPSHOT_MISSING') throw error }
+      return json(response, 200, { ...(await launchDescriptor(config, entry, body.profileId)), leaseGeneration: lease.generation })
+    } catch (error) { return json(response, error.code === 'PLAYER_LEASE_HELD' ? 409 : 400, { error: error.message, code: error.code }) }
+  }
+  let body
+  try { body = request.method === 'GET' ? Object.fromEntries(searchParams) : await readJsonBody(request) } catch (error) { return json(response, 400, { error: error.message }) }
+  try {
+    const input = { profileId: body.profileId, gameId: body.gameId, deviceId, sessionId: route.sessionId, generation: body.generation }
+    if (route.kind === 'heartbeat') return json(response, 200, await config.playerLeases.renew(input))
+    if (route.kind === 'release') return json(response, 200, await config.playerLeases.release(input))
+    const entry = await findEntry(config, input.gameId)
+    if (!entry) return json(response, 404, { error: 'Game was not found.' })
+    if (await config.profileStore.get(entry.id, input.profileId) === null) return json(response, 404, { error: 'Profile was not found.' })
+    const verification = await verifyRom(entry, config.romsDirectory)
+    if (!verification.ok) return json(response, 409, { error: verification.reason })
+    return json(response, 200, { ...(await launchDescriptor(config, entry, input.profileId)), leaseGeneration: input.generation })
+  } catch (error) { return json(response, error.code === 'PLAYER_LEASE_INVALID' ? 410 : error.code === 'PLAYER_LEASE_HELD' ? 409 : 400, { error: error.message, code: error.code }) }
+}
+
+function playerDeviceId(request, response) {
+  const current = /(?:^|;\s*)emulator_hub_device=([^;]+)/.exec(request.headers.cookie ?? '')?.[1]
+  if (current && /^[0-9a-f-]{36}$/i.test(current)) return current
+  const deviceId = randomUUID()
+  response.setHeader('Set-Cookie', `emulator_hub_device=${deviceId}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax`)
+  return deviceId
+}
+
+function playerLeaseHeaders(request) {
+  const sessionId = request.headers['x-player-session-id']
+  const generation = Number(request.headers['x-player-lease-generation'])
+  if (typeof sessionId !== 'string' || !sessionId || !Number.isInteger(generation) || generation < 1) {
+    const error = new Error('An active player lease is required to save.')
+    error.code = 'PLAYER_LEASE_INVALID'
+    throw error
+  }
+  return { deviceId: playerDeviceId(request, { setHeader() {} }), sessionId, generation }
+}
+
+async function launchDescriptor(config, entry, profileId) {
+  return { id: entry.id, title: entry.title, core: entry.core, profileId, gameId: stableGameId(`${profileId}:${entry.id}`), romUrl: `/roms/${encodeURIComponent(entry.id)}`, saveUrl: `/api/profiles/${encodeURIComponent(profileId)}/games/${encodeURIComponent(entry.id)}/save`, snapshotUrl: `/api/profiles/${encodeURIComponent(profileId)}/games/${encodeURIComponent(entry.id)}/snapshot`, romSha256: entry.sha256, runtimeId: 'emulatorjs-4.2.3' }
+}
+
+async function handleClientDiagnostics(request, response, config, searchParams) {
+  if (request.method === 'GET') {
+    json(response, 200, { events: config.clientDiagnosticStore.list({ sessionId: searchParams.get('sessionId') ?? undefined }) })
+    return
+  }
+  try {
+    const event = config.clientDiagnosticStore.append(await readJsonBody(request))
+    config.clientDiagnosticLogger.info('mobile.client-diagnostic', event)
+    empty(response, 204)
+  } catch (error) {
+    if (error.code === 'CLIENT_DIAGNOSTIC_INVALID' || error.code === 'UNSUPPORTED_CONTENT_TYPE' || error.code === 'REQUEST_BODY_TOO_LARGE' || error.code === 'INVALID_JSON_BODY') {
+      json(response, 400, { error: error.message })
+      return
+    }
+    throw error
+  }
+}
+
 function json(response, status, payload) {
   const body = JSON.stringify(payload)
   response.writeHead(status, {
@@ -1432,6 +1602,13 @@ function normalizePokemonHubLogger(logger) {
     info() {},
     warn() {},
     error(event, context = {}) { console.error(pokemonHubLogLabel(context), { timestamp: new Date().toISOString(), level: 'error', event, ...context }) },
+  }
+}
+
+function normalizeClientDiagnosticLogger(logger) {
+  if (logger && typeof logger.info === 'function') return logger
+  return {
+    info(event, context = {}) { console.info('[Mobile client diagnostic]', { timestamp: new Date().toISOString(), event, ...context }) },
   }
 }
 

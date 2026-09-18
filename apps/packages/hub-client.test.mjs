@@ -1,7 +1,26 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { acquirePokemonHubSnapshot, closePokemonHubSession, releasePokemonHubSnapshot, renewPokemonHubSnapshot, syncPokemonHubSessionSnapshot, syncPokemonHubSnapshot, transferPokemonHub } from './hub-client.js'
+import { acquirePlayerLease, acquirePokemonHubSnapshot, closePokemonHubSession, getCloudSave, putCloudSave, releasePlayerLease, releasePokemonHubSnapshot, renewPokemonHubSnapshot, syncPokemonHubSessionSnapshot, syncPokemonHubSnapshot, transferPokemonHub } from './hub-client.js'
+
+test('sends player lease identity for acquire, save, and release', async () => {
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url, options })
+    if (options.method === 'PUT') return { ok: true, json: async () => ({ revision: 1 }) }
+    return { ok: true, json: async () => ({ leaseGeneration: 3 }) }
+  }
+  try {
+    await acquirePlayerLease('emerald', 'may', 'session-a')
+    await putCloudSave('/api/save', new Uint8Array([1]), null, { sessionId: 'session-a', generation: 3 })
+    await releasePlayerLease('session-a', { profileId: 'may', gameId: 'emerald', generation: 3 })
+  } finally { globalThis.fetch = originalFetch }
+  assert.deepEqual(calls.map(call => call.url), ['/api/games/emerald/player-leases', '/api/save', '/api/player-leases/session-a'])
+  assert.equal(calls[1].options.headers['X-Player-Session-Id'], 'session-a')
+  assert.equal(calls[1].options.headers['X-Player-Lease-Generation'], '3')
+  assert.equal(calls[2].options.method, 'DELETE')
+})
 
 test('sends the Pokemon Hub snapshot lifecycle to its profile-scoped routes', async () => {
   const originalFetch = globalThis.fetch

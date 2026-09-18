@@ -4,7 +4,7 @@ import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from '@dnd-
 import { PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom'
 import { Button, ConfigProvider, Form, Input, Modal, Popconfirm, Select } from 'antd'
 import { CloseOutlined, DeleteOutlined, EditOutlined, FolderAddOutlined, InboxOutlined, LeftOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons'
-import { closePokemonHubSession, createPokemonHubProfile, createProfile, deletePokemonHubProfile, deleteProfile as deleteProfileRequest, getControlProfile, getGames, getLaunch, getPokemonHub, getPokemonHubProfiles, getSaveProfileLayout, heartbeatPokemonHubSession, openPokemonHubSession, renamePokemonHubProfile, syncPokemonHubSessionSnapshot, updateControlProfile, updateProfile } from '../../packages/hub-client.js'
+import { acquirePlayerLease, closePokemonHubSession, createPokemonHubProfile, createProfile, deletePokemonHubProfile, deleteProfile as deleteProfileRequest, getControlProfile, getGames, getPokemonHub, getPokemonHubProfiles, getProfiles, getSaveProfileLayout, heartbeatPokemonHubSession, openPokemonHubSession, releasePlayerLease, renamePokemonHubProfile, syncPokemonHubSessionSnapshot, updateControlProfile, updateProfile } from '../../packages/hub-client.js'
 import { activeGamepadBindings, readGamepadBinding, readGamepadSnapshot } from '../../packages/gamepad-input.mjs'
 import { isPokemonHubDraggable, pokemonHubDragId } from '../../packages/pokemon-hub-drag-identity.mjs'
 import { getPokemonHubColumnCount, getPokemonHubGridWidth, getPokemonHubVisibleSlotCount } from '../../packages/pokemon-hub-grid.mjs'
@@ -19,8 +19,22 @@ import { deriveSaveProfileCatalog, replaceCatalogProfile } from '../../packages/
 import { activePaneSourceKind, addWorkspacePane, choosePaneSource, createPokemonHubWorkspaceState, firstAvailableHubSource, firstAvailableSaveSource, hasAvailableSaveProfile, isCompletePaneSource, isPaneSourceAvailable, removeWorkspacePane } from '../../packages/pokemon-hub-workspace.mjs'
 import { groupGamesByLayout } from '../../packages/hub-layout.mjs'
 import { getProfilePickerPlacement } from '../../packages/profile-picker-placement.mjs'
+import { appendClientDiagnosticsParameters, createClientDiagnostics, getClientDiagnosticsOptions } from '../../packages/client-diagnostics.mjs'
+import { closePlayerAfterSaveAttempts } from '../../packages/player-close.mjs'
+import { isMobileLandscapeViewport, isNarrowPortraitViewport } from '../../packages/mobile-viewport.mjs'
+import { shouldReloadForFrontendRevision } from '../../packages/frontend-revision.mjs'
+import { readFastForwardSpeed, writeFastForwardSpeed } from '../../packages/fast-forward-preference.mjs'
 import hubLayout from './hub-layout.json'
 import './styles.css'
+
+const clientDiagnosticsOptions = getClientDiagnosticsOptions(window.location.search)
+if (clientDiagnosticsOptions.enabled) {
+  createClientDiagnostics({ browser: window, source: 'hub', sessionId: clientDiagnosticsOptions.sessionId })
+}
+
+function readViewport() {
+  return { width: window.innerWidth, height: window.innerHeight }
+}
 
 const gbaControls = Object.freeze({
   l: { id: '10', label: 'L' },
@@ -72,6 +86,18 @@ function configurePlayerFrame(frame, message) {
   observer.observe(root, { childList: true, characterData: true, subtree: true })
   hideFastForwardOverlay()
   configuredPlayerFrames.add(frame)
+}
+
+function playerFrameUrl(session) {
+  const parameters = appendClientDiagnosticsParameters(new URLSearchParams({
+    id: session.gameId,
+    profileId: session.profileId,
+    sessionId: session.sessionId,
+    leaseGeneration: String(session.leaseGeneration),
+    fastForward: session.initialFastForwardEnabled ? '1' : '0',
+    fastForwardSpeed: String(session.initialFastForwardSpeed),
+  }), clientDiagnosticsOptions)
+  return `/player.html?${parameters}`
 }
 
 function ControlBinding({ control, profile, captureTarget, onCapture }) {
@@ -163,7 +189,7 @@ function App() {
   const [pokemonHubProfileRenaming, setPokemonHubProfileRenaming] = useState(null)
   const [pokemonHubProfileRenameName, setPokemonHubProfileRenameName] = useState('')
   const [fastForwardEnabled, setFastForwardEnabled] = useState(false)
-  const [fastForwardSpeed, setFastForwardSpeed] = useState(1.5)
+  const [fastForwardSpeed, setFastForwardSpeed] = useState(() => readFastForwardSpeed(document.cookie))
   const [profileGame, setProfileGame] = useState(null)
   const [profilePickerPlacement, setProfilePickerPlacement] = useState(null)
   const [profilePurpose, setProfilePurpose] = useState('launch')
@@ -175,13 +201,16 @@ function App() {
   const [profileError, setProfileError] = useState('')
   const [profileBusy, setProfileBusy] = useState(false)
   const [error, setError] = useState('')
+  const [installHelpOpen, setInstallHelpOpen] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
+  const [viewport, setViewport] = useState(readViewport)
   const playerShellRef = useRef(null)
   const pokemonHubSessionRef = useRef(null)
   const pokemonHubSessionOpeningRef = useRef(null)
   const pokemonHubSnapshotTimerRef = useRef(null)
   const pokemonHubPanesRef = useRef(pokemonHubPanes)
   const pokemonHubSnapshotsRef = useRef({})
+  const profilePickerRequestRef = useRef(0)
   pokemonHubPanesRef.current = pokemonHubPanes
   const { profilesByGame: saveProfilesByGame, saveProfileGames } = deriveSaveProfileCatalog(games)
 
@@ -201,6 +230,77 @@ function App() {
       })
       .finally(() => { if (active) setCatalogLoading(false) })
     return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    const updateViewport = () => setViewport(readViewport())
+    window.addEventListener('resize', updateViewport)
+    window.addEventListener('orientationchange', updateViewport)
+    window.visualViewport?.addEventListener('resize', updateViewport)
+    return () => {
+      window.removeEventListener('resize', updateViewport)
+      window.removeEventListener('orientationchange', updateViewport)
+      window.visualViewport?.removeEventListener('resize', updateViewport)
+    }
+  }, [])
+
+  useEffect(() => {
+    const receive = event => {
+      if (event.origin !== window.location.origin || event.data?.type !== 'emulator-hub:lease-lost') return
+      if (event.data.sessionId && event.data.profileId && event.data.gameId && Number.isInteger(event.data.generation)) {
+        void releasePlayerLease(event.data.sessionId, { profileId: event.data.profileId, gameId: event.data.gameId, generation: event.data.generation }).catch(() => {})
+      }
+      setActiveSessions(current => current.filter(session => session.sessionId !== event.data.sessionId))
+      setError('A sessão do emulador foi substituída ou expirou.')
+    }
+    window.addEventListener('message', receive)
+    return () => window.removeEventListener('message', receive)
+  }, [])
+
+  useEffect(() => {
+    if (!profileGame) return undefined
+    let active = true
+    const refreshProfiles = async () => {
+      try {
+        const currentProfiles = await getProfiles(profileGame.id)
+        if (!active) return
+        setProfiles(currentProfiles)
+        updateCachedProfiles(profileGame.id, () => currentProfiles)
+      } catch {
+        // Keep the last known list visible if a background refresh fails.
+      }
+    }
+    const interval = window.setInterval(refreshProfiles, 3_000)
+    return () => {
+      active = false
+      window.clearInterval(interval)
+    }
+  }, [profileGame])
+
+  useEffect(() => {
+    let active = true
+    let revision = null
+    const checkFrontendRevision = async () => {
+      if (document.visibilityState === 'hidden') return
+      try {
+        const response = await fetch('/', { method: 'HEAD', cache: 'no-store' })
+        const nextRevision = response.headers.get('etag')
+        if (!active || !nextRevision) return
+        if (shouldReloadForFrontendRevision(revision, nextRevision)) {
+          window.location.reload()
+          return
+        }
+        revision = nextRevision
+      } catch {
+        // A temporary offline state must not disrupt an active game.
+      }
+    }
+    void checkFrontendRevision()
+    document.addEventListener('visibilitychange', checkFrontendRevision)
+    return () => {
+      active = false
+      document.removeEventListener('visibilitychange', checkFrontendRevision)
+    }
   }, [])
 
   useEffect(() => {
@@ -293,6 +393,10 @@ function App() {
   }, [activeSessions, fastForwardEnabled, fastForwardSpeed])
 
   useEffect(() => {
+    writeFastForwardSpeed(document, fastForwardSpeed)
+  }, [fastForwardSpeed])
+
+  useEffect(() => {
     if (!pokemonHubOpen) return
     const renew = async () => {
       const session = pokemonHubSessionRef.current
@@ -322,6 +426,7 @@ function App() {
   }, [pokemonHubOpen])
 
   async function toggleFullscreen() {
+    if (isMobileLandscape) return
     try {
       if (document.fullscreenElement === playerShellRef.current) await document.exitFullscreen()
       else await playerShellRef.current.requestFullscreen()
@@ -331,14 +436,22 @@ function App() {
   }
 
   async function closePlayer() {
-    try {
-      await Promise.all([...document.querySelectorAll('.player-grid iframe')].map(frame => flushPlayerSave(frame)))
-      if (document.fullscreenElement === playerShellRef.current) await document.exitFullscreen()
-      setActiveSessions([])
-      setFullscreen(false)
-    } catch (cause) {
-      setError(`Não foi possível sincronizar o save: ${cause.message}`)
-    }
+    const result = await closePlayerAfterSaveAttempts({
+      saveAttempts: activeSessions.map((session, index) => {
+        const frame = document.querySelectorAll('.player-grid iframe')[index]
+        return Promise.resolve(frame ? flushPlayerSave(frame) : undefined).finally(() => releasePlayerLease(session.sessionId, { profileId: session.profileId, gameId: session.gameId, generation: session.leaseGeneration }).catch(() => {}))
+      }),
+      close: async () => {
+        try {
+          if (document.fullscreenElement === playerShellRef.current) await document.exitFullscreen()
+        } catch {
+          // The player still needs to close if the browser rejects leaving fullscreen.
+        }
+        setActiveSessions([])
+        setFullscreen(false)
+      },
+    })
+    if (result.failures.length > 0) setError('O emulador foi fechado, mas alguns saves não puderam ser sincronizados.')
   }
 
   function flushPlayerSave(frame) {
@@ -355,12 +468,23 @@ function App() {
         if (error) reject(error)
         else resolve()
       }
+      try {
+        const directSync = frame.contentWindow?.emulatorHubSyncSave
+        if (typeof directSync === 'function') {
+          Promise.resolve(directSync()).then(() => finish(), finish)
+          return
+        }
+      } catch {
+        // The message fallback supports an iframe which has not exposed its
+        // same-origin synchronizer yet.
+      }
       window.addEventListener('message', receive)
       frame.contentWindow?.postMessage({ type: 'emulator-hub:sync-save', requestId }, window.location.origin)
     })
   }
 
   async function openProfilePicker(game, purpose = 'launch', anchor = null) {
+    const request = ++profilePickerRequestRef.current
     setError('')
     setProfileError('')
     setProfileName('')
@@ -370,6 +494,15 @@ function App() {
     setProfilePickerPlacement(getProfilePickerPlacement(anchor, { width: window.innerWidth, height: window.innerHeight }))
     setProfileGame(game)
     setProfiles(game.profiles ?? [])
+    try {
+      const currentProfiles = await getProfiles(game.id)
+      if (request !== profilePickerRequestRef.current) return
+      setProfiles(currentProfiles)
+      updateCachedProfiles(game.id, () => currentProfiles)
+    } catch (cause) {
+      if (request !== profilePickerRequestRef.current) return
+      setProfileError(cause.message)
+    }
   }
 
   function updateCachedProfiles(gameId, transform) {
@@ -384,12 +517,15 @@ function App() {
     setProfileBusy(true)
     try {
       const game = profileGame
-      await getLaunch(game.id, profile.id)
+      const sessionId = crypto.randomUUID()
+      const lease = await acquirePlayerLease(game.id, profile.id, sessionId)
       setProfileGame(null)
       setProfilePickerPlacement(null)
       const session = {
         gameId: game.id,
         profileId: profile.id,
+        sessionId,
+        leaseGeneration: lease.leaseGeneration,
         initialFastForwardEnabled: fastForwardEnabled,
         initialFastForwardSpeed: fastForwardSpeed,
       }
@@ -459,6 +595,7 @@ function App() {
   }
 
   function openInstancePicker() {
+    if (isMobileLandscape) return
     setError('')
     setInstancePicker(true)
   }
@@ -897,8 +1034,11 @@ function App() {
     }
   }
 
-  const activeProfileIds = new Set(activeSessions.map(session => session.profileId))
+  const activeProfileIds = new Set(activeSessions.map(session => `${session.gameId}:${session.profileId}`))
   const gameSections = groupGamesByLayout(games, hubLayout)
+  const isStandalone = window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true
+  const isNarrowPortrait = isNarrowPortraitViewport(viewport)
+  const isMobileLandscape = isMobileLandscapeViewport(viewport)
 
   return <main className="hub">
     <div className="hub-layout" inert={activeSessions.length || profileGame || instancePicker || controlPanelOpen || pokemonHubOpen ? true : undefined}>
@@ -906,42 +1046,40 @@ function App() {
         <button className="hub-sidebar-action" type="button" aria-label="Configurar controles" title="Configurar controles" onClick={openControlPanel}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8h10M7 16h10M5 5h14v14H5zM9 8v8M15 8v8" /></svg>
         </button>
+        {!isStandalone && <button className="hub-sidebar-action hub-sidebar-install" type="button" aria-label="Instalar no iPhone" title="Instalar no iPhone" onClick={() => setInstallHelpOpen(true)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11M8 10l4 4 4-4M5 17v3h14v-3" /></svg>
+        </button>}
       </aside>
       <section className="hub-content">
         <section className="hub-section hub-section-internal" aria-labelledby="internal-applications-heading">
           <header className="hub-section-header"><h2 id="internal-applications-heading">Aplicações internas</h2></header>
           <div className="boxes">
-          <div className="box pokemon-hub-card">
+          <button className="box pokemon-hub-card" type="button" aria-label="Abrir Pokémon Hub" onClick={openPokemonHub}>
             <div className="cover">
-              <button className="hub-button" type="button" aria-label="Abrir Pokémon Hub" onClick={openPokemonHub}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" /></svg>
-              </button>
             </div>
             <div className="title"><small>Pokémon Hub</small></div>
-          </div>
+          </button>
           </div>
         </section>
         {gameSections.map(section => <section className="hub-section hub-section-games" key={section.id} aria-labelledby={`${section.id}-heading`}>
           <header className="hub-section-header"><h2 id={`${section.id}-heading`}>{section.title}</h2></header>
           <div className="boxes">
-          {section.games.map(game => <div className="box" key={game.id}>
+          {section.games.map(game => <button
+            className="box"
+            key={game.id}
+            type="button"
+            aria-label={`Iniciar ${game.title}`}
+            disabled={game.status !== 'ready'}
+            onClick={event => {
+              const card = event.currentTarget.getBoundingClientRect()
+              openProfilePicker(game, 'launch', { left: card.left, top: card.top, bottom: card.bottom })
+            }}
+          >
             <div className="cover">
               {game.coverUrl && <img className="cover-image" src={game.coverUrl} alt={`Capa de ${game.title}`} />}
-              <button
-                className="play-button"
-                aria-label={`Play ${game.title}`}
-                disabled={game.status !== 'ready'}
-                onClick={event => {
-                  const playButton = event.currentTarget.getBoundingClientRect()
-                  const card = event.currentTarget.closest('.box')?.getBoundingClientRect()
-                  openProfilePicker(game, 'launch', { left: card?.left ?? playButton.left, top: playButton.top, bottom: playButton.bottom })
-                }}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l13-7.5z" /></svg>
-              </button>
             </div>
             {game.language && <div className="title"><small>{game.language}</small></div>}
-          </div>)}
+          </button>)}
           </div>
         </section>)}
         {error && <p className="error" role="alert">{error}</p>}
@@ -1047,16 +1185,19 @@ function App() {
         </div>
       </div>
     </div>}
-    {profileGame && <div className={`profile-overlay${profilePickerPlacement ? ' profile-picker-overlay' : ''}`} role="dialog" aria-modal="true" aria-label="Selecionar perfil">
-      <div className={`profile-panel${profilePickerPlacement ? ' profile-picker-panel' : ''}`} style={profilePickerPlacement ?? undefined}>
+    {profileGame && <div className={`profile-overlay${profilePickerPlacement ? ' profile-picker-overlay' : ''} profile-picker-mobile`} role="dialog" aria-modal="true" aria-label="Selecionar perfil">
+      <div className={`profile-panel${profilePickerPlacement ? ' profile-picker-panel' : ''}`} style={profilePickerPlacement ? profilePickerPlacement : undefined}>
         <header className="profile-header">
           <h2>{profileGame.title}</h2>
           <button className="dialog-close" type="button" aria-label="Fechar seleção de perfil" onClick={() => { setProfileGame(null); setProfilePickerPlacement(null); setCreatingProfile(false) }}>×</button>
         </header>
         <div className="profile-body">
+          <div className="profile-picker-content">
+          <div className="profile-picker-profiles">
           {profiles.length > 0 && <div className="profile-list">
             {profiles.map(profile => {
-              const isRunning = activeProfileIds.has(profile.id)
+              const isRunning = activeProfileIds.has(`${profileGame.id}:${profile.id}`)
+              const isLeased = isRunning || profile.leaseActive === true
               const isEditing = editingProfileId === profile.id
               return <div className="profile-row" key={profile.id}>
               {isEditing
@@ -1066,18 +1207,20 @@ function App() {
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4L19 6" /></svg>
                   </button>
                 </form>
-                : <button className="profile-select" type="button" aria-label={isRunning ? `${profile.name} em execução` : profile.name} disabled={profileBusy || (isRunning && profilePurpose !== 'pokemon-hub')} onClick={() => launchWithProfile(profile)}>
+                : <button className="profile-select" type="button" aria-label={isLeased ? `${profile.name} em execução` : profile.name} disabled={profileBusy || isLeased} onClick={() => launchWithProfile(profile)}>
                   <span>{profile.name}</span>
-                  {isRunning && <svg className="profile-running" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 1-6.4 2.7M4 3v5h5" /></svg>}
+                  {isLeased && <svg className="profile-running" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 1-6.4 2.7M4 3v5h5" /></svg>}
                 </button>}
-              <button className="profile-edit" type="button" aria-label={`Editar perfil ${profile.name}`} disabled={profileBusy || isEditing || isRunning} onClick={() => startEditingProfile(profile)}>
+              <button className="profile-edit" type="button" aria-label={`Editar perfil ${profile.name}`} disabled={profileBusy || isEditing || isLeased} onClick={() => startEditingProfile(profile)}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l11-11-4-4L4 16v4M13 7l4 4" /></svg>
               </button>
-              <button className="profile-delete" type="button" aria-label={`Excluir perfil ${profile.name}`} disabled={profileBusy || isEditing || isRunning} onClick={() => removeProfile(profile)}>
+              <button className="profile-delete" type="button" aria-label={`Excluir perfil ${profile.name}`} disabled={profileBusy || isEditing || isLeased} onClick={() => removeProfile(profile)}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" /></svg>
               </button>
             </div>})}
           </div>}
+          </div>
+          <div className="profile-picker-create">
           {!creatingProfile && <button className="profile-add" type="button" aria-label="Criar novo perfil" onClick={() => setCreatingProfile(true)}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
           </button>}
@@ -1086,7 +1229,22 @@ function App() {
             <button type="submit" disabled={profileBusy}>{profileBusy ? '...' : 'Criar'}</button>
           </form>}
           {profileError && <p className="profile-error" role="alert">{profileError}</p>}
+          </div>
+          </div>
         </div>
+      </div>
+    </div>}
+    {isNarrowPortrait && <div className="mobile-rotate-overlay" role="status" aria-live="assertive">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7a3 3 0 0 1 3 3v4M17 21h-7a3 3 0 0 1-3-3v-4M17 3l3 3-3 3M7 21l-3-3 3-3" /></svg>
+      <strong>Gire o aparelho</strong>
+      <span>A experiência de jogo funciona melhor na horizontal.</span>
+    </div>}
+    {installHelpOpen && <div className="mobile-install-overlay" role="dialog" aria-modal="true" aria-labelledby="mobile-install-title">
+      <div className="mobile-install-panel">
+        <button className="dialog-close" type="button" aria-label="Fechar instruções de instalação" onClick={() => setInstallHelpOpen(false)}>×</button>
+        <h2 id="mobile-install-title">Instalar no iPhone</h2>
+        <p>No Chrome, toque em <strong>Compartilhar</strong> e depois em <strong>Adicionar à Tela de Início</strong>.</p>
+        <p>Depois, abra o ícone “Emulator Hub” pela Tela de Início.</p>
       </div>
     </div>}
     {activeSessions.length > 0 && <div className="player-overlay" role="dialog" aria-modal="true" aria-label="Emulator">
@@ -1119,12 +1277,14 @@ function App() {
             </div>
           </div>
           <div className="player-actions">
-            <button type="button" aria-label="Adicionar instância" disabled={activeSessions.length >= 4} onClick={openInstancePicker}>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-            </button>
-            <button type="button" aria-label={fullscreen ? 'Sair da tela cheia' : 'Tela cheia'} onClick={toggleFullscreen}>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d={fullscreen ? 'M4 9h5V4M20 9h-5V4M4 15h5v5M20 15h-5v5' : 'M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5'} /></svg>
-            </button>
+            {!isMobileLandscape && <>
+              <button type="button" aria-label="Adicionar instância" disabled={activeSessions.length >= 4} onClick={openInstancePicker}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+              </button>
+              <button type="button" aria-label={fullscreen ? 'Sair da tela cheia' : 'Tela cheia'} onClick={toggleFullscreen}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d={fullscreen ? 'M4 9h5V4M20 9h-5V4M4 15h5v5M20 15h-5v5' : 'M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5'} /></svg>
+              </button>
+            </>}
             <button type="button" aria-label="Fechar emulador" onClick={closePlayer}>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19" /></svg>
             </button>
@@ -1134,7 +1294,7 @@ function App() {
           <div className="player-grid">
             {activeSessions.map(session => <iframe
               key={`${session.gameId}:${session.profileId}:${controlRevision}`}
-              src={`/player.html?id=${encodeURIComponent(session.gameId)}&profileId=${encodeURIComponent(session.profileId)}&fastForward=${session.initialFastForwardEnabled ? '1' : '0'}&fastForwardSpeed=${session.initialFastForwardSpeed}`}
+              src={playerFrameUrl(session)}
               title="EmulatorJS"
               allow="fullscreen; gamepad"
               onLoad={event => configurePlayerFrame(event.currentTarget, { type: 'emulator-hub:fast-forward', enabled: fastForwardEnabled, speed: fastForwardSpeed })}

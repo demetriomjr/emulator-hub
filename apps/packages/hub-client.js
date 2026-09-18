@@ -80,6 +80,33 @@ export async function getLaunch(id, profileId) {
   return getJson(`/api/games/${encodeURIComponent(id)}/launch?${parameters}`)
 }
 
+async function postJson(url, body) {
+  const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  const result = await response.json().catch(() => ({}))
+  if (!response.ok) throw Object.assign(new Error(result.error || `Request failed (${response.status})`), { code: result.code })
+  return result
+}
+
+export async function acquirePlayerLease(gameId, profileId, sessionId) {
+  return postJson(`/api/games/${encodeURIComponent(gameId)}/player-leases`, { profileId, sessionId })
+}
+
+export async function heartbeatPlayerLease(sessionId, lease) {
+  return postJson(`/api/player-leases/${encodeURIComponent(sessionId)}/heartbeat`, lease)
+}
+
+export function getPlayerLeaseLaunch(sessionId, lease) {
+  const parameters = new URLSearchParams({ profileId: lease.profileId, gameId: lease.gameId, generation: String(lease.generation) })
+  return getJson(`/api/player-leases/${encodeURIComponent(sessionId)}/launch?${parameters}`)
+}
+
+export async function releasePlayerLease(sessionId, lease) {
+  const response = await fetch(`/api/player-leases/${encodeURIComponent(sessionId)}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lease) })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw Object.assign(new Error(body.error || `Request failed (${response.status})`), { code: body.code })
+  return body
+}
+
 export function getPokemonHub(profileId) {
   return getJson(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub`)
 }
@@ -249,8 +276,8 @@ async function readPokemonHubResponse(response) {
   return body
 }
 
-export async function getCloudSave(url) {
-  const response = await fetch(url, { cache: 'no-store' })
+export async function getCloudSave(url, lease) {
+  const response = await fetch(url, { cache: 'no-store', headers: leaseHeaders(lease) })
   if (response.status === 404) return null
   if (!response.ok) throw new Error(`Save request failed (${response.status})`)
   const revision = /^"(\d+)"$/.exec(response.headers.get('etag') ?? '')?.[1]
@@ -258,13 +285,41 @@ export async function getCloudSave(url) {
   return { bytes: new Uint8Array(await response.arrayBuffer()), revision: Number(revision) }
 }
 
-export async function putCloudSave(url, bytes, revision) {
+export async function putCloudSave(url, bytes, revision, lease) {
   const response = await fetch(url, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/octet-stream', 'If-Match': revision === null ? '*' : `"${revision}"` },
+    headers: { 'Content-Type': 'application/octet-stream', 'If-Match': revision === null ? '*' : `"${revision}"`, ...leaseHeaders(lease) },
     body: bytes,
   })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.error || `Save upload failed (${response.status})`)
   return body
+}
+
+export async function getEmulatorSnapshot(url, lease) {
+  const response = await fetch(url, { cache: 'no-store', headers: leaseHeaders(lease) })
+  if (response.status === 404) return null
+  if (!response.ok) throw new Error(`Snapshot request failed (${response.status})`)
+  const revision = /^"(\d+)"$/.exec(response.headers.get('etag') ?? '')?.[1]
+  if (!revision) throw new Error('Snapshot response is missing a revision.')
+  const { decodeSnapshotBundle } = await import('./emulator-snapshot.mjs')
+  const snapshot = await decodeSnapshotBundle(new Uint8Array(await response.arrayBuffer()))
+  return { ...snapshot, revision: Number(revision) }
+}
+
+export async function putEmulatorSnapshot(url, bundle, revision, lease) {
+  const { encodeSnapshotBundle } = await import('./emulator-snapshot.mjs')
+  const response = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/vnd.emulator-hub.snapshot', 'If-Match': revision === null ? '*' : `"${revision}"`, ...leaseHeaders(lease) },
+    body: await encodeSnapshotBundle(bundle),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.error || `Snapshot upload failed (${response.status})`)
+  return body
+}
+
+function leaseHeaders(lease) {
+  if (!lease) return {}
+  return { 'X-Player-Session-Id': lease.sessionId, 'X-Player-Lease-Generation': String(lease.generation) }
 }
