@@ -20,6 +20,7 @@ Make an iPhone browser failure observable from the local development host withou
 - `GET /api/debug/client-events` returns the ephemeral newest-first backlog, optionally filtered by `sessionId`.
 - The LAN Caddy configuration writes JSON access logs to `tmp/caddy-lan/caddy-access.log`, so the diagnostic POST and its request metadata can be correlated with proxy traffic.
 - Chrome on iPhone (`CriOS`) stays on EmulatorJS's Safari/WebKit suspended-audio guard. This preserves the upstream resume control required by iOS; the separate game-surface retry never suppresses it.
+- The player consumes EmulatorJS's upstream `latest` data channel (new runtime code with stable cores) while the iPhone rendering-stall investigation is active. Its browser cache must be purged before a device test can establish an A/B result.
 - Once EmulatorJS starts, the game surface retries `AudioContext.resume()` on its first pointer, touch, or keyboard gesture and removes those listeners once the context is running. The context is resolved from the current OpenAL source when the runtime does not expose `currentCtx.audioCtx`. This restores audio after iOS rejects automatic audio startup without interfering with game input.
 - With diagnostics enabled, the player compares the EmulatorJS frame counter one second after the game-start event and records an `emulator-frame-stall` event when it did not advance.
 

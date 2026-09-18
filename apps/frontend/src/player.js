@@ -10,7 +10,10 @@ const parameters = new URLSearchParams(location.search)
 const id = parameters.get('id')
 const profileId = parameters.get('profileId')
 const game = document.getElementById('game')
-const dataUrl = 'https://cdn.emulatorjs.org/4.2.3/data/'
+// The upstream `latest` channel keeps stable cores while receiving runtime
+// fixes ahead of the pinned 4.2.3 release. This branch exercises it against
+// the known iPhone WebKit rendering stall.
+const dataUrl = 'https://cdn.emulatorjs.org/latest/data/'
 const clientDiagnosticsOptions = getClientDiagnosticsOptions(location.search)
 const clientDiagnostics = clientDiagnosticsOptions.enabled
   ? createClientDiagnostics({ browser: window, source: 'player', sessionId: clientDiagnosticsOptions.sessionId })
