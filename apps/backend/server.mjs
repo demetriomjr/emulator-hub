@@ -31,6 +31,7 @@ import { createRomDiscovery } from '../packages/rom-discovery.mjs'
 import { createRedisRomRegistry } from '../packages/rom-registry.mjs'
 import { createRedisPersistence } from '../packages/redis-persistence.mjs'
 import { migrateLegacyJsonData } from '../packages/redis-legacy-migration.mjs'
+import { createClientDiagnosticStore } from '../packages/client-diagnostic-store.mjs'
 
 const backendDirectory = dirname(fileURLToPath(import.meta.url))
 const defaultCatalogPath = join(backendDirectory, 'catalog.json')
@@ -86,6 +87,8 @@ export function createHubServer(options = {}) {
     pokemonSaveAdapters: options.pokemonSaveAdapters ?? createPokemonSaveAdapterRegistry([pokemonGen3Adapter]),
     pokemonHubEventStore: options.pokemonHubEventStore ?? createPokemonHubEventStore({ persistence }),
     pokemonHubLogger: normalizePokemonHubLogger(options.pokemonHubLogger),
+    clientDiagnosticStore: options.clientDiagnosticStore ?? createClientDiagnosticStore(),
+    clientDiagnosticLogger: normalizeClientDiagnosticLogger(options.clientDiagnosticLogger),
   }
   config.pokemonHubSnapshotCoordinator = options.pokemonHubSnapshotCoordinator ?? createPokemonHubSnapshotCoordinator({ persistence, eventStore: config.pokemonHubEventStore, logger: config.pokemonHubLogger, validatePlacementChange: validatePokemonHubTransferPlacement })
   const canCreatePokemonHubSessionService = ['getSnapshot', 'renew', 'release', 'sync', 'reconcileWorkspaceLeases'].every(method => typeof config.pokemonHubSnapshotCoordinator[method] === 'function')
@@ -222,6 +225,7 @@ async function handleRequest(request, response, config) {
   const isSaveProfileGamesRoute = route.pathname === '/api/pokemon-hub/save-profile-games'
   const pokemonHubProfilesRoute = route.pathname === '/api/pokemon-hub/profiles'
   const pokemonHubProfileRoute = parsePokemonHubProfileRoute(route.pathname)
+  const isClientDiagnosticsRoute = route.pathname === '/api/debug/client-events'
   const supportedMethod = request.method === 'GET'
     || (request.method === 'HEAD' && isRomRoute)
     || (request.method === 'POST' && gameProfilesRoute)
@@ -232,14 +236,20 @@ async function handleRequest(request, response, config) {
     || (pokemonHubSessionRoute && ((request.method === 'POST' && ['open', 'attach', 'heartbeat', 'snapshot', 'close-command'].includes(pokemonHubSessionRoute.kind)) || (request.method === 'DELETE' && ['detach', 'close'].includes(pokemonHubSessionRoute.kind))))
     || (request.method === 'PATCH' && gameProfileRoute)
     || (request.method === 'DELETE' && gameProfileRoute)
+    || (isClientDiagnosticsRoute && request.method === 'POST')
   if (!supportedMethod) {
-    response.setHeader('Allow', pokemonHubSessionRoute ? pokemonHubSessionRoute.kind === 'detach' || pokemonHubSessionRoute.kind === 'close' ? 'DELETE' : 'POST' : pokemonHubRoute ? ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute.kind) ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'PATCH, DELETE' : pokemonHubProfilesRoute || gameProfilesRoute ? 'GET, POST' : saveRoute || isControlProfileRoute ? 'GET, PUT' : gameProfileRoute ? 'PATCH, DELETE' : isRomRoute ? 'GET, HEAD' : 'GET')
+    response.setHeader('Allow', isClientDiagnosticsRoute ? 'GET, POST' : pokemonHubSessionRoute ? pokemonHubSessionRoute.kind === 'detach' || pokemonHubSessionRoute.kind === 'close' ? 'DELETE' : 'POST' : pokemonHubRoute ? ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute.kind) ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'PATCH, DELETE' : pokemonHubProfilesRoute || gameProfilesRoute ? 'GET, POST' : saveRoute || isControlProfileRoute ? 'GET, PUT' : gameProfileRoute ? 'PATCH, DELETE' : isRomRoute ? 'GET, HEAD' : 'GET')
     json(response, 405, { error: 'Method is not supported for this route.' })
     return
   }
 
   if (gameProfilesRoute) {
     await handleGameProfiles(request, response, config, gameProfilesRoute.gameId)
+    return
+  }
+
+  if (isClientDiagnosticsRoute) {
+    await handleClientDiagnostics(request, response, config, route.searchParams)
     return
   }
 
@@ -1287,6 +1297,25 @@ async function readJsonBody(request, maximumBytes = defaultJsonBodyMaximumBytes)
   }
 }
 
+async function handleClientDiagnostics(request, response, config, searchParams) {
+  if (request.method === 'GET') {
+    json(response, 200, { events: config.clientDiagnosticStore.list({ sessionId: searchParams.get('sessionId') ?? undefined }) })
+    return
+  }
+
+  try {
+    const event = config.clientDiagnosticStore.append(await readJsonBody(request))
+    config.clientDiagnosticLogger.info('mobile.client-diagnostic', event)
+    empty(response, 204)
+  } catch (error) {
+    if (error.code === 'CLIENT_DIAGNOSTIC_INVALID' || error.code === 'UNSUPPORTED_CONTENT_TYPE' || error.code === 'REQUEST_BODY_TOO_LARGE' || error.code === 'INVALID_JSON_BODY') {
+      json(response, 400, { error: error.message })
+      return
+    }
+    throw error
+  }
+}
+
 function json(response, status, payload) {
   const body = JSON.stringify(payload)
   response.writeHead(status, {
@@ -1432,6 +1461,13 @@ function normalizePokemonHubLogger(logger) {
     info() {},
     warn() {},
     error(event, context = {}) { console.error(pokemonHubLogLabel(context), { timestamp: new Date().toISOString(), level: 'error', event, ...context }) },
+  }
+}
+
+function normalizeClientDiagnosticLogger(logger) {
+  if (logger && typeof logger.info === 'function') return logger
+  return {
+    info(event, context = {}) { console.info('[Mobile client diagnostic]', { timestamp: new Date().toISOString(), event, ...context }) },
   }
 }
 

@@ -1,5 +1,7 @@
 # Specifications
 
+- [Spec 031 — Mobile client diagnostics](031-mobile-client-diagnostics.md): opt-in iPhone browser failure reporting, ephemeral backend backlog, and Caddy access-log correlation.
+
 - [Spec 028 — Pokemon Hub session contract repair](028-pokemon-hub-session-contract-repair.md): active compact-session protocol, atomic attach ownership, lease reconciliation, compact corrections, and terminal browser recovery. Supersedes Spec 026's browser transfer flow and amends Spec 027.
 
 - [Spec 026 — Persistent Hub grid transfers](026-pokemon-hub-persistent-grid-transfers.md): authoritative game Box and Hub grid placement transfers through the snapshot coordinator.

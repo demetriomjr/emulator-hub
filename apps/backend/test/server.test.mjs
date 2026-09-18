@@ -120,6 +120,57 @@ describe('hub backend HTTP contract', () => {
     assert.equal(response.headers.get('x-emulator-hub-backend'), '1')
   })
 
+  test('keeps a sanitized, session-filtered backlog of client diagnostics', async () => {
+    const fixture = await createFixture([])
+    const logged = []
+    const server = createHubServer({
+      ...fixture,
+      clientDiagnosticLogger: { info: (event, context) => logged.push({ event, context }) },
+    })
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+    liveServers.add(server)
+    const baseUrl = `http://127.0.0.1:${server.address().port}`
+
+    const accepted = await fetch(`${baseUrl}/api/debug/client-events`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'ios-session-1', source: 'player', kind: 'network-error', message: 'request failed',
+        page: '/player.html?profileId=private', request: { method: 'GET', path: '/api/games?private=1', status: 503 },
+      }),
+    })
+    assert.equal(accepted.status, 204)
+    assert.equal(await accepted.text(), '')
+
+    await fetch(`${baseUrl}/api/debug/client-events`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: 'ios-session-2', source: 'hub', kind: 'uncaught-error', message: 'catalog failed' }),
+    })
+
+    const response = await fetch(`${baseUrl}/api/debug/client-events?sessionId=ios-session-1`)
+    assert.equal(response.status, 200)
+    const { events } = await jsonResponse(response)
+    assert.equal(events.length, 1)
+    assert.equal(events[0].page, '/player.html')
+    assert.deepEqual(events[0].request, { method: 'GET', path: '/api/games', status: 503 })
+    assert.equal(logged.length, 2)
+    assert.equal(logged[0].event, 'mobile.client-diagnostic')
+  })
+
+  test('rejects malformed and unsupported client diagnostic requests', async () => {
+    const { baseUrl } = await startFixture([])
+
+    const malformed = await fetch(`${baseUrl}/api/debug/client-events`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: 'ios-session-1', source: 'unknown', kind: 'uncaught-error' }),
+    })
+    assert.equal(malformed.status, 400)
+    assert.deepEqual(await jsonResponse(malformed), { error: 'Client diagnostic is invalid.' })
+
+    const unsupported = await fetch(`${baseUrl}/api/debug/client-events`, { method: 'PUT' })
+    assert.equal(unsupported.status, 405)
+    assert.equal(unsupported.headers.get('allow'), 'GET, POST')
+  })
+
   test('reports the conflicting listener when the backend cannot bind its endpoint', async () => {
     const error = Object.assign(new Error('listen EADDRINUSE: address already in use 127.0.0.1:3000'), {
       code: 'EADDRINUSE', errno: -4091, syscall: 'listen', address: '127.0.0.1', port: 3000,

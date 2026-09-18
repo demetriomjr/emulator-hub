@@ -1,12 +1,20 @@
 import { getCloudSave, getControlProfile, getLaunch, putCloudSave } from '../../packages/hub-client.js'
 import { createCloudSaveSynchronizer } from '../../packages/cloud-save-sync.mjs'
 import { createEmulatorGamepadInput } from '../../packages/gamepad-input.mjs'
+import { createClientDiagnostics, getClientDiagnosticsOptions } from '../../packages/client-diagnostics.mjs'
+import { getEmulatorAudioContext, installAudioResumeOnUserGesture } from '../../packages/mobile-audio-resume.mjs'
+import { monitorEmulatorFrameProgress } from '../../packages/emulator-frame-progress.mjs'
+import { instrumentEmulatorLifecycle } from '../../packages/emulator-lifecycle-diagnostics.mjs'
 
 const parameters = new URLSearchParams(location.search)
 const id = parameters.get('id')
 const profileId = parameters.get('profileId')
 const game = document.getElementById('game')
 const dataUrl = 'https://cdn.emulatorjs.org/4.2.3/data/'
+const clientDiagnosticsOptions = getClientDiagnosticsOptions(location.search)
+const clientDiagnostics = clientDiagnosticsOptions.enabled
+  ? createClientDiagnostics({ browser: window, source: 'player', sessionId: clientDiagnosticsOptions.sessionId })
+  : null
 let fastForwardRequest = {
   enabled: parameters.get('fastForward') === '1',
   speed: Number(parameters.get('fastForwardSpeed')),
@@ -22,6 +30,9 @@ let gamepadInput = null
 let gamepadBindings = []
 let cloudSaveSynchronizer = null
 let cloudSaveInterval = null
+let removeAudioResumeGesture = null
+let stopFrameProgressMonitor = null
+let stopLifecycleDiagnostics = null
 
 async function hashSave(bytes) {
   const digest = await crypto.subtle.digest('SHA-256', bytes)
@@ -157,23 +168,46 @@ async function start() {
     contextMenu: false,
   }
   window.EJS_ready = () => {
+    stopLifecycleDiagnostics?.()
+    if (clientDiagnostics) {
+      stopLifecycleDiagnostics = instrumentEmulatorLifecycle({
+        emulator: window.EJS_emulator,
+        report: clientDiagnostics.capture,
+      })
+    }
     normalizeEmulatorChrome()
     applyFastForward()
   }
   window.EJS_onGameStart = () => {
+    clientDiagnostics?.capture({ kind: 'emulator-lifecycle', message: 'EmulatorJS game start callback' })
+    removeAudioResumeGesture?.()
+    removeAudioResumeGesture = installAudioResumeOnUserGesture({
+      element: game,
+      getAudioContext: () => getEmulatorAudioContext(window.EJS_emulator),
+    })
     gamepadInput = createEmulatorGamepadInput(window.EJS_emulator, controlProfile.bindings)
     gamepadInput.update(gamepadBindings)
     cloudSaveSynchronizer.restore(window.EJS_emulator.gameManager)
     cloudSaveInterval = window.setInterval(() => synchronizeCloudSave().catch(() => {}), 15000)
+    stopFrameProgressMonitor?.()
+    if (clientDiagnostics) {
+      stopFrameProgressMonitor = monitorEmulatorFrameProgress({
+        getFrame: () => window.EJS_emulator?.gameManager?.getFrameNum?.(),
+        report: clientDiagnostics.capture,
+      })
+    }
   }
   const loader = document.createElement('script')
   loader.src = `${dataUrl}loader.js`
   loader.onerror = () => {
-    game.textContent = 'EmulatorJS loader could not be reached.'
+    const message = 'EmulatorJS loader could not be reached.'
+    clientDiagnostics?.capture({ kind: 'emulator-failure', message })
+    game.textContent = message
   }
   document.body.appendChild(loader)
 }
 
 start().catch(error => {
+  clientDiagnostics?.capture({ kind: 'emulator-failure', message: error.message, name: error.name, stack: error.stack })
   game.textContent = error.message
 })

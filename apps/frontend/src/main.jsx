@@ -19,8 +19,14 @@ import { deriveSaveProfileCatalog, replaceCatalogProfile } from '../../packages/
 import { activePaneSourceKind, addWorkspacePane, choosePaneSource, createPokemonHubWorkspaceState, firstAvailableHubSource, firstAvailableSaveSource, hasAvailableSaveProfile, isCompletePaneSource, isPaneSourceAvailable, removeWorkspacePane } from '../../packages/pokemon-hub-workspace.mjs'
 import { groupGamesByLayout } from '../../packages/hub-layout.mjs'
 import { getProfilePickerPlacement } from '../../packages/profile-picker-placement.mjs'
+import { appendClientDiagnosticsParameters, createClientDiagnostics, getClientDiagnosticsOptions } from '../../packages/client-diagnostics.mjs'
 import hubLayout from './hub-layout.json'
 import './styles.css'
+
+const clientDiagnosticsOptions = getClientDiagnosticsOptions(window.location.search)
+if (clientDiagnosticsOptions.enabled) {
+  createClientDiagnostics({ browser: window, source: 'hub', sessionId: clientDiagnosticsOptions.sessionId })
+}
 
 const gbaControls = Object.freeze({
   l: { id: '10', label: 'L' },
@@ -72,6 +78,16 @@ function configurePlayerFrame(frame, message) {
   observer.observe(root, { childList: true, characterData: true, subtree: true })
   hideFastForwardOverlay()
   configuredPlayerFrames.add(frame)
+}
+
+function playerFrameUrl(session) {
+  const parameters = appendClientDiagnosticsParameters(new URLSearchParams({
+    id: session.gameId,
+    profileId: session.profileId,
+    fastForward: session.initialFastForwardEnabled ? '1' : '0',
+    fastForwardSpeed: String(session.initialFastForwardSpeed),
+  }), clientDiagnosticsOptions)
+  return `/player.html?${parameters}`
 }
 
 function ControlBinding({ control, profile, captureTarget, onCapture }) {
@@ -1134,7 +1150,7 @@ function App() {
           <div className="player-grid">
             {activeSessions.map(session => <iframe
               key={`${session.gameId}:${session.profileId}:${controlRevision}`}
-              src={`/player.html?id=${encodeURIComponent(session.gameId)}&profileId=${encodeURIComponent(session.profileId)}&fastForward=${session.initialFastForwardEnabled ? '1' : '0'}&fastForwardSpeed=${session.initialFastForwardSpeed}`}
+              src={playerFrameUrl(session)}
               title="EmulatorJS"
               allow="fullscreen; gamepad"
               onLoad={event => configurePlayerFrame(event.currentTarget, { type: 'emulator-hub:fast-forward', enabled: fastForwardEnabled, speed: fastForwardSpeed })}
