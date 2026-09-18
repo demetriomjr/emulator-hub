@@ -605,10 +605,17 @@ async function listSaveProfileGames(response, config) {
   const games = []
   for (let index = 0; index < entries.length; index += 1) {
     const entry = normalizeEntry(entries[index], index)
+    const layout = getPokemonSaveLayout(entry.pokemonSave?.layoutProfile, entry.pokemonSave?.adapter)
+    const adapter = layout && config.pokemonSaveAdapters.get(entry.pokemonSave.adapter)
+    if (!adapter) continue
     const verification = await verifyRom(entry, config.romsDirectory)
-    if (!verification.ok || (await config.profileStore.list(entry.id)).length === 0) continue
+    if (!verification.ok) continue
+    const profiles = await config.profileStore.list(entry.id)
+    const savedProfiles = await Promise.all(profiles.map(async profile => ({ profile, saved: await config.saveStore.get(profile.id, entry.id) !== null })))
+    const loadableProfiles = savedProfiles.flatMap(({ profile, saved }) => saved ? [profile] : [])
+    if (loadableProfiles.length === 0) continue
 
-    const game = { id: entry.id, title: entry.title, system: entry.system }
+    const game = { id: entry.id, title: entry.title, system: entry.system, status: 'ready', profiles: loadableProfiles }
     if (entry.region && entry.region !== 'legacy') game.region = entry.region
     if (entry.coverUrl) game.coverUrl = entry.coverUrl
     games.push(game)

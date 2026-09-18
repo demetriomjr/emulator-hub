@@ -37,6 +37,11 @@ snapshot as its JSON body.
 
 The browser captures and sends that body immediately. It cancels only an unsent
 debounce timer; it neither waits for nor cancels the current snapshot flight.
+The close intent also ends the local workspace and stops its heartbeat before
+waiting for the remote response. A lost, failed, or corrected close response
+never resurrects that local session; backend heartbeat expiry finalizes the
+last accepted canonical snapshot instead. A later opening always creates a new
+session.
 
 Inside the existing per-session queue, the backend treats this body as final
 snapshot intent:
@@ -56,22 +61,25 @@ the older request later fails because the session is closed. If the older flight
 is processed first, the close is rebased and validated against that result.
 
 Invalid final intent returns the raw current canonical snapshot and leaves the
-session open. A save-write failure also leaves the session open for retry. The
-same close identity can replay success from a small bounded terminal record; no
-general close journal, worker lease, generation takeover or multi-phase aggregate
-is part of this design.
+backend session available only for expiry recovery. A save-write failure also
+leaves it available for a later observer retry. The closed frontend does not
+resume it. The same close identity can replay success from a small bounded
+terminal record; no general close journal, worker lease, generation takeover or
+multi-phase aggregate is part of this design.
 
 ## Acceptance criteria
 
 1. Clicking the workspace X sends a close request without awaiting the current
    snapshot flight.
 2. The close request contains the latest complete visible snapshot.
-3. Move-then-X is correct whether the ordinary snapshot or close reaches the
+3. The workspace stops heartbeats and closes locally before the remote close
+   response; failure cannot retain or restore that frontend session.
+4. Move-then-X is correct whether the ordinary snapshot or close reaches the
    backend first.
-4. Closing one pane never closes the session and releases only its source.
-5. Closing a save pane writes that save; closing a Hub pane performs no `.sav`
+5. Closing one pane never closes the session and releases only its source.
+6. Closing a save pane writes that save; closing a Hub pane performs no `.sav`
    write.
-6. Whole-session close writes all remaining save sources, releases all remaining
+7. Whole-session close writes all remaining save sources, releases all remaining
    leases and closes the session.
-7. Accepted movement alone performs no native save write.
-8. No project build is required for implementation or verification.
+8. Accepted movement alone performs no native save write.
+9. No project build is required for implementation or verification.

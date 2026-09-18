@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { addWorkspacePane, choosePaneSource, createPokemonHubWorkspaceState, hasAvailableSaveProfile, isCompletePaneSource, isPaneSourceAvailable, removeWorkspacePane } from './pokemon-hub-workspace.mjs'
+import { addWorkspacePane, choosePaneSource, createPokemonHubWorkspaceState, firstAvailableSaveSource, hasAvailableSaveProfile, isCompletePaneSource, isPaneSourceAvailable, removeWorkspacePane } from './pokemon-hub-workspace.mjs'
 
 test('opens directly into an empty Hub workspace without selecting an Emulator Hub profile', () => {
   assert.deepEqual(createPokemonHubWorkspaceState(), { profile: null, panes: [null], boxes: {} })
@@ -38,6 +38,25 @@ test('hides a ROM when every one of its save profiles is already open elsewhere'
   assert.equal(hasAvailableSaveProfile([rubyTest, null], 1, 'pokemon-ruby', [{ id: 'test', name: 'Test' }]), false)
   assert.equal(hasAvailableSaveProfile([rubyTest, null], 1, 'pokemon-ruby', rubyProfiles), true)
   assert.equal(hasAvailableSaveProfile([rubyTest, null], 0, 'pokemon-ruby', [{ id: 'test', name: 'Test' }]), true)
+})
+
+test('opens an empty save selector when no loadable profile remains for the pane', () => {
+  const occupied = { kind: 'game', gameId: 'pokemon-emerald', profileId: 'may' }
+
+  assert.deepEqual(firstAvailableSaveSource(
+    [occupied, null],
+    1,
+    [{ id: 'pokemon-emerald' }],
+    { 'pokemon-emerald': [{ id: 'may', name: 'May' }] },
+  ), { kind: 'game' })
+})
+
+test('a pending save selection exclusively activates the save source mode', async () => {
+  const workspace = await import('./pokemon-hub-workspace.mjs')
+
+  assert.equal(typeof workspace.activePaneSourceKind, 'function')
+  assert.equal(workspace.activePaneSourceKind({ kind: 'hub', hubProfileId: 'general' }, { kind: 'game' }), 'game')
+  assert.equal(workspace.activePaneSourceKind({ kind: 'hub', hubProfileId: 'general' }, null), 'hub')
 })
 
 test('hides occupied complete sources from other pane selectors while retaining the current value', () => {

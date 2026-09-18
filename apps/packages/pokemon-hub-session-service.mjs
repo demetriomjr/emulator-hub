@@ -433,7 +433,7 @@ export function createPokemonHubSessionService({ persistence, coordinator, logge
         continue
       }
       const session = await read(identity.profileId, identity.sessionId)
-      if (isProtectedSessionTransition(session) || isLiveSnapshotOperation(session?.activeOperation, currentNow)) continue
+      if (isProtectedSessionTransition(session, currentNow) || isLiveSnapshotOperation(session?.activeOperation, currentNow)) continue
       if (!session || session.expiresAt > currentNow) {
         await persistence.removeFromSortedSet(expiringSessionIndexKey(), member)
         continue
@@ -447,7 +447,8 @@ export function createPokemonHubSessionService({ persistence, coordinator, logge
     assertString(profileId, 'Profile ID'); assertString(sessionId, 'Session ID')
     return enqueue(sessionId, async () => {
       const session = await read(profileId, sessionId)
-      if (!session || isProtectedSessionTransition(session) || isLiveSnapshotOperation(session.activeOperation, now()) || session.expiresAt > now()) return null
+      const currentNow = now()
+      if (!session || isProtectedSessionTransition(session, currentNow) || isLiveSnapshotOperation(session.activeOperation, currentNow) || session.expiresAt > currentNow) return null
       const sources = structuredClone(session.sources)
       if (beforeClose) await beforeClose(sources)
       await Promise.all([
@@ -780,7 +781,7 @@ function operationKey(profileId, sessionId, operationId) { return pokemonHubRedi
 function isLiveSnapshotOperation(operation, instant) {
   return Boolean(operation && typeof operation.id === 'string' && operation.id.length > 0 && Number.isInteger(operation.generation) && operation.generation > 0 && Number.isFinite(operation.deadline) && operation.deadline > instant)
 }
-function isProtectedSessionTransition(session) { return session?.state === 'transitioning' }
+function isProtectedSessionTransition(session, currentNow) { return session?.state === 'transitioning' && isLiveSnapshotOperation(session.operation, currentNow) }
 function sameSnapshotOperation(left, right) {
   return Boolean(left && right && left.id === right.id && left.generation === right.generation && left.deadline === right.deadline)
 }

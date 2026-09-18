@@ -12,15 +12,20 @@ properties, native records, representation bytes, or save bytes.
 
 ## Session model
 
-1. Opening the workspace creates one server-issued `sessionId`.
+1. Every workspace opening creates a new server-issued `sessionId`. A later
+   opening never resumes or reuses an earlier session.
 2. One session owns every source opened in that workspace; a source is not its
    own session.
 3. The backend maps each session-local opaque `sourceId` to its actual save or
    grid source.
-4. The session owns the expiry timestamp. Heartbeats renew leases and return
-   only an acknowledgement.
+4. The session owns the expiry timestamp. Heartbeats prove that its frontend is
+   still present, keep that live session's leases valid, and return only an
+   acknowledgement.
 5. Closing a source, closing the workspace, or expiry flushes and releases the
    relevant active source set through the existing save-flush rules.
+6. A backend request actively transitioning the session postpones expiry only
+   until its bounded operation deadline. It cannot protect a ghost session
+   indefinitely.
 
 ## Compact workspace snapshot
 
@@ -104,6 +109,14 @@ Request: `{ sequence }`
 Successful response: `{ ok: true, expiresAt }`
 
 It never carries or returns placement state.
+
+The browser schedules it every three seconds. If any session request is active,
+one heartbeat remains pending and is sent immediately when all active session
+requests settle; waiting for them is not a heartbeat failure. Three actual
+transport or backend failures close the workspace locally. On the backend,
+three missed heartbeat windows with no bounded active operation finalize the
+last accepted snapshot, flush dirty saves, release source leases and delete the
+session.
 
 ## Required tests
 

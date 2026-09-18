@@ -27,6 +27,21 @@ test('opens a session with the persisted canonical three-pane snapshot', async (
   })
 })
 
+test('creates a fresh empty identity for every workspace opening', async () => {
+  const persistence = createMemoryRedisPersistence()
+  const coordinator = createPokemonHubSnapshotCoordinator({ persistence, eventStore: createPokemonHubEventStore({ persistence }) })
+  let id = 0
+  const service = createPokemonHubSessionService({ persistence, coordinator, newId: () => `session-${++id}` })
+
+  const first = await service.open({ profileId })
+  const second = await service.open({ profileId })
+
+  assert.equal(first.sessionId, 'session-1')
+  assert.equal(second.sessionId, 'session-2')
+  assert.deepEqual(first.snapshot, { revision: 0, panes: [null, null, null] })
+  assert.deepEqual(second.snapshot, { revision: 0, panes: [null, null, null] })
+})
+
 test('returns a fresh server clock sample when renewing a session heartbeat', async () => {
   let instant = 1_000
   const persistence = createMemoryRedisPersistence()
@@ -487,6 +502,25 @@ test('finds expired sessions through the expiry index without scanning the Redis
   const expired = await service.listExpired()
 
   assert.deepEqual(expired, [{ profileId, sessionId: 'session-a' }])
+})
+
+test('expires a transition whose bounded active-request deadline has elapsed', async () => {
+  let instant = 1_000
+  const persistence = createMemoryRedisPersistence()
+  const coordinator = createPokemonHubSnapshotCoordinator({ persistence, eventStore: createPokemonHubEventStore({ persistence }) })
+  const service = createPokemonHubSessionService({ persistence, coordinator, now: () => instant, leaseMs: 9, operationLeaseMs: 20, newId: () => 'session-a' })
+  const opened = await service.open({ profileId })
+  const key = pokemonHubRedisKeys.session(profileId, opened.sessionId)
+  const stored = JSON.parse(await persistence.get(key))
+  stored.state = 'transitioning'
+  stored.operation = { id: 'stuck-request', generation: 1, deadline: 1_020 }
+  stored.activeOperation = stored.operation
+  await persistence.set(key, JSON.stringify(stored))
+  instant = 1_021
+
+  assert.deepEqual(await service.listExpired(), [{ profileId, sessionId: 'session-a' }])
+  assert.deepEqual(await service.releaseExpired({ profileId, sessionId: 'session-a' }), [])
+  assert.equal(await persistence.get(key), null)
 })
 
 test('attaching a source returns its complete safe bootstrap data separately from compact session state', async () => {

@@ -161,6 +161,42 @@ describe('hub backend HTTP contract', () => {
     assert.equal(observations, 1)
   })
 
+  test('finalizes an expired workspace by flushing its save before releasing its lease', async () => {
+    const fixture = await createFixture([])
+    const actions = []
+    let listed = false
+    const source = { sourceKey: 'save:profile-may:emerald', sourceSessionId: 'source-session', leaseToken: 'lease-token' }
+    const server = createHubServer({
+      ...fixture,
+      pokemonHubSessionService: {
+        async listExpired() {
+          if (listed) return []
+          listed = true
+          return [{ profileId: 'profile-may', sessionId: 'expired-session' }]
+        },
+        async releaseExpired({ beforeClose }) {
+          await beforeClose([source])
+          actions.push({ type: 'session-deleted' })
+        },
+      },
+      pokemonHubSnapshotCoordinator: {
+        async release(request) { actions.push({ type: 'lease-released', request }); return { released: true } },
+      },
+      pokemonHubSaveFlush: {
+        async flushExpiredLeases() {},
+        markDirty() {},
+        async flushSource(request) { actions.push({ type: 'save-flushed', request }); return { status: 'flushed' } },
+      },
+    })
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+    liveServers.add(server)
+    await new Promise(resolve => setImmediate(resolve))
+
+    assert.deepEqual(actions.map(action => action.type), ['save-flushed', 'lease-released', 'session-deleted'])
+    assert.deepEqual(actions[0].request, { profileId: 'profile-may', sourceKey: source.sourceKey })
+    assert.deepEqual(actions[1].request, { profileId: 'profile-may', sourceKey: source.sourceKey, workspaceId: 'expired-session', sourceSessionId: source.sourceSessionId, leaseToken: source.leaseToken })
+  })
+
   test('does not log an accepted canonical session snapshot', async () => {
     const fixture = await createFixture([])
     const requests = []
@@ -936,28 +972,35 @@ describe('hub backend HTTP contract', () => {
     assert.deepEqual(catalog.games[0].profiles, [profile])
   })
 
-  test('lists only ready ROMs that have save profiles', async () => {
+  test('lists only loadable save profiles before the workspace selector opens them', async () => {
     const emerald = Buffer.from('emerald with save profile')
     const firered = Buffer.from('firered without save profile')
-    const ruby = Buffer.from('missing ruby with save profile')
-    const { baseUrl } = await startFixture([
-      { id: 'pokemon-emerald', title: 'Pokemon Emerald', system: 'gba', core: 'gba', file: 'pokemon-emerald.gba', sha256: sha256(emerald) },
+    const ruby = Buffer.from('unsupported ruby with save profile')
+    const fixture = await createFixture([
+      { id: 'pokemon-emerald', title: 'Pokemon Emerald', system: 'gba', core: 'gba', file: 'pokemon-emerald.gba', sha256: sha256(emerald), pokemonSave: { supported: true, adapter: 'gen3-gba-v1', layoutProfile: 'pokemon-emerald-gba' } },
       { id: 'pokemon-firered', title: 'Pokemon FireRed', system: 'gba', core: 'gba', file: 'pokemon-firered.gba', sha256: sha256(firered) },
       { id: 'pokemon-ruby', title: 'Pokemon Ruby', system: 'gba', core: 'gba', file: 'pokemon-ruby.gba', sha256: sha256(ruby) },
-    ], { 'pokemon-emerald.gba': emerald, 'pokemon-firered.gba': firered })
-
-    await fetch(`${baseUrl}/api/games/pokemon-emerald/profiles`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'May' }),
+    ], { 'pokemon-emerald.gba': emerald, 'pokemon-firered.gba': firered, 'pokemon-ruby.gba': ruby })
+    const profiles = {
+      'pokemon-emerald': [{ id: 'may', name: 'May', createdAt: '2026-09-18T00:00:00.000Z' }, { id: 'wally', name: 'Wally', createdAt: '2026-09-18T00:00:01.000Z' }],
+      'pokemon-ruby': [{ id: 'brendan', name: 'Brendan', createdAt: '2026-09-18T00:00:02.000Z' }],
+    }
+    const server = createHubServer({
+      ...fixture,
+      profileStore: { async list(gameId) { return profiles[gameId] ?? [] } },
+      saveStore: { async get(profileId, gameId) { return gameId === 'pokemon-emerald' && profileId === 'may' ? { bytes: Buffer.from([1]), revision: 1, sha256: 'save', fenceGeneration: 0 } : null } },
+      pokemonSaveAdapters: { get(adapterId) { return adapterId === 'gen3-gba-v1' ? { id: adapterId } : null } },
+      pokemonHubSaveFlush: { markDirty() {}, async flushSource() { return { status: 'clean' } }, async flushExpiredLeases() {} },
     })
-    await fetch(`${baseUrl}/api/games/pokemon-ruby/profiles`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Brendan' }),
-    })
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+    liveServers.add(server)
+    const baseUrl = `http://127.0.0.1:${server.address().port}`
 
     const response = await fetch(`${baseUrl}/api/pokemon-hub/save-profile-games`)
 
     assert.equal(response.status, 200)
     assert.deepEqual(await jsonResponse(response), {
-      games: [{ id: 'pokemon-emerald', title: 'Pokemon Emerald', system: 'gba' }],
+      games: [{ id: 'pokemon-emerald', title: 'Pokemon Emerald', system: 'gba', status: 'ready', profiles: [profiles['pokemon-emerald'][0]] }],
     })
   })
 

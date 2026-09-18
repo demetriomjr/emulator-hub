@@ -4,8 +4,10 @@ export function createPokemonHubHeartbeatMonitor({ maximumFailures = 3 } = {}) {
 
   return { observe }
 
-  async function observe(heartbeat) {
+  async function observe(heartbeat, { waitUntilReady } = {}) {
     if (typeof heartbeat !== 'function') throw new TypeError('Pokemon Hub heartbeat must be a function')
+    if (waitUntilReady !== undefined && typeof waitUntilReady !== 'function') throw new TypeError('Pokemon Hub heartbeat readiness check must be a function')
+    if (waitUntilReady && !await waitUntilReady()) return { status: 'cancelled' }
     try {
       await heartbeat()
       failures = 0

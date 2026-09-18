@@ -26,6 +26,20 @@ export function hasAvailableSaveProfile(panes, index, gameId, profiles) {
   ))
 }
 
+export function firstAvailableSaveSource(panes, index, games, profilesByGame) {
+  for (const game of games ?? []) {
+    const profile = (profilesByGame?.[game.id] ?? []).find(candidate => (
+      isPaneSourceAvailable(panes, index, { kind: 'game', gameId: game.id, profileId: candidate.id })
+    ))
+    if (profile) return { kind: 'game', gameId: game.id, profileId: profile.id }
+  }
+  return { kind: 'game' }
+}
+
+export function activePaneSourceKind(source, selectionDraft) {
+  return selectionDraft?.kind ?? source?.kind ?? null
+}
+
 export function addWorkspacePane(panes) {
   if (panes.length >= 3) throw new Error('Pokémon Hub supports at most three panes.')
   return [...panes, null]

@@ -22,3 +22,29 @@ test('resets failed-heartbeat attempts after the backend responds', async () => 
 
   assert.deepEqual(await monitor.observe(async () => { throw unavailable }), { status: 'retrying', failures: 1 })
 })
+
+test('waits for an active request before sending the pending heartbeat', async () => {
+  const monitor = createPokemonHubHeartbeatMonitor()
+  let releaseRequest
+  const requestFinished = new Promise(resolve => { releaseRequest = resolve })
+  let heartbeats = 0
+
+  const pending = monitor.observe(async () => { heartbeats += 1 }, {
+    waitUntilReady: async () => { await requestFinished; return true },
+  })
+
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(heartbeats, 0)
+  releaseRequest()
+  assert.deepEqual(await pending, { status: 'healthy' })
+  assert.equal(heartbeats, 1)
+})
+
+test('does not count a cancelled pending heartbeat as a transport failure', async () => {
+  const monitor = createPokemonHubHeartbeatMonitor()
+  const unavailable = new Error('connection lost')
+
+  assert.deepEqual(await monitor.observe(async () => { throw unavailable }), { status: 'retrying', failures: 1 })
+  assert.deepEqual(await monitor.observe(async () => {}, { waitUntilReady: async () => false }), { status: 'cancelled' })
+  assert.deepEqual(await monitor.observe(async () => { throw unavailable }), { status: 'retrying', failures: 2 })
+})

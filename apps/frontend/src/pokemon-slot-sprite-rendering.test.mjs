@@ -65,7 +65,7 @@ test('persists cross-kind drops through one canonical session snapshot', async (
   assert.match(source, /onDragEnd=\{completePokemonHubDrag\}/)
   assert.match(source, /applyLocalSessionMove\(sourceSnapshot, targetSnapshot, fromSlot, toSlot, pokemonInstanceId\)/)
   assert.match(source, /createCanonicalPokemonHubSnapshot\(session, pokemonHubPanesRef\.current, pokemonHubSnapshotsRef\.current\)/)
-  assert.match(source, /send: request => syncPokemonHubSessionSnapshot\(session\.profileId, session\.sessionId, request\.snapshot, request\.idempotencyKey\)/)
+  assert.match(source, /send: request => session\.requestGate\.run\(\(\) => syncPokemonHubSessionSnapshot\(session\.profileId, session\.sessionId, request\.snapshot, request\.idempotencyKey\)\)/)
   assert.match(source, /onCorrection: snapshot =>/)
 })
 
@@ -92,6 +92,31 @@ test('keeps canonical candidates and ends the local session after a terminal sna
   assert.match(source, /endPokemonHubSessionLocally\(cause\)/)
 })
 
+test('defers heartbeat behind every tracked session request', async () => {
+  const source = await readFile(sourceFile, 'utf8')
+
+  assert.match(source, /requestGate: createPokemonHubRequestGate\(\)/)
+  assert.match(source, /waitUntilReady: session\.requestGate\.isInFlight\(\)/)
+  assert.match(source, /session\.requestGate\.waitForIdle\(\)/)
+  assert.equal(source.match(/session\.requestGate\.run\(\(\) => syncPokemonHubSessionSnapshot/g)?.length, 2)
+})
+
+test('isolates heartbeat in-flight state between old and newly opened sessions', async () => {
+  const source = await readFile(sourceFile, 'utf8')
+
+  assert.doesNotMatch(source, /pokemonHubHeartbeatInFlightRef/)
+  assert.match(source, /heartbeatInFlight: false/)
+  assert.match(source, /if \(!session \|\| session\.heartbeatInFlight\) return/)
+})
+
+test('stores the save-profile game array returned by the client without unwrapping it twice', async () => {
+  const source = await readFile(sourceFile, 'utf8')
+
+  assert.match(source, /const games = await getSaveProfileGames\(\)/)
+  assert.match(source, /setLoadableSaveCatalog\(games\)/)
+  assert.doesNotMatch(source, /setLoadableSaveCatalog\(response\.games\)/)
+})
+
 test('visibly confirms an accepted empty snapshot response without changing its payload', async () => {
   const source = await readFile(sourceFile, 'utf8')
 
@@ -99,13 +124,17 @@ test('visibly confirms an accepted empty snapshot response without changing its 
   assert.match(source, /pokemonHubSnapshotStatus && <p className="pokemon-hub-snapshot-status" role="status">\{pokemonHubSnapshotStatus\}<\/p>/)
 })
 
-test('closes the entire workspace with the latest visible snapshot without draining the flight', async () => {
+test('abandons the local workspace before waiting for the remote close response', async () => {
   const source = await readFile(sourceFile, 'utf8')
 
   assert.match(source, /async function closePokemonHub\(\)/)
   assert.doesNotMatch(source, /snapshotFlight\.beginClose\(\)/)
-  assert.match(source, /const finalSnapshot = createCanonicalPokemonHubSnapshot\(session, pokemonHubPanesRef\.current, pokemonHubSnapshotsRef\.current\)/)
-  assert.match(source, /await closePokemonHubSession\(session\.profileId, session\.sessionId, finalSnapshot, session\.pendingCloseIdempotencyKey/)
+  assert.match(source, /const finalSnapshot = session \? createCanonicalPokemonHubSnapshot\(session, pokemonHubPanesRef\.current, pokemonHubSnapshotsRef\.current\) : null/)
+  const localRelease = source.indexOf('pokemonHubSessionRef.current = null', source.indexOf('async function closePokemonHub()'))
+  const remoteClose = source.indexOf('closePokemonHubSession(session.profileId, session.sessionId, finalSnapshot', source.indexOf('async function closePokemonHub()'))
+  assert.ok(localRelease >= 0)
+  assert.ok(remoteClose >= 0)
+  assert.ok(localRelease < remoteClose)
   assert.doesNotMatch(source, /submitStructuralPokemonHubPaneChange\(\[null, null, null\]/)
 })
 
