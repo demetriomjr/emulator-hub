@@ -252,4 +252,13 @@ button { font: inherit; }
   .profile-picker-mobile .profile-add { height: auto; min-height: 46px; margin: 0; }
   .profile-picker-mobile .profile-create { flex-direction: column; margin: 0; }
   .profile-picker-mobile .profile-create input, .profile-picker-mobile .profile-create button { min-height: 44px; }
+  .player-overlay { padding: 0; background: #05090cf2; }
+  .player-shell { --mobile-player-control-height: min(42px, calc((100dvh - 72px) / 9)); display: grid; width: 100vw !important; height: 100dvh !important; grid-template-columns: 80px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+  .player-header { grid-column: 1; grid-row: 1; height: auto; flex-direction: column; justify-content: space-between; gap: 7px; padding: 8px; border: 0; border-right: 0; border-radius: 0; background: transparent; overflow: hidden; }
+  .player-global-controls, .player-actions, .fast-forward-control { flex-direction: column; }
+  .player-actions { margin-top: 0; }
+  .player-control-button, .player-actions button, .fast-forward-button, .global-reset-button { width: 64px; height: var(--mobile-player-control-height); }
+  .hub-sidebar .hub-sidebar-action[aria-label='Configurar controles'], .player-header .player-control-button[aria-label='Configurar controles'] { display: none; }
+  .fast-forward-control select { width: 64px; height: var(--mobile-player-control-height); padding: 0; appearance: none; -webkit-appearance: none; text-align: center; text-align-last: center; font-size: 12px; }
+  .player-panel { grid-column: 2; grid-row: 1; align-self: stretch; justify-self: stretch; width: 100%; height: 100%; aspect-ratio: auto; border: 0; border-radius: 0; box-shadow: none; }
 }

@@ -1,4 +1,4 @@
-import { getCloudSave, getControlProfile, getLaunch, putCloudSave } from '../../packages/hub-client.js'
+import { getCloudSave, getControlProfile, getPlayerLeaseLaunch, heartbeatPlayerLease, putCloudSave } from '../../packages/hub-client.js'
 import { createCloudSaveSynchronizer } from '../../packages/cloud-save-sync.mjs'
 import { createEmulatorGamepadInput } from '../../packages/gamepad-input.mjs'
 import { createClientDiagnostics, getClientDiagnosticsOptions } from '../../packages/client-diagnostics.mjs'
@@ -9,6 +9,8 @@ import { instrumentEmulatorLifecycle } from '../../packages/emulator-lifecycle-d
 const parameters = new URLSearchParams(location.search)
 const id = parameters.get('id')
 const profileId = parameters.get('profileId')
+const sessionId = parameters.get('sessionId')
+const leaseGeneration = Number(parameters.get('leaseGeneration'))
 const game = document.getElementById('game')
 // The upstream `latest` channel keeps stable cores while receiving runtime
 // fixes ahead of the pinned 4.2.3 release. This branch exercises it against
@@ -36,6 +38,25 @@ let cloudSaveInterval = null
 let removeAudioResumeGesture = null
 let stopFrameProgressMonitor = null
 let stopLifecycleDiagnostics = null
+let leaseHeartbeat = null
+let leaseLost = false
+
+function loseLease() {
+  if (leaseLost) return
+  leaseLost = true
+  if (leaseHeartbeat) window.clearInterval(leaseHeartbeat)
+  if (cloudSaveInterval) window.clearInterval(cloudSaveInterval)
+  window.parent.postMessage({ type: 'emulator-hub:lease-lost', sessionId, profileId, gameId: id, generation: leaseGeneration }, location.origin)
+}
+
+function startLeaseHeartbeat() {
+  if (!sessionId || !Number.isInteger(leaseGeneration)) return
+  const renew = async () => {
+    try { await heartbeatPlayerLease(sessionId, { profileId, gameId: id, generation: leaseGeneration }) } catch { loseLease() }
+  }
+  void renew()
+  leaseHeartbeat = window.setInterval(() => void renew(), 5000)
+}
 
 async function hashSave(bytes) {
   const digest = await crypto.subtle.digest('SHA-256', bytes)
@@ -43,9 +64,11 @@ async function hashSave(bytes) {
 }
 
 async function synchronizeCloudSave() {
-  if (!cloudSaveSynchronizer || !window.EJS_emulator?.gameManager) return false
+  if (leaseLost || !cloudSaveSynchronizer || !window.EJS_emulator?.gameManager) return false
   return cloudSaveSynchronizer.sync(window.EJS_emulator.gameManager)
 }
+
+window.emulatorHubSyncSave = synchronizeCloudSave
 
 function hideContextMenuButton() {
   for (const button of game.querySelectorAll('button')) {
@@ -99,7 +122,7 @@ function loadEmulatorState() {
 }
 
 window.addEventListener('message', event => {
-  if (event.origin !== location.origin || event.source !== window.parent) return
+  if (event.origin !== location.origin) return
   if (event.data?.type === 'emulator-hub:gamepad') {
     if (!Array.isArray(event.data.bindings) || !event.data.bindings.every(value => typeof value === 'string')) return
     gamepadBindings = event.data.bindings
@@ -135,11 +158,13 @@ window.addEventListener('message', event => {
 
 async function start() {
   if (!id || !profileId) throw new Error('Missing game or profile ID')
-  const [launch, controlProfile] = await Promise.all([getLaunch(id, profileId), getControlProfile()])
+  if (!sessionId || !Number.isInteger(leaseGeneration)) throw new Error('Missing active player lease')
+  startLeaseHeartbeat()
+  const [launch, controlProfile] = await Promise.all([getPlayerLeaseLaunch(sessionId, { profileId, gameId: id, generation: leaseGeneration }), getControlProfile()])
   if (!launch.romUrl || !launch.core) throw new Error('Incomplete launch configuration')
   cloudSaveSynchronizer = createCloudSaveSynchronizer({
-    load: () => getCloudSave(launch.saveUrl),
-    upload: (bytes, revision) => putCloudSave(launch.saveUrl, bytes, revision),
+    load: () => getCloudSave(launch.saveUrl, { sessionId, generation: leaseGeneration }),
+    upload: (bytes, revision) => putCloudSave(launch.saveUrl, bytes, revision, { sessionId, generation: leaseGeneration }),
     hash: hashSave,
   })
   await cloudSaveSynchronizer.load()
@@ -149,6 +174,23 @@ async function start() {
   window.EJS_gameName = launch.title
   window.EJS_gameID = launch.gameId
   window.EJS_defaultControls = { 0: controlProfile.bindings, 1: {}, 2: {}, 3: {} }
+  // EmulatorJS only detects touch once during startup. Match the Hub's mobile
+  // player breakpoint so Chrome's device viewport simulation is deterministic.
+  const isMobilePlayerViewport = window.matchMedia('(max-width: 900px) and (max-height: 500px) and (orientation: landscape)').matches
+  window.EJS_browserMode = isMobilePlayerViewport ? 'mobile' : undefined
+  // Replace EmulatorJS's GBA touch layout with its normal gameplay controls.
+  // The upstream default also adds Fast and Slow below Start/Select; speed is
+  // already controlled by the Hub toolbar, so those duplicate touch buttons
+  // are deliberately omitted.
+  window.EJS_VirtualGamepadSettings = [
+    { type: 'button', text: 'B', id: 'b', location: 'right', left: 10, top: 70, bold: true, input_value: 0 },
+    { type: 'button', text: 'A', id: 'a', location: 'right', left: 81, top: 40, bold: true, input_value: 8 },
+    { type: 'dpad', id: 'dpad', location: 'left', left: '50%', top: '50%', joystickInput: false, inputValues: [4, 5, 6, 7] },
+    { type: 'button', text: 'Start', id: 'start', location: 'center', left: 60, fontSize: 15, block: true, input_value: 3 },
+    { type: 'button', text: 'Select', id: 'select', location: 'center', left: -5, fontSize: 15, block: true, input_value: 2 },
+    { type: 'button', text: 'L', id: 'l', location: 'left', left: 3, top: -90, bold: true, block: true, input_value: 10 },
+    { type: 'button', text: 'R', id: 'r', location: 'right', right: 3, top: -90, bold: true, block: true, input_value: 11 },
+  ]
   // Control bindings are managed by the hub backend. Do not let a stale
   // EmulatorJS per-game localStorage profile replace them during startup.
   window.EJS_disableLocalStorage = true
@@ -172,6 +214,7 @@ async function start() {
   }
   window.EJS_ready = () => {
     stopLifecycleDiagnostics?.()
+    if (isMobilePlayerViewport) window.EJS_emulator?.changeSettingOption?.('virtual-gamepad', 'enabled')
     if (clientDiagnostics) {
       stopLifecycleDiagnostics = instrumentEmulatorLifecycle({
         emulator: window.EJS_emulator,
@@ -211,6 +254,7 @@ async function start() {
 }
 
 start().catch(error => {
+  loseLease()
   clientDiagnostics?.capture({ kind: 'emulator-failure', message: error.message, name: error.name, stack: error.stack })
   game.textContent = error.message
 })
