@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "node --env-file-if-exists=.env server.mjs",
-    "dev": "node --env-file-if-exists=.env --watch server.mjs",
+    "dev": "node --env-file-if-exists=.env dev.mjs",
     "test": "node --test --test-isolation=none test/*.test.mjs",
     "migrate:redis": "node --env-file-if-exists=.env migrate-redis.mjs"
   }

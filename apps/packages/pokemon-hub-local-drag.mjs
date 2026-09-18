@@ -1,6 +1,7 @@
 export function applyPokemonHubLocalDrop(state, sourceLocation, targetLocation) {
   const unchanged = { action: 'none', hubProfiles: state?.hubProfiles, saveLayoutsBySource: state?.saveLayoutsBySource }
   if (!state || sameLocation(sourceLocation, targetLocation)) return unchanged
+  if (sourceLocation?.kind !== targetLocation?.kind) return unchanged
 
   const sourceSlot = readSlot(state, sourceLocation)
   const targetSlot = readSlot(state, targetLocation)

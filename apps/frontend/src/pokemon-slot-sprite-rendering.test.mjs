@@ -45,7 +45,7 @@ test('moves only Party sprites above the fixed status strip', async () => {
   assert.match(css, /\.pokemon-save-party\s+\.pokemon-hub-slot-sprite\s*\{[^}]*transform:\s*translateY\(-6px\);/)
 })
 
-test('uses one read-only DnD provider with a six-pixel pointer threshold', async () => {
+test('uses one DnD provider with a six-pixel pointer threshold and a session snapshot drag flow', async () => {
   const source = await readFile(sourceFile, 'utf8')
 
   assert.match(source, /from '@dnd-kit\/react'/)
@@ -54,18 +54,33 @@ test('uses one read-only DnD provider with a six-pixel pointer threshold', async
   assert.match(source, /function PokemonHubDragSlot\(/)
   assert.match(source, /function PokemonHubDragOverlay\(/)
   assert.match(source, /<DragDropProvider/)
-  assert.doesNotMatch(source, /transferPokemonHub/)
+  assert.match(source, /async function persistPokemonHubSessionMove\(source, target\)/)
+  assert.match(source, /schedulePokemonHubSnapshot\(\)/)
 })
 
-test('applies accepted drops only through the local workspace operation', async () => {
+test('persists cross-kind drops through one compact session snapshot', async () => {
   const source = await readFile(sourceFile, 'utf8')
 
-  assert.match(source, /import \{ applyPokemonHubLocalDrop \} from '\.\.\/\.\.\/packages\/pokemon-hub-local-drag\.mjs'/)
   assert.match(source, /function completePokemonHubDrag\(event\)/)
   assert.match(source, /onDragEnd=\{completePokemonHubDrag\}/)
-  assert.match(source, /setPokemonHubProfiles\(result\.hubProfiles\)/)
-  assert.match(source, /setSaveLayoutsBySource\(result\.saveLayoutsBySource\)/)
-  assert.doesNotMatch(source, /transferPokemonHub/)
+  assert.match(source, /applyLocalSessionMove\(sourceSnapshot, targetSnapshot, fromSlot, toSlot, pokemonInstanceId\)/)
+  assert.match(source, /await syncPokemonHubSessionSnapshot\(session\.profileId, session\.sessionId, session\.pendingSnapshot\)/)
+  assert.match(source, /applyCompactSessionSnapshot\(response\.snapshot, response\.pokemonDisplay\)/)
+})
+
+test('keeps display metadata with the instance during an optimistic cross-source move', async () => {
+  const source = await readFile(sourceFile, 'utf8')
+
+  assert.match(source, /const movedPokemonDisplay = sourceSnapshot\.pokemonDisplay\?\.\[pokemonInstanceId\]/)
+  assert.match(source, /\? \{ \.\.\.snapshot\.pokemonDisplay, \[pokemonInstanceId\]: movedPokemonDisplay \}/)
+})
+
+test('orders compact session sources and ends the local session after a terminal snapshot error', async () => {
+  const source = await readFile(sourceFile, 'utf8')
+
+  assert.match(source, /Object\.values\(snapshots\)\.sort\(\(left, right\) => left\.sourceId\.localeCompare\(right\.sourceId\)\)/)
+  assert.match(source, /session\.pendingSnapshot = null/)
+  assert.match(source, /endPokemonHubSessionLocally\(cause\)/)
 })
 
 test('styles read-only drag targets and the pointer-transparent overlay', async () => {

@@ -54,17 +54,17 @@ test('swaps occupied Hub slots only within the same Hub profile grid', () => {
   assert.deepEqual(state.hubProfiles[0].grid.entries, { 0: { species: 25, shiny: false }, 1: { species: 1, shiny: true } })
 })
 
-test('moves an occupied Pokémon into any empty local target without persistence', () => {
+test('does not make an unpersisted move between a game save and a Hub grid', () => {
   const state = fixture()
   const toHub = applyPokemonHubLocalDrop(state, party('emerald', 'may', 0), hub(4))
   const toSave = applyPokemonHubLocalDrop(state, hub(0), box('ruby', 'dawn', 1))
 
-  assert.equal(toHub.action, 'move')
-  assert.deepEqual(toHub.saveLayoutsBySource['emerald:may'].party[0], { occupied: false })
-  assert.deepEqual(toHub.hubProfiles[0].grid.entries[4], { species: 289, shiny: false })
-  assert.equal(toSave.action, 'move')
-  assert.equal(toSave.hubProfiles[0].grid.entries[0], undefined)
-  assert.deepEqual(toSave.saveLayoutsBySource['ruby:dawn'].boxes[0].slots[1], { occupied: true, species: 25, shiny: false })
+  assert.equal(toHub.action, 'none')
+  assert.equal(toHub.hubProfiles, state.hubProfiles)
+  assert.equal(toHub.saveLayoutsBySource, state.saveLayoutsBySource)
+  assert.equal(toSave.action, 'none')
+  assert.equal(toSave.hubProfiles, state.hubProfiles)
+  assert.equal(toSave.saveLayoutsBySource, state.saveLayoutsBySource)
 })
 
 test('rejects occupied cross-area and cross-save targets without changing references', () => {

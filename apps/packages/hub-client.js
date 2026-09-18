@@ -89,6 +89,30 @@ export function getPokemonHub(profileId) {
   return getJson(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub`)
 }
 
+export function openPokemonHubSession(profileId) {
+  return postPokemonHubSession(profileId, '', {})
+}
+
+export function attachPokemonHubSessionSource(profileId, sessionId, sourceKey) {
+  return postPokemonHubSession(profileId, `/${encodeURIComponent(sessionId)}/sources`, { sourceKey })
+}
+
+export function heartbeatPokemonHubSession(profileId, sessionId, sequence) {
+  return postPokemonHubSession(profileId, `/${encodeURIComponent(sessionId)}/heartbeat`, { sequence })
+}
+
+export function syncPokemonHubSessionSnapshot(profileId, sessionId, snapshot) {
+  return postPokemonHubSession(profileId, `/${encodeURIComponent(sessionId)}/snapshots`, snapshot)
+}
+
+export async function detachPokemonHubSessionSource(profileId, sessionId, sourceId) {
+  return deletePokemonHubSession(profileId, `/${encodeURIComponent(sessionId)}/sources/${encodeURIComponent(sourceId)}`)
+}
+
+export async function closePokemonHubSession(profileId, sessionId) {
+  return deletePokemonHubSession(profileId, `/${encodeURIComponent(sessionId)}`)
+}
+
 function profileCollectionUrl(gameId) {
   return `/api/games/${encodeURIComponent(gameId)}/profiles`
 }
@@ -134,7 +158,64 @@ export async function transferPokemonHub(profileId, transfer) {
     body: JSON.stringify(transfer),
   })
   const body = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`)
+  if (!response.ok) {
+    const error = new Error(body.error || `Request failed (${response.status})`)
+    if (typeof body.code === 'string') error.code = body.code
+    throw error
+  }
+  return body
+}
+
+export function acquirePokemonHubSnapshot(profileId, request) {
+  return postPokemonHubSnapshot(profileId, 'acquire', request)
+}
+
+export function renewPokemonHubSnapshot(profileId, request) {
+  return postPokemonHubSnapshot(profileId, 'renew', request)
+}
+
+export function syncPokemonHubSnapshot(profileId, request) {
+  return postPokemonHubSnapshot(profileId, 'sync', request)
+}
+
+export function releasePokemonHubSnapshot(profileId, request) {
+  return postPokemonHubSnapshot(profileId, 'release', request)
+}
+
+async function postPokemonHubSnapshot(profileId, operation, request) {
+  const response = await fetch(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/snapshots/${operation}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    const error = new Error(body.error || `Request failed (${response.status})`)
+    if (typeof body.code === 'string') error.code = body.code
+    throw error
+  }
+  return body
+}
+
+async function postPokemonHubSession(profileId, suffix, body) {
+  const response = await fetch(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/sessions${suffix}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  })
+  return readPokemonHubResponse(response)
+}
+
+async function deletePokemonHubSession(profileId, suffix) {
+  const response = await fetch(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/sessions${suffix}`, { method: 'DELETE' })
+  return readPokemonHubResponse(response)
+}
+
+async function readPokemonHubResponse(response) {
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    const error = new Error(body.error || `Request failed (${response.status})`)
+    if (typeof body.code === 'string') error.code = body.code
+    throw error
+  }
   return body
 }
 

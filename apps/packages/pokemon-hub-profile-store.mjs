@@ -17,7 +17,7 @@ export function createPokemonHubProfileStore({ dataPath }) {
           throw profileError('POKEMON_HUB_PROFILE_NAME_DUPLICATE', 'A Pokémon Hub profile with this name already exists.')
         }
         const profile = {
-          schemaVersion: 5,
+          schemaVersion: 6,
           hubProfileId: randomUUID(),
           name: normalizedName,
           createdAt: new Date().toISOString(),
@@ -42,6 +42,23 @@ export function createPokemonHubProfileStore({ dataPath }) {
         profiles[index] = profile
         await writeProfiles(dataPath, profiles)
         return copy(profile)
+      })
+      queue = operation.catch(() => {})
+      return operation
+    },
+    bindOwner(hubProfileId, ownerProfileId) {
+      const operation = queue.then(async () => {
+        const owner = normalizeOwnerProfileId(ownerProfileId)
+        const profiles = await readProfiles(dataPath)
+        const index = profiles.findIndex(profile => profile.hubProfileId === hubProfileId)
+        if (index === -1) throw profileError('POKEMON_HUB_PROFILE_NOT_FOUND', 'Pokemon Hub profile was not found.')
+        const profile = profiles[index]
+        if (profile.ownerProfileId && profile.ownerProfileId !== owner) throw profileError('POKEMON_HUB_PROFILE_OWNER_CONFLICT', 'Pokemon Hub profile is reserved by another backend profile.')
+        if (Object.values(profile.grid.entries).some(entry => typeof entry.pokemonInstanceId !== 'string')) throw profileError('POKEMON_HUB_PROFILE_LEGACY_ENTRIES', 'Pokemon Hub profile contains entries without an authoritative record identity.')
+        const bound = { ...profile, ownerProfileId: owner }
+        profiles[index] = bound
+        await writeProfiles(dataPath, profiles)
+        return copy(bound)
       })
       queue = operation.catch(() => {})
       return operation
@@ -75,7 +92,7 @@ export function createRedisPokemonHubProfileStore({ persistence }) {
         const normalizedName = normalizeName(name)
         const profiles = await readRedisProfiles(persistence)
         if (profiles.some(profile => profile.name.localeCompare(normalizedName, undefined, { sensitivity: 'accent' }) === 0)) throw profileError('POKEMON_HUB_PROFILE_NAME_DUPLICATE', 'Pokémon Hub profile already exists.')
-        const profile = { schemaVersion: 5, hubProfileId: randomUUID(), name: normalizedName, createdAt: new Date().toISOString(), grid: { entries: {} } }
+        const profile = { schemaVersion: 6, hubProfileId: randomUUID(), name: normalizedName, createdAt: new Date().toISOString(), grid: { entries: {} } }
         await writeRedisProfiles(persistence, [...profiles, profile])
         return copy(profile)
       })
@@ -90,6 +107,22 @@ export function createRedisPokemonHubProfileStore({ persistence }) {
         if (index === -1) throw profileError('POKEMON_HUB_PROFILE_NOT_FOUND', 'Pokémon Hub profile was not found.')
         if (profiles.some(profile => profile.hubProfileId !== hubProfileId && profile.name.localeCompare(normalizedName, undefined, { sensitivity: 'accent' }) === 0)) throw profileError('POKEMON_HUB_PROFILE_NAME_DUPLICATE', 'Pokémon Hub profile already exists.')
         profiles[index] = { ...profiles[index], name: normalizedName }
+        await writeRedisProfiles(persistence, profiles)
+        return copy(profiles[index])
+      })
+      queue = operation.catch(() => {})
+      return operation
+    },
+    bindOwner(hubProfileId, ownerProfileId) {
+      const operation = queue.then(async () => {
+        const owner = normalizeOwnerProfileId(ownerProfileId)
+        const profiles = await readRedisProfiles(persistence)
+        const index = profiles.findIndex(profile => profile.hubProfileId === hubProfileId)
+        if (index === -1) throw profileError('POKEMON_HUB_PROFILE_NOT_FOUND', 'PokÃ©mon Hub profile was not found.')
+        const profile = profiles[index]
+        if (profile.ownerProfileId && profile.ownerProfileId !== owner) throw profileError('POKEMON_HUB_PROFILE_OWNER_CONFLICT', 'PokÃ©mon Hub profile is reserved by another backend profile.')
+        if (Object.values(profile.grid.entries).some(entry => typeof entry.pokemonInstanceId !== 'string')) throw profileError('POKEMON_HUB_PROFILE_LEGACY_ENTRIES', 'PokÃ©mon Hub profile contains entries without an authoritative record identity.')
+        profiles[index] = { ...profile, ownerProfileId: owner }
         await writeRedisProfiles(persistence, profiles)
         return copy(profiles[index])
       })
@@ -119,7 +152,7 @@ async function readProfiles(dataPath) {
     const source = JSON.parse(await readFile(collectionPath(dataPath), 'utf8'))
     const profiles = Array.isArray(source) ? source.map(normalizeProfile) : null
     if (!profiles || profiles.some(profile => profile === null)) throw new Error('Invalid Pokémon Hub profile data.')
-    if (source.some(profile => profile.schemaVersion !== 5 || Array.isArray(profile.grid?.slots) || 'capacity' in (profile.grid ?? {}))) {
+    if (source.some(profile => profile.schemaVersion !== 6 || Array.isArray(profile.grid?.slots) || 'capacity' in (profile.grid ?? {}))) {
       await writeProfiles(dataPath, profiles)
     }
     return profiles
@@ -170,6 +203,11 @@ function normalizeName(value) {
   return name
 }
 
+function normalizeOwnerProfileId(value) {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 128) throw profileError('POKEMON_HUB_PROFILE_INVALID', 'PokÃ©mon Hub backend profile is invalid.')
+  return value
+}
+
 function normalizeProfile(profile) {
   if (!profile || typeof profile !== 'object'
     || typeof profile.hubProfileId !== 'string' || !/^[0-9a-f-]{36}$/i.test(profile.hubProfileId)
@@ -177,18 +215,21 @@ function normalizeProfile(profile) {
     || typeof profile.createdAt !== 'string' || !Number.isFinite(Date.parse(profile.createdAt))
     || !profile.grid || typeof profile.grid !== 'object') return null
 
-  if (![1, 2, 3, 4, 5].includes(profile.schemaVersion)) return null
+  if (![1, 2, 3, 4, 5, 6].includes(profile.schemaVersion)) return null
+  if (profile.ownerProfileId !== undefined && (typeof profile.ownerProfileId !== 'string' || profile.ownerProfileId.length === 0 || profile.ownerProfileId.length > 128)) return null
+  const owner = profile.ownerProfileId ? { ownerProfileId: profile.ownerProfileId } : {}
 
-  if (profile.schemaVersion === 5) {
+  if (profile.schemaVersion === 5 || profile.schemaVersion === 6) {
     const entries = normalizeEntries(profile.grid.entries)
     if (!entries) return null
 
     return {
-      schemaVersion: 5,
+      schemaVersion: 6,
       hubProfileId: profile.hubProfileId,
       name: profile.name,
       createdAt: profile.createdAt,
       grid: { entries },
+      ...owner,
     }
   }
 
@@ -197,11 +238,12 @@ function normalizeProfile(profile) {
     if (!entries) return null
 
     return {
-      schemaVersion: 5,
+      schemaVersion: 6,
       hubProfileId: profile.hubProfileId,
       name: profile.name,
       createdAt: profile.createdAt,
       grid: { entries },
+      ...owner,
     }
   }
 
@@ -211,13 +253,14 @@ function normalizeProfile(profile) {
   if (profile.schemaVersion === 2 && (!Number.isInteger(profile.grid.maxColumns) || profile.grid.maxColumns < 1 || profile.grid.maxColumns > 30)) return null
 
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     hubProfileId: profile.hubProfileId,
     name: profile.name,
     createdAt: profile.createdAt,
     grid: {
       entries: entriesFromSlots(profile.grid.slots),
     },
+    ...owner,
   }
 }
 

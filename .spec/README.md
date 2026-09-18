@@ -1,5 +1,11 @@
 # Specifications
 
+- [Spec 028 — Pokemon Hub session contract repair](028-pokemon-hub-session-contract-repair.md): active compact-session protocol, atomic attach ownership, lease reconciliation, compact corrections, and terminal browser recovery. Supersedes Spec 026's browser transfer flow and amends Spec 027.
+
+- [Spec 026 — Persistent Hub grid transfers](026-pokemon-hub-persistent-grid-transfers.md): authoritative game Box and Hub grid placement transfers through the snapshot coordinator.
+
+- [Spec 025 — Pokemon Hub deferred save flush](025-pokemon-hub-save-flush.md): deferred authoritative save writes, final flush after workspace release, and the initial safe Generation III materialization boundary.
+
 - [Spec 024 — Pokemon Hub record model and snapshot transport](024-pokemon-hub-record-model-and-snapshot-transport.md): backend-owned complete Pokemon records, lossless Generation III representation, opaque instance identifiers, and small placement-only snapshot payloads.
 
 - [Spec 023 — Pokemon Hub snapshot integrity and exclusive sessions](023-pokemon-hub-snapshot-integrity.md): planned opaque Pokémon identities, exclusive source leases, versioned snapshot synchronization, deterministic duplicate correction, and a frontend-only test phase.

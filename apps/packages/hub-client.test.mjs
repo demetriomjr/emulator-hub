@@ -1,70 +1,53 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { createProfile, deleteProfile, getGames, getProfiles, getSaveProfileGames, getSaveProfileLayout, updateProfile } from './hub-client.js'
+import { acquirePokemonHubSnapshot, releasePokemonHubSnapshot, renewPokemonHubSnapshot, syncPokemonHubSessionSnapshot, syncPokemonHubSnapshot, transferPokemonHub } from './hub-client.js'
 
-test('gets the shared ROM catalog with each ROM profile projection', async (t) => {
+test('sends the Pokemon Hub snapshot lifecycle to its profile-scoped routes', async () => {
   const originalFetch = globalThis.fetch
-  const profile = { id: 'profile-1', name: 'Leaf', createdAt: '2026-09-17T00:00:00.000Z' }
-  const game = { id: 'pokemon-emerald', title: 'Pokemon Emerald', system: 'gba', status: 'ready', profiles: [profile] }
-  let body = { games: [game] }
-  globalThis.fetch = async () => ({ ok: true, json: async () => body })
-  t.after(() => { globalThis.fetch = originalFetch })
-
-  assert.deepEqual(await getGames(), [game])
-
-  body = { games: [{ ...game, profiles: [{ id: 'profile-1', name: 'Leaf' }] }] }
-  await assert.rejects(() => getGames(), /Invalid catalog profile response/)
-})
-
-test('preserves the missing-save code from a Save layout request', async (t) => {
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = async () => ({ ok: false, status: 404, json: async () => ({ error: 'Save was not found.', code: 'SAVE_MISSING' }) })
-  t.after(() => { globalThis.fetch = originalFetch })
-
-  await assert.rejects(
-    () => getSaveProfileLayout('pokemon-ruby', 'profile-1'),
-    error => error.code === 'SAVE_MISSING' && error.message === 'Save was not found.',
-  )
-})
-
-test('sends every game-profile request to the selected ROM', async (t) => {
-  const originalFetch = globalThis.fetch
-  const requests = []
-  const profile = { id: 'profile-1', name: 'Leaf', createdAt: '2026-09-17T00:00:00.000Z' }
-  globalThis.fetch = async (url, options = {}) => {
-    requests.push({ url, options })
-    return { ok: true, json: async () => url.endsWith('/profiles') && !options.method ? { profiles: [profile] } : profile }
+  const calls = []
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options })
+    return { ok: true, json: async () => ({ ok: true }) }
   }
-  t.after(() => { globalThis.fetch = originalFetch })
+  try {
+    await acquirePokemonHubSnapshot('profile-may', { sourceKey: 'save:profile-may:emerald', workspaceId: 'workspace-a' })
+    await renewPokemonHubSnapshot('profile-may', { sourceKey: 'save:profile-may:emerald', workspaceId: 'workspace-a', sourceSessionId: 'session-a', leaseToken: 'token-a' })
+    await syncPokemonHubSnapshot('profile-may', { workspaceId: 'workspace-a', clientSequence: 1, idempotencyKey: 'sync-1', sources: [] })
+    await releasePokemonHubSnapshot('profile-may', { sourceKey: 'save:profile-may:emerald', workspaceId: 'workspace-a', sourceSessionId: 'session-a', leaseToken: 'token-a' })
+  } finally { globalThis.fetch = originalFetch }
 
-  assert.deepEqual(await getProfiles('pokemon-emerald'), [profile])
-  await createProfile('pokemon-emerald', 'Leaf')
-  await updateProfile('pokemon-emerald', profile.id, 'Green')
-  await deleteProfile('pokemon-emerald', profile.id)
-
-  assert.deepEqual(requests.map(({ url, options }) => [url, options.method ?? 'GET']), [
-    ['/api/games/pokemon-emerald/profiles', 'GET'],
-    ['/api/games/pokemon-emerald/profiles', 'POST'],
-    ['/api/games/pokemon-emerald/profiles/profile-1', 'PATCH'],
-    ['/api/games/pokemon-emerald/profiles/profile-1', 'DELETE'],
+  assert.deepEqual(calls.map(call => call.url), [
+    '/api/profiles/profile-may/pokemon-hub/snapshots/acquire',
+    '/api/profiles/profile-may/pokemon-hub/snapshots/renew',
+    '/api/profiles/profile-may/pokemon-hub/snapshots/sync',
+    '/api/profiles/profile-may/pokemon-hub/snapshots/release',
   ])
+  assert.ok(calls.every(call => call.options.method === 'POST' && call.options.headers['Content-Type'] === 'application/json'))
 })
 
-test('gets save-profile ROMs and rejects an invalid response shape', async (t) => {
+test('preserves a structured backend error code for a persistent grid transfer', async () => {
   const originalFetch = globalThis.fetch
-  const requests = []
-  const game = { id: 'pokemon-emerald', title: 'Pokemon Emerald', system: 'gba' }
-  let body = { games: [game] }
-  globalThis.fetch = async (url, options = {}) => {
-    requests.push({ url, options })
-    return { ok: true, json: async () => body }
+  globalThis.fetch = async () => ({ ok: false, status: 409, json: async () => ({ error: 'Destination is occupied.', code: 'POKEMON_HUB_DESTINATION_OCCUPIED' }) })
+  try {
+    await assert.rejects(() => transferPokemonHub('profile-may', { workspaceId: 'workspace-a' }), { code: 'POKEMON_HUB_DESTINATION_OCCUPIED' })
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('sends a compact complete session snapshot to the snapshot route', async () => {
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options })
+    return { ok: true, json: async () => ({ ok: true, sequence: 1, version: 3 }) }
   }
-  t.after(() => { globalThis.fetch = originalFetch })
+  const snapshot = { n: 1, v: 2, s: [['source-a', [[7, 'pokemon-a']]]] }
+  try {
+    await syncPokemonHubSessionSnapshot('profile-may', 'session-a', snapshot)
+  } finally { globalThis.fetch = originalFetch }
 
-  assert.deepEqual(await getSaveProfileGames(), [game])
-  assert.deepEqual(requests, [{ url: '/api/pokemon-hub/save-profile-games', options: { cache: 'no-store' } }])
-
-  body = { games: {} }
-  await assert.rejects(() => getSaveProfileGames(), /Invalid save-profile game response/)
+  assert.deepEqual(calls, [{
+    url: '/api/profiles/profile-may/pokemon-hub/sessions/session-a/snapshots',
+    options: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(snapshot) },
+  }])
 })

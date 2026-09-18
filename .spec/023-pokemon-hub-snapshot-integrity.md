@@ -59,11 +59,13 @@ Opening a source must call a future acquire operation before its contents become
 acquire(sourceKey, workspaceId) -> { sourceSessionId, leaseToken, expiresAt, sourceRevision, snapshot }
 ```
 
-- Acquisition is atomic and exclusive per source key. A source already leased by another workspace session is rejected with `SOURCE_RESERVED` and is not rendered as editable.
+- Acquisition is atomic and exclusive per source key. `workspaceId` is a browser-session UUID generated on every workspace opening; it is never reused by a later opening. A source already leased by another workspace session is rejected with `SOURCE_RESERVED` and is not rendered as editable.
 - The same UI cannot open the same source twice; the existing pane-selection rule remains a client-side convenience, not the integrity mechanism.
 - A workspace may acquire several distinct sources, allowing movement between them only when every participating source is leased by that workspace.
-- The server renews a live lease only when `sourceSessionId` and `leaseToken` match. The frontend renews every 10 seconds; the initial lease duration is 30 seconds.
-- A normal close performs a final successful synchronization before releasing each source lease. Closing a tab, a browser crash, a network loss, or a missed renewal relies on expiry; a later workspace may acquire the source only after expiry.
+- `sourceSessionId` and `leaseToken` are issued by the server for each source inside that browser session. The server renews a live lease only when both values match.
+- The frontend sends a handshake every 3 seconds. Missing three consecutive handshake windows expires that browser session's source lease. The backend then performs the final save flush and releases the source; it does not rely on a UI close event.
+- A normal close still performs a final successful synchronization before releasing each source lease. If a new browser session reaches an already-expired lease while finalization is queued, acquisition drives that finalization and retries once. A flush failure leaves the source unavailable rather than risking an incomplete write.
+- The backend runs the expired-session observer once during startup and then every second. It uses the durable persistence key scan, prevents overlapping observer executions, and logs any observer failure; it must never silently discard an observer error.
 - The frontend disables further movement in a source after lease loss, surfaces the returned authority state, and writes an explicit `console.error` for unexpected synchronization failures.
 
 ## Snapshot shape

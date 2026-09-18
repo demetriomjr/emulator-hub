@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { createPokemonHubProfileStore } from './pokemon-hub-profile-store.mjs'
+import { createPokemonHubProfileStore, createRedisPokemonHubProfileStore } from './pokemon-hub-profile-store.mjs'
+import { createMemoryRedisPersistence } from './redis-persistence.mjs'
 
 async function createStore() {
   const dataPath = await mkdtemp(join(tmpdir(), 'emulator-hub-pokemon-hub-profiles-'))
@@ -20,6 +21,27 @@ test('persists a named Hub profile with sparse empty storage', async () => {
   assert.equal(profile.name, 'Shiny collection')
   assert.deepEqual(profile.grid, { entries: {} })
   assert.deepEqual(await store.list(), [profile])
+})
+
+test('binds an empty Hub grid permanently to its first backend profile', async () => {
+  const { store } = await createStore()
+  const profile = await store.create({ name: 'Transfer box' })
+
+  const bound = await store.bindOwner(profile.hubProfileId, 'profile-may')
+
+  assert.equal(bound.ownerProfileId, 'profile-may')
+  assert.equal((await store.bindOwner(profile.hubProfileId, 'profile-may')).ownerProfileId, 'profile-may')
+  await assert.rejects(() => store.bindOwner(profile.hubProfileId, 'profile-dawn'), { code: 'POKEMON_HUB_PROFILE_OWNER_CONFLICT' })
+})
+
+test('keeps a Redis-backed Hub grid bound to the profile that first owns it', async () => {
+  const store = createRedisPokemonHubProfileStore({ persistence: createMemoryRedisPersistence() })
+  const profile = await store.create({ name: 'Redis transfer box' })
+
+  await store.bindOwner(profile.hubProfileId, 'profile-may')
+
+  assert.equal((await store.list())[0].ownerProfileId, 'profile-may')
+  await assert.rejects(() => store.bindOwner(profile.hubProfileId, 'profile-dawn'), { code: 'POKEMON_HUB_PROFILE_OWNER_CONFLICT' })
 })
 
 test('rejects duplicate normalized Hub profile names and invalid grid dimensions', async () => {
