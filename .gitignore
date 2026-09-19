@@ -32,6 +32,7 @@ apps/frontend/public/resources/.pokemon.sync*
 # Local environment and secrets
 apps/backend/roms/
 apps/backend/data/
+test-data/
 .env
 .env.*
 !.env.example
