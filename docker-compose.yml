@@ -3,10 +3,14 @@ services:
     build:
       context: .
       dockerfile: deploy/frontend.Dockerfile
+    depends_on:
+      backend:
+        condition: service_healthy
     ports:
       - "127.0.0.1:8080:8080"
-    depends_on:
-      - backend
+    networks:
+      - application
+      - caddy
     restart: unless-stopped
 
   backend:
@@ -21,7 +25,22 @@ services:
     volumes:
       - emulator-hub-data:/app/apps/backend/data
       - ./deploy/roms:/app/apps/backend/roms:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/games').then(response => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    networks:
+      - application
     restart: unless-stopped
 
 volumes:
   emulator-hub-data:
+    name: ${EMULATOR_HUB_DATA_VOLUME:-emulator-hub-data}
+
+networks:
+  application:
+  caddy:
+    name: ${CADDY_NETWORK:?Set CADDY_NETWORK in deploy/.env}
+    external: true
