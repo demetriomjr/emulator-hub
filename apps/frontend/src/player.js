@@ -15,7 +15,6 @@ const leaseGeneration = Number(parameters.get('leaseGeneration'))
 const restoreLocalRecovery = parameters.get('restoreRecovery') === '1'
 const game = document.getElementById('game')
 const isMobilePlayerViewport = window.matchMedia('(max-width: 900px) and (max-height: 500px) and (orientation: landscape)').matches
-const mobileDpadDeadZoneRatio = 0.5
 const mobileGamepadLayout = Object.freeze([
   { id: 'dpad', x: 133, y: 263, size: 195, shape: 'zone' },
   { id: 'a', x: 775, y: 248, size: 91, shape: 'round' },
@@ -161,27 +160,56 @@ function resizeMobileDpad(element, size) {
   front.style.marginTop = `${-size / 4}px`
 }
 
-function configureMobileDpadInput(element, size) {
-  const collection = window.nipplejs?.factory?.collections?.find(({ options }) => options.zone === element)
-  if (!collection) return
-  element.dataset.mobileDpadDeadZone = String(size * mobileDpadDeadZoneRatio)
-  if (element.dataset.mobileDpadInputConfigured) return
-
-  collection.off('move')
-  collection.on('move', (_, info) => {
+function installMaxRangeDpadInput(element) {
+  if (element.dataset.mobileDpadInputConfigured || !window.PointerEvent) return
+  const front = element.querySelector('.nipple .front')
+  if (!front) return
+  let activePointerId = null
+  const clearInputs = () => {
+    for (const input of [4, 5, 6, 7]) window.EJS_emulator?.gameManager?.simulateInput(0, input, 0)
+  }
+  const release = () => {
+    clearInputs()
+    front.style.transform = 'translate(0px, 0px)'
+  }
+  const stopNativeZone = (event) => {
+    if (event.cancelable) event.preventDefault()
+    event.stopImmediatePropagation()
+  }
+  const start = (event) => {
+    stopNativeZone(event)
+    activePointerId = event.pointerId
+    element.setPointerCapture?.(event.pointerId)
+    release()
+  }
+  const move = (event) => {
+    if (event.pointerId !== activePointerId) return
+    stopNativeZone(event)
+    const bounds = element.getBoundingClientRect()
+    const maxDistance = Math.min(bounds.width, bounds.height) / 2
+    const dx = event.clientX - bounds.left - bounds.width / 2
+    const dy = event.clientY - bounds.top - bounds.height / 2
+    const distance = Math.hypot(dx, dy)
+    const ratio = Math.min(distance, maxDistance) / Math.max(distance, 1)
+    front.style.transform = `translate(${dx * ratio}px, ${dy * ratio}px)`
+    if (distance < maxDistance) return clearInputs()
+    const degree = (Math.atan2(-dy, dx) * 180 / Math.PI + 360) % 360
     const manager = window.EJS_emulator?.gameManager
-    if (!manager) return
-    const deadZone = Number(element.dataset.mobileDpadDeadZone)
-    if (info.distance < deadZone) {
-      for (const input of [4, 5, 6, 7]) manager.simulateInput(0, input, 0)
-      return
-    }
-    const degree = info.angle.degree
-    manager.simulateInput(0, 4, degree >= 30 && degree < 150 ? 1 : 0)
-    manager.simulateInput(0, 5, degree >= 210 && degree < 330 ? 1 : 0)
-    manager.simulateInput(0, 6, degree >= 120 && degree < 240 ? 1 : 0)
-    manager.simulateInput(0, 7, degree >= 300 || degree < 60 ? 1 : 0)
-  })
+    manager?.simulateInput(0, 4, degree >= 30 && degree < 150 ? 1 : 0)
+    manager?.simulateInput(0, 5, degree >= 210 && degree < 330 ? 1 : 0)
+    manager?.simulateInput(0, 6, degree >= 120 && degree < 240 ? 1 : 0)
+    manager?.simulateInput(0, 7, degree >= 300 || degree < 60 ? 1 : 0)
+  }
+  const end = (event) => {
+    if (event.pointerId !== activePointerId) return
+    stopNativeZone(event)
+    activePointerId = null
+    release()
+  }
+  element.addEventListener('pointerdown', start, { capture: true, passive: false })
+  element.addEventListener('pointermove', move, { capture: true, passive: false })
+  element.addEventListener('pointerup', end, { capture: true, passive: false })
+  element.addEventListener('pointercancel', end, { capture: true, passive: false })
   element.dataset.mobileDpadInputConfigured = 'true'
 }
 
@@ -209,7 +237,7 @@ function applyMobileGamepadLayout() {
     if (control.id === 'r') element.textContent = 'R'
     if (control.shape === 'zone') {
       resizeMobileDpad(element, width)
-      configureMobileDpadInput(element, width)
+      installMaxRangeDpadInput(element)
     }
   }
 }
