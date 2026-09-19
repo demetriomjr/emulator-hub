@@ -17,8 +17,9 @@ test('production Compose isolates the backend and waits for its healthcheck', as
   assert.doesNotMatch(compose, /"0\.0\.0\.0:8080:8080"/)
 })
 
-test('production frontend image synchronizes ignored Pokemon sprites before Vite copies public assets', async () => {
+test('production frontend image does not synchronize Pokemon sprites during deployment', async () => {
   const dockerfile = await readFile(frontendDockerfile, 'utf8')
 
-  assert.match(dockerfile, /RUN npm run sync:pokemon-resources\s*\r?\nRUN npm run build/)
+  assert.doesNotMatch(dockerfile, /RUN npm run sync:pokemon-resources/)
+  assert.match(dockerfile, /RUN npm run build/)
 })

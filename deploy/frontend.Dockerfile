@@ -10,7 +10,6 @@ RUN npm ci
 
 COPY apps/frontend ./
 COPY apps/packages ../packages
-RUN npm run sync:pokemon-resources
 RUN npm run build
 
 FROM nginx:1.29-alpine
