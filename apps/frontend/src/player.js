@@ -17,8 +17,8 @@ const game = document.getElementById('game')
 const isMobilePlayerViewport = window.matchMedia('(max-width: 900px) and (max-height: 500px) and (orientation: landscape)').matches
 const mobileGamepadLayout = Object.freeze([
   { id: 'dpad', x: 133, y: 263, size: 195, shape: 'zone' },
-  { id: 'a', x: 672, y: 323, size: 91, shape: 'round' },
-  { id: 'b', x: 775, y: 248, size: 91, shape: 'round' },
+  { id: 'a', x: 775, y: 248, size: 91, shape: 'round' },
+  { id: 'b', x: 672, y: 323, size: 91, shape: 'round' },
   { id: 'start', x: 494, y: 313, size: 95, shape: 'block' },
   { id: 'select', x: 350, y: 313, size: 89, shape: 'block' },
   { id: 'l', x: 121, y: 48, size: 150, shape: 'block' },
@@ -140,26 +140,47 @@ function normalizeEmulatorChrome() {
   hideFastForwardOverlay()
 }
 
+function resizeMobileDpad(element, size) {
+  const nipple = element.querySelector('.nipple')
+  const back = nipple?.querySelector('.back')
+  const front = nipple?.querySelector('.front')
+  if (!nipple || !back || !front) return
+
+  const collection = window.nipplejs?.factory?.collections?.find(({ options }) => options.zone === element)
+  if (collection?.options) collection.options.size = size
+  collection?.forEach((instance) => { instance.options.size = size })
+
+  back.style.width = `${size}px`
+  back.style.height = `${size}px`
+  back.style.marginLeft = `${-size / 2}px`
+  back.style.marginTop = `${-size / 2}px`
+  front.style.width = `${size / 2}px`
+  front.style.height = `${size / 2}px`
+  front.style.marginLeft = `${-size / 4}px`
+  front.style.marginTop = `${-size / 4}px`
+}
+
 function applyMobileGamepadLayout() {
   if (!isMobilePlayerViewport) return
   const bounds = game.getBoundingClientRect()
-  const scale = Math.min(bounds.width / 844, bounds.height / 390)
-  const offsetX = bounds.left + (bounds.width - 844 * scale) / 2
-  const offsetY = bounds.top + (bounds.height - 390 * scale) / 2
+  const scaleX = bounds.width / 844
+  const scaleY = bounds.height / 390
+  const scale = Math.min(scaleX, scaleY)
   for (const control of mobileGamepadLayout) {
     const element = game.querySelector(`.b_${control.id}`)
     if (!element) continue
     const width = control.size * scale
     const height = control.shape === 'block' ? 31 * scale : width
     element.style.setProperty('position', 'fixed', 'important')
-    element.style.setProperty('left', `${offsetX + control.x * scale}px`, 'important')
-    element.style.setProperty('top', `${offsetY + control.y * scale}px`, 'important')
+    element.style.setProperty('left', `${bounds.left + control.x * scaleX}px`, 'important')
+    element.style.setProperty('top', `${bounds.top + control.y * scaleY}px`, 'important')
     element.style.setProperty('width', `${width}px`, 'important')
     element.style.setProperty('height', `${height}px`, 'important')
     element.style.setProperty('line-height', `${height}px`, 'important')
     element.style.setProperty('margin', '0', 'important')
     element.style.setProperty('transform', 'translate(-50%, -50%)', 'important')
     element.style.setProperty('z-index', '2', 'important')
+    if (control.shape === 'zone') resizeMobileDpad(element, width)
   }
 }
 

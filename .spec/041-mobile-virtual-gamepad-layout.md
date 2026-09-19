@@ -15,8 +15,8 @@ Apply the approved landscape mobile control layout to EmulatorJS while keeping i
 
 - The mobile player uses a digital EmulatorJS `zone` for GBA directions, so a player can slide a finger between directions.
 - A/B, Start, Select, L, and R remain native EmulatorJS buttons.
-- The approved logical 844 by 390 layout is: D-pad zone `(133, 263, 195)`; A `(672, 323, 91)`; B `(775, 248, 91)`; Start `(494, 313, 95)`; Select `(350, 313, 89)`; L `(121, 48, 150)`; R `(723, 48, 150)`.
-- The positions and sizes scale uniformly to the current landscape player viewport.
+- The approved logical 844 by 390 layout is: D-pad zone `(133, 263, 195)`; A `(775, 248, 91)`; B `(672, 323, 91)`; Start `(494, 313, 95)`; Select `(350, 313, 89)`; L `(121, 48, 150)`; R `(723, 48, 150)`.
+- Positions map directly to the current landscape player viewport, avoiding letterbox padding when the mobile control rail reduces its width. Control sizes remain uniform.
 
 ## Boundaries
 
