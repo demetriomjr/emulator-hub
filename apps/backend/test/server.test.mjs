@@ -998,7 +998,7 @@ describe('hub backend HTTP contract', () => {
     const id = `rom-${sha1}`
 
     assert.deepEqual(await jsonResponse(await fetch(`${baseUrl}/api/games`)), {
-      games: [{ id, title: 'Pokémon FireRed Version', system: 'gba', core: 'gba', status: 'ready', region: 'wor', coverUrl: 'https://retrocollection.example/firered.png', pokemonHubSaveSupported: false, profiles: [] }],
+      games: [{ id, title: 'Pokémon FireRed Version', system: 'gba', core: 'gba', status: 'ready', region: 'wor', coverUrl: 'https://retrocollection.example/firered.png', pokemonHubSaveSupported: true, profiles: [] }],
     })
     const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/${id}/profiles`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Leaf' }),

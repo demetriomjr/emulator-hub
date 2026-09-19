@@ -53,6 +53,14 @@ test('creates an immutable first-admission Hub passport from a verified source t
   assert.deepEqual(decision, { allowed: true, hubPassport: { sourceTitle: 'pokemon-ruby', sourceFamily: 'hoenn-rs' } })
 })
 
+test('uses the adapter game capability as the rules title', () => {
+  const decision = createPokemonHubTransferPlacementPolicy()({
+    origin: { location: gameBox }, destination: { location: hub }, record: { display: { species: 252, isEgg: false } },
+    source: { transferCapability: { game: 'pokemon-ruby', ordinaryTradeReady: true, nationalDexUnlocked: false, networkMachineRestored: null } }, sourcePokemonCount: 2,
+  })
+  assert.deepEqual(decision, { allowed: true, hubPassport: { sourceTitle: 'pokemon-ruby', sourceFamily: 'hoenn-rs' } })
+})
+
 test('applies the shared evaluator to verified moves between two different game saves', () => {
   const validatePlacementChange = createPokemonHubTransferPlacementPolicy()
   const decision = validatePlacementChange({

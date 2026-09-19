@@ -1,31 +1,29 @@
 {
+  "titleAliases": {
+    "pokemonrubyversion": "pokemon-ruby",
+    "pokemonsapphireversion": "pokemon-sapphire",
+    "pokemonemeraldversion": "pokemon-emerald",
+    "pokemonfireredversion": "pokemon-firered",
+    "pokemonleafgreenversion": "pokemon-leafgreen"
+  },
   "profiles": [
     {
-      "id": "pokemon-ruby-gba",
-      "adapter": "gen3-gba-v1",
-      "party": { "sectionId": 1, "countOffset": 564, "offset": 568, "slots": 6, "recordBytes": 100 },
-      "boxes": { "count": 14, "slots": 30, "columns": 6, "rows": 5 }
-    },
-    {
-      "id": "pokemon-sapphire-gba",
+      "id": "pokemon-ruby-sapphire-gba",
+      "titles": ["pokemon-ruby", "pokemon-sapphire"],
       "adapter": "gen3-gba-v1",
       "party": { "sectionId": 1, "countOffset": 564, "offset": 568, "slots": 6, "recordBytes": 100 },
       "boxes": { "count": 14, "slots": 30, "columns": 6, "rows": 5 }
     },
     {
       "id": "pokemon-emerald-gba",
+      "titles": ["pokemon-emerald"],
       "adapter": "gen3-gba-v1",
       "party": { "sectionId": 1, "countOffset": 564, "offset": 568, "slots": 6, "recordBytes": 100 },
       "boxes": { "count": 14, "slots": 30, "columns": 6, "rows": 5 }
     },
     {
-      "id": "pokemon-firered-gba",
-      "adapter": "gen3-gba-v1",
-      "party": { "sectionId": 1, "countOffset": 52, "offset": 56, "slots": 6, "recordBytes": 100 },
-      "boxes": { "count": 14, "slots": 30, "columns": 6, "rows": 5 }
-    },
-    {
-      "id": "pokemon-leafgreen-gba",
+      "id": "pokemon-firered-leafgreen-gba",
+      "titles": ["pokemon-firered", "pokemon-leafgreen"],
       "adapter": "gen3-gba-v1",
       "party": { "sectionId": 1, "countOffset": 52, "offset": 56, "slots": 6, "recordBytes": 100 },
       "boxes": { "count": 14, "slots": 30, "columns": 6, "rows": 5 }

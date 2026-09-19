@@ -56,9 +56,11 @@ return cjson.encode(result)`,
   },
 }
 
-export function createPlayerLeaseCoordinator({ persistence, now = () => Date.now(), leaseDurationMs = 45_000 } = {}) {
+export function createPlayerLeaseCoordinator({ persistence, now = () => Date.now(), leaseDurationMs = 45_000, gameSaveLeases = null } = {}) {
   if (!persistence || typeof persistence.eval !== 'function') throw new TypeError('Player lease persistence is required.')
   if (!Number.isFinite(leaseDurationMs) || leaseDurationMs <= 0) throw new TypeError('Player lease duration is invalid.')
+
+  if (gameSaveLeases) return createGlobalPlayerLeaseFacade(gameSaveLeases)
 
   return {
     acquire: input => run('acquire', input),
@@ -90,5 +92,22 @@ function validate(input, needsGeneration) {
   for (const field of ['profileId', 'gameId', 'deviceId', 'sessionId']) if (typeof input?.[field] !== 'string' || input[field].length === 0) throw new TypeError(`Player lease ${field} is invalid.`)
   if (needsGeneration && (!Number.isInteger(input.generation) || input.generation < 1)) throw new TypeError('Player lease generation is invalid.')
   if (input.minimumGeneration !== undefined && (!Number.isInteger(input.minimumGeneration) || input.minimumGeneration < 1)) throw new TypeError('Player lease minimum generation is invalid.')
+}
+
+function createGlobalPlayerLeaseFacade(gameSaveLeases) {
+  for (const method of ['acquirePlayer', 'renewPlayer', 'releasePlayer', 'assertPlayerWrite', 'get']) if (typeof gameSaveLeases?.[method] !== 'function') throw new TypeError('Game save lease coordinator is invalid.')
+  return {
+    acquire: input => gameSaveLeases.acquirePlayer(input).catch(error => { throw playerError(error) }),
+    renew: input => gameSaveLeases.renewPlayer(input).catch(error => { throw playerError(error) }),
+    release: input => gameSaveLeases.releasePlayer(input).catch(error => { throw playerError(error) }),
+    assertWrite: input => gameSaveLeases.assertPlayerWrite(input).catch(error => { throw playerError(error) }),
+    get: input => gameSaveLeases.get(input),
+    async isActive(identity) { return (await gameSaveLeases.get(identity))?.ownerKind === 'player' },
+  }
+}
+
+function playerError(error) {
+  if (error?.code === 'SAVE_IN_USE_BY_PLAYER' || error?.code === 'SAVE_IN_USE_BY_POKEMON_HUB') return leaseError('PLAYER_LEASE_HELD', error.message)
+  return error
 }
 function leaseError(code, message) { const error = new Error(message); error.code = code; return error }

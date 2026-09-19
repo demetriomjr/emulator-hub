@@ -29,10 +29,11 @@ const markSaveFlushedTransition = Object.freeze({
 const pokemonHubHandshakeIntervalMs = 3_000
 const pokemonHubMissedHandshakeLimit = 3
 
-export function createPokemonHubSnapshotCoordinator({ persistence, eventStore, logger = nullPokemonHubLogger, now = () => new Date(), newId = randomUUID, leaseMs = pokemonHubHandshakeIntervalMs * pokemonHubMissedHandshakeLimit, validatePlacementChange = () => {} }) {
+export function createPokemonHubSnapshotCoordinator({ persistence, eventStore, logger = nullPokemonHubLogger, now = () => new Date(), newId = randomUUID, leaseMs = pokemonHubHandshakeIntervalMs * pokemonHubMissedHandshakeLimit, validatePlacementChange = () => {}, gameSaveLeases = null }) {
   if (!persistence || typeof persistence.get !== 'function' || typeof persistence.set !== 'function' || typeof persistence.delete !== 'function' || typeof persistence.keys !== 'function') throw new TypeError('Pokemon Hub snapshot persistence is invalid')
   if (!eventStore || typeof eventStore.append !== 'function') throw new TypeError('Pokemon Hub event store is invalid')
   if (typeof validatePlacementChange !== 'function') throw new TypeError('Pokemon Hub placement validation is invalid')
+  if (gameSaveLeases && ['acquireHub', 'renewHub', 'releaseHub'].some(method => typeof gameSaveLeases[method] !== 'function')) throw new TypeError('Game save lease coordinator is invalid')
 
   return {
     async getSnapshot({ profileId, sourceKey }) {
@@ -176,6 +177,8 @@ export function createPokemonHubSnapshotCoordinator({ persistence, eventStore, l
         throw coordinatorError('SOURCE_FLUSH_PENDING', 'Pokemon Hub source is waiting for its final save flush.')
       }
       if (existing && existing.expiresAt > instant && existing.workspaceId !== workspaceId) throw coordinatorError('SOURCE_RESERVED', 'Pokemon Hub source is reserved by another workspace.')
+      const gameSaveLease = gameSaveLeaseIdentity(profileId, sourceKey, workspaceId)
+      if (gameSaveLease) await gameSaveLeases?.acquireHub(gameSaveLease)
       const lease = existing && existing.expiresAt > instant && existing.workspaceId === workspaceId
         ? existing
         : { profileId, sourceKey, workspaceId, sourceSessionId: randomUUID(), leaseToken: randomUUID(), expiresAt: instant + leaseMs }
@@ -192,6 +195,8 @@ export function createPokemonHubSnapshotCoordinator({ persistence, eventStore, l
       const key = leaseKey(profileId, sourceKey)
       const lease = await readLease(key)
       if (!lease || lease.workspaceId !== workspaceId || lease.sourceSessionId !== sourceSessionId || lease.leaseToken !== leaseToken || lease.expiresAt <= now().getTime()) throw coordinatorError('LEASE_INVALID', 'Pokemon Hub source lease is invalid.')
+      const gameSaveLease = gameSaveLeaseIdentity(profileId, sourceKey, workspaceId)
+      if (gameSaveLease) await gameSaveLeases?.renewHub(gameSaveLease)
       const renewed = { ...lease, expiresAt: now().getTime() + leaseMs }
       await Promise.all([
         persistence.set(key, JSON.stringify(renewed)),
@@ -210,6 +215,8 @@ export function createPokemonHubSnapshotCoordinator({ persistence, eventStore, l
         persistence.removeFromSet(workspaceLeaseIndexKey(profileId, workspaceId), sourceKey),
         persistence.removeFromSortedSet(expiringLeaseIndexKey(), leaseMember(profileId, sourceKey)),
       ])
+      const gameSaveLease = gameSaveLeaseIdentity(profileId, sourceKey, workspaceId)
+      if (gameSaveLease) await gameSaveLeases?.releaseHub(gameSaveLease)
       return { sourceKey, released: true }
     },
 
@@ -242,6 +249,8 @@ export function createPokemonHubSnapshotCoordinator({ persistence, eventStore, l
         persistence.removeFromSet(workspaceLeaseIndexKey(profileId, workspaceId), sourceKey),
         persistence.removeFromSortedSet(expiringLeaseIndexKey(), leaseMember(profileId, sourceKey)),
       ])
+      const gameSaveLease = gameSaveLeaseIdentity(profileId, sourceKey, workspaceId)
+      if (gameSaveLease) await gameSaveLeases?.releaseHub(gameSaveLease).catch(error => { if (error.code !== 'HUB_LEASE_INVALID') throw error })
       return { sourceKey, released: true }
     },
 
@@ -594,6 +603,12 @@ function parseLeaseMember(member) {
     const [profileId, sourceKey] = JSON.parse(member)
     return typeof profileId === 'string' && profileId.length > 0 && typeof sourceKey === 'string' && sourceKey.length > 0 ? { profileId, sourceKey } : null
   } catch { return null }
+}
+function gameSaveLeaseIdentity(profileId, sourceKey, workspaceId) {
+  const prefix = `save:${profileId}:`
+  if (!sourceKey.startsWith(prefix)) return null
+  const gameId = sourceKey.slice(prefix.length)
+  return gameId.length > 0 && !gameId.includes(':') ? { profileId, gameId, workspaceId } : null
 }
 function syncKey(profileId, workspaceId, idempotencyKey) { return pokemonHubRedisKeys.snapshotSync(profileId, workspaceId, idempotencyKey) }
 function assertString(value, label) { if (typeof value !== 'string' || value.length === 0) throw new TypeError(`${label} is required`) }

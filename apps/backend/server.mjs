@@ -27,7 +27,7 @@ import { adoptPokemonHubSave } from '../packages/pokemon-hub-save-adoption.mjs'
 import { createPokemonHubSaveFlushService } from '../packages/pokemon-hub-save-flush.mjs'
 import { createPokemonSaveAdapterRegistry } from '../packages/pokemon-save-adapter-registry.mjs'
 import { pokemonGen3Adapter } from '../packages/pokemon-gen3-adapter.mjs'
-import { getPokemonSaveLayout } from '../packages/pokemon-save-layouts.mjs'
+import { getPokemonSaveLayout, getPokemonSaveMetadataForTitle } from '../packages/pokemon-save-layouts.mjs'
 import { pokemonHubLocationKey } from '../packages/pokemon-hub-location-key.mjs'
 import { createRomDiscovery } from '../packages/rom-discovery.mjs'
 import { createRedisRomRegistry } from '../packages/rom-registry.mjs'
@@ -35,6 +35,7 @@ import { createRedisPersistence } from '../packages/redis-persistence.mjs'
 import { migrateLegacyJsonData } from '../packages/redis-legacy-migration.mjs'
 import { createClientDiagnosticStore } from '../packages/client-diagnostic-store.mjs'
 import { createPlayerLeaseCoordinator } from '../packages/player-lease-coordinator.mjs'
+import { createGameSaveLeaseCoordinator } from '../packages/game-save-lease-coordinator.mjs'
 
 const backendDirectory = dirname(fileURLToPath(import.meta.url))
 const defaultCatalogPath = join(backendDirectory, 'catalog.json')
@@ -73,6 +74,7 @@ const unavailableReasons = Object.freeze({
 export function createHubServer(options = {}) {
   const romRegistryPath = options.romRegistryPath ?? (options.catalogPath ? join(dirname(options.catalogPath), 'data', 'rom-registry.json') : defaultRomRegistryPath)
   const persistence = options.persistence ?? createRedisPersistence(redisConfiguration(options))
+  const gameSaveLeases = options.gameSaveLeases ?? createGameSaveLeaseCoordinator({ persistence })
   const config = {
     persistence,
     catalogPath: options.catalogPath ?? defaultCatalogPath,
@@ -94,10 +96,11 @@ export function createHubServer(options = {}) {
     pokemonHubLogger: normalizePokemonHubLogger(options.pokemonHubLogger),
     clientDiagnosticStore: options.clientDiagnosticStore ?? createClientDiagnosticStore(),
     clientDiagnosticLogger: normalizeClientDiagnosticLogger(options.clientDiagnosticLogger),
-    playerLeases: options.playerLeases ?? createPlayerLeaseCoordinator({ persistence }),
+    gameSaveLeases,
+    playerLeases: options.playerLeases ?? createPlayerLeaseCoordinator({ persistence, gameSaveLeases }),
   }
   config.saveStore = invalidateSnapshotAfterSave(config.saveStore, config.snapshotStore)
-  config.pokemonHubSnapshotCoordinator = options.pokemonHubSnapshotCoordinator ?? createPokemonHubSnapshotCoordinator({ persistence, eventStore: config.pokemonHubEventStore, logger: config.pokemonHubLogger, validatePlacementChange: createPokemonHubTransferPlacementPolicy() })
+  config.pokemonHubSnapshotCoordinator = options.pokemonHubSnapshotCoordinator ?? createPokemonHubSnapshotCoordinator({ persistence, eventStore: config.pokemonHubEventStore, logger: config.pokemonHubLogger, validatePlacementChange: createPokemonHubTransferPlacementPolicy(), gameSaveLeases: config.gameSaveLeases })
   const canCreatePokemonHubSessionService = ['getSnapshot', 'renew', 'release', 'sync', 'reconcileWorkspaceLeases'].every(method => typeof config.pokemonHubSnapshotCoordinator[method] === 'function')
   config.pokemonHubSessionService = options.pokemonHubSessionService ?? (canCreatePokemonHubSessionService
     ? createPokemonHubSessionService({ persistence, coordinator: config.pokemonHubSnapshotCoordinator, logger: config.pokemonHubLogger })
@@ -386,7 +389,7 @@ async function loadAvailableCatalog(config) {
     }
     if (legacy.pokemonSave && !existing.pokemonSave) byId.set(legacy.id, { ...existing, pokemonSave: structuredClone(legacy.pokemonSave) })
   }
-  return [...byId.values()]
+  return [...byId.values()].map(entry => entry.pokemonSave ? entry : { ...entry, ...(getPokemonSaveMetadataForTitle(entry.title) ? { pokemonSave: getPokemonSaveMetadataForTitle(entry.title) } : {}) })
 }
 
 async function lookupRomBatch(lookups) {
@@ -417,8 +420,8 @@ async function handleGameProfiles(request, response, config, encodedGameId) {
 async function handleGameProfile(request, response, config, route) {
   const entry = await findProfileGame(response, config, route.gameId)
   if (entry === null) return
-  if (await config.playerLeases.isActive({ profileId: route.profileId, gameId: entry.id })) {
-    return json(response, 409, { error: 'This profile is open in an active player session.', code: 'PLAYER_LEASE_HELD' })
+  if (await isGameSaveLeased(config, { profileId: route.profileId, gameId: entry.id })) {
+    return json(response, 409, { error: 'This profile is open in an active game save session.', code: 'GAME_SAVE_LEASE_HELD' })
   }
   if (request.method === 'PATCH') await updateProfile(request, response, config, entry.id, route.profileId)
   else await deleteProfile(response, config, entry.id, route.profileId)
@@ -444,7 +447,7 @@ async function findProfileGame(response, config, encodedGameId) {
 
 async function listProfiles(response, config, gameId) {
   const profiles = await config.profileStore.list(gameId)
-  json(response, 200, { profiles: await Promise.all(profiles.map(async profile => ({ ...profile, leaseActive: await config.playerLeases.isActive({ profileId: profile.id, gameId }) }))) })
+  json(response, 200, { profiles: await Promise.all(profiles.map(async profile => ({ ...profile, leaseActive: await isGameSaveLeased(config, { profileId: profile.id, gameId }) }))) })
 }
 
 async function getControlProfile(response, config) {
@@ -560,7 +563,7 @@ async function listGames(response, config) {
       system: entry.system,
       core: entry.core,
       status: verification.ok ? 'ready' : 'unavailable',
-      pokemonHubSaveSupported: Boolean(getPokemonSaveLayout(entry.pokemonSave?.layoutProfile, entry.pokemonSave?.adapter) && config.pokemonSaveAdapters.get(entry.pokemonSave?.adapter)),
+      pokemonHubSaveSupported: Boolean(getPokemonSaveLayout(entry.pokemonSave?.layoutProfile, entry.pokemonSave?.adapter, entry.pokemonSave?.title) && config.pokemonSaveAdapters.get(entry.pokemonSave?.adapter)),
     }
 
     if (!verification.ok) {
@@ -583,7 +586,7 @@ async function listGames(response, config) {
       game.profiles = await Promise.all(profiles.map(async profile => ({
         ...profile,
         hasSave: await config.saveStore.get(profile.id, entry.id) !== null,
-        leaseActive: await config.playerLeases.isActive({ profileId: profile.id, gameId: entry.id }),
+        leaseActive: await isGameSaveLeased(config, { profileId: profile.id, gameId: entry.id }),
       })))
     } else {
       game.profiles = []
@@ -651,7 +654,7 @@ async function listSaveProfileGames(response, config) {
   const games = []
   for (let index = 0; index < entries.length; index += 1) {
     const entry = normalizeEntry(entries[index], index)
-    const layout = getPokemonSaveLayout(entry.pokemonSave?.layoutProfile, entry.pokemonSave?.adapter)
+    const layout = getPokemonSaveLayout(entry.pokemonSave?.layoutProfile, entry.pokemonSave?.adapter, entry.pokemonSave?.title)
     const adapter = layout && config.pokemonSaveAdapters.get(entry.pokemonSave.adapter)
     if (!adapter) continue
     const verification = await verifyRom(entry, config.romsDirectory)
@@ -758,9 +761,11 @@ async function getSaveLayout(response, config, { gameId, profileId }) {
   const entry = await findEntry(config, gameId)
   if (entry === null) return json(response, 404, { error: 'Game was not found.' })
   if (await config.profileStore.get(entry.id, profileId) === null) return json(response, 404, { error: 'Profile was not found.' })
+  const activeLease = await config.gameSaveLeases.get({ profileId, gameId: entry.id })
+  if (activeLease?.ownerKind === 'player') return json(response, 409, { error: 'This save is open in an active player session.', code: 'SAVE_IN_USE_BY_PLAYER' })
   const save = await config.saveStore.get(profileId, entry.id)
   if (save === null) return json(response, 404, { error: 'Save was not found.', code: 'SAVE_MISSING' })
-  const layout = getPokemonSaveLayout(entry.pokemonSave?.layoutProfile, entry.pokemonSave?.adapter)
+  const layout = getPokemonSaveLayout(entry.pokemonSave?.layoutProfile, entry.pokemonSave?.adapter, entry.pokemonSave?.title)
   if (!layout) {
     console.error('[Pokemon Hub] save layout rejected', { gameId, profileId, code: 'SAVE_LAYOUT_UNSUPPORTED' })
     return json(response, 409, { error: 'Save layout is not supported.', code: 'SAVE_LAYOUT_UNSUPPORTED' })
@@ -1426,6 +1431,10 @@ async function nextPlayerLeaseGeneration(config, profileId, gameId) {
   return Math.max(save?.fenceGeneration ?? 0, snapshot?.metadata?.fenceGeneration ?? 0) + 1
 }
 
+async function isGameSaveLeased(config, identity) {
+  return (await config.gameSaveLeases.get(identity)) !== null
+}
+
 function playerDeviceId(request, response) {
   const current = /(?:^|;\s*)emulator_hub_device=([^;]+)/.exec(request.headers.cookie ?? '')?.[1]
   if (current && /^[0-9a-f-]{36}$/i.test(current)) return current
@@ -1517,7 +1526,7 @@ async function readProjectedPokemonHubProfiles(config) {
 }
 
 async function adoptSaveIfSupported(config, profileId, entry, saved) {
-  const layout = getPokemonSaveLayout(entry.pokemonSave?.layoutProfile, entry.pokemonSave?.adapter)
+  const layout = getPokemonSaveLayout(entry.pokemonSave?.layoutProfile, entry.pokemonSave?.adapter, entry.pokemonSave?.title)
   const adapter = layout && config.pokemonSaveAdapters.get(entry.pokemonSave.adapter)
   if (!adapter) return
   await adoptPokemonHubSave({ coordinator: config.pokemonHubSnapshotCoordinator, profileId, gameId: entry.id, saved, adapter, layout })
@@ -1529,7 +1538,7 @@ async function resolvePokemonHubSaveSource(config, { profileId, sourceKey }) {
   const gameId = sourceKey.slice(prefix.length)
   const entry = await findEntry(config, gameId)
   if (!entry) throw serverError('SAVE_SOURCE_INVALID', 'Pokemon Hub save source is invalid.')
-  const layout = getPokemonSaveLayout(entry.pokemonSave?.layoutProfile, entry.pokemonSave?.adapter)
+  const layout = getPokemonSaveLayout(entry.pokemonSave?.layoutProfile, entry.pokemonSave?.adapter, entry.pokemonSave?.title)
   const adapter = layout && config.pokemonSaveAdapters.get(entry.pokemonSave.adapter)
   if (!adapter) throw serverError('SAVE_SOURCE_UNSUPPORTED', 'Pokemon Hub save source is not supported.')
   return { gameId, adapter, layout }
@@ -1576,10 +1585,13 @@ async function acquirePokemonHubSnapshot(config, profileId, request, logger = co
         throw adoptionError
       }
     }
+    let reservedGameSave = null
     try {
       logger.info('snapshot.http.save-source-adoption-started', { profileId, workspaceId: request.workspaceId ?? null, sourceKey: request.sourceKey })
       const target = await resolvePokemonHubSaveSource(config, { profileId, sourceKey: request.sourceKey })
       if (!target) throw error
+      reservedGameSave = { profileId, gameId: target.gameId, workspaceId: request.workspaceId }
+      await config.gameSaveLeases.acquireHub(reservedGameSave)
       if (await config.profileStore.get(target.gameId, profileId) === null) throw serverError('PROFILE_NOT_FOUND', 'Profile was not found.')
       const saved = await config.saveStore.get(profileId, target.gameId)
       if (!saved) throw serverError('SAVE_MISSING', 'Save was not found.')
@@ -1588,6 +1600,7 @@ async function acquirePokemonHubSnapshot(config, profileId, request, logger = co
       logger.info('snapshot.http.save-source-adopted', { profileId, workspaceId: request.workspaceId ?? null, sourceKey: request.sourceKey, gameId: target.gameId, expiresAt: acquired.expiresAt ?? null })
       return acquired
     } catch (adoptionError) {
+      if (reservedGameSave) await config.gameSaveLeases.releaseHub(reservedGameSave).catch(releaseError => { if (releaseError.code !== 'HUB_LEASE_INVALID') throw releaseError })
       logger.error('snapshot.http.save-source-adoption-failed', { profileId, workspaceId: request.workspaceId ?? null, sourceKey: request.sourceKey, error: errorDetails(adoptionError) })
       throw adoptionError
     }

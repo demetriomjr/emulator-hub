@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { createPokemonHubEventStore } from './pokemon-hub-event-store.mjs'
+import { createGameSaveLeaseCoordinator } from './game-save-lease-coordinator.mjs'
 import { createPokemonHubSnapshotCoordinator } from './pokemon-hub-snapshot-coordinator.mjs'
 import { createPokemonHubTransferPlacementPolicy, validatePokemonHubTransferPlacement } from './pokemon-hub-transfer-placement-policy.mjs'
 import { pokemonHubRedisKeys } from './pokemon-hub-redis-keys.mjs'
@@ -26,9 +27,23 @@ async function fixture(options = {}) {
     now,
     newId: (() => { let value = 0; return () => `00000000-0000-4000-8000-${String(++value).padStart(12, '0')}` })(),
     validatePlacementChange: options.validatePlacementChange,
+    gameSaveLeases: options.gameSaveLeases,
   })
   return { persistence, events, coordinator, setTime: value => { instant = value } }
 }
+
+test('does not acquire a save source while the player owns its global save lease', async () => {
+  const persistence = createMemoryRedisPersistence()
+  const leases = createGameSaveLeaseCoordinator({ persistence, now: () => Date.parse('2026-09-17T12:00:00.000Z') })
+  await leases.acquirePlayer({ profileId, gameId: 'emerald', deviceId: 'device-a', sessionId: 'player-a' })
+  const { coordinator } = await fixture({ gameSaveLeases: leases })
+  await coordinator.adopt({ profileId, sourceKey: 'save:profile-may:emerald', sourceRevision: 1, adapter: 'gen3-gba-v1', slots: [{ location: party(0), record: null }] })
+
+  await assert.rejects(
+    coordinator.acquire({ profileId, sourceKey: 'save:profile-may:emerald', workspaceId: 'workspace-a' }),
+    error => error.code === 'SAVE_IN_USE_BY_PLAYER',
+  )
+})
 
 test('adopts native records once and acquires a safe snapshot without bytes', async () => {
   const { coordinator, events } = await fixture()

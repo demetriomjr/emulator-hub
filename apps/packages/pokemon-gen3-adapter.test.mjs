@@ -35,9 +35,12 @@ test('projects Emerald transfer capabilities from the newest validated save copy
     nationalDexFlag: 0x896,
     nationalDexWork: { index: 0x46, value: 0x0302 },
   })
+  writePartyCount(bytes, 0xe000, 0x234, 2)
+  writePartyRecord(bytes, 0xe000, 0x238, 0, buildPcRecord({ personality: 0, originalTrainerId: 0x56781234, species: 25 }))
+  writePartyRecord(bytes, 0xe000, 0x238, 1, buildPcRecord({ personality: 1, originalTrainerId: 0x56781234, species: 64 }))
   refreshCopyChecksums(bytes, 0xe000)
 
-  const inspected = pokemonGen3Adapter.inspect(bytes, { id: 'pokemon-emerald-gba' })
+  const inspected = pokemonGen3Adapter.inspect(bytes, { id: 'pokemon-emerald-gba', pokemonSaveTitle: 'pokemon-emerald', party: { sectionId: 1, countOffset: 0x234, offset: 0x238, slots: 6, recordBytes: 100 } })
 
   assert.deepEqual(inspected.transferCapabilities, {
     game: 'pokemon-emerald',
@@ -45,6 +48,16 @@ test('projects Emerald transfer capabilities from the newest validated save copy
     nationalDexUnlocked: true,
     networkMachineRestored: null,
   })
+})
+
+test('does not call a Gen III save trade-ready without two non-Egg party Pokémon', () => {
+  const bytes = buildGen3Save({ firstIndex: 3, secondIndex: 7 })
+  writeCapability(bytes, 0xe000, { smallOffset: 0x1a, magic: 0xda, eventFlagBase: 0x1270, eventWorkBase: 0x139c, ordinaryTradeFlag: 0x861, nationalDexFlag: 0x896, nationalDexWork: { index: 0x46, value: 0x0302 } })
+  writePartyCount(bytes, 0xe000, 0x234, 1)
+  writePartyRecord(bytes, 0xe000, 0x238, 0, buildPcRecord({ personality: 0, originalTrainerId: 0x56781234, species: 25 }))
+  refreshCopyChecksums(bytes, 0xe000)
+
+  assert.equal(pokemonGen3Adapter.inspect(bytes, { id: 'pokemon-emerald-gba', pokemonSaveTitle: 'pokemon-emerald', party: { sectionId: 1, countOffset: 0x234, offset: 0x238, slots: 6, recordBytes: 100 } }).transferCapabilities.ordinaryTradeReady, false)
 })
 
 test('requires every National Dex signal and reads FireRed Network Machine separately', () => {
@@ -60,9 +73,12 @@ test('requires every National Dex signal and reads FireRed Network Machine separ
     networkMachineFlag: 0x844,
     omitNationalDexFlag: true,
   })
+  writePartyCount(bytes, 0xe000, 0x34, 2)
+  writePartyRecord(bytes, 0xe000, 0x38, 0, buildPcRecord({ personality: 0, originalTrainerId: 0x56781234, species: 25 }))
+  writePartyRecord(bytes, 0xe000, 0x38, 1, buildPcRecord({ personality: 1, originalTrainerId: 0x56781234, species: 64 }))
   refreshCopyChecksums(bytes, 0xe000)
 
-  assert.deepEqual(pokemonGen3Adapter.inspect(bytes, { id: 'pokemon-firered-gba' }).transferCapabilities, {
+  assert.deepEqual(pokemonGen3Adapter.inspect(bytes, { id: 'pokemon-firered-leafgreen-gba', pokemonSaveTitle: 'pokemon-firered', party: { sectionId: 1, countOffset: 0x34, offset: 0x38, slots: 6, recordBytes: 100 } }).transferCapabilities, {
     game: 'pokemon-firered',
     ordinaryTradeReady: true,
     nationalDexUnlocked: false,
@@ -191,7 +207,7 @@ test('extracts complete native Party and PC records for backend-only adoption', 
 
   const records = pokemonGen3Adapter.readAllSlots(bytes, { party: { sectionId: 1, countOffset: 0x234, offset: 0x238, slots: 6, recordBytes: 100 } })
 
-  assert.deepEqual(records[0].record.display, { species: 25, shiny: false })
+  assert.deepEqual(records[0].record.display, { species: 25, shiny: false, isEgg: false })
   assert.equal(records[0].record.representation.kind, 'party-record')
   assert.deepEqual(records[0].record.representation.bytes, partyRecord)
   const pc = records.find(slot => slot.location.area === 'box' && slot.location.box === 0 && slot.location.slot === 0)
@@ -300,13 +316,23 @@ function writeLargeUInt16(bytes, copyOffset, offset, value) {
   writeLargeByte(bytes, copyOffset, offset + 1, value >>> 8)
 }
 
-function buildPcRecord({ personality, originalTrainerId, species, marker = 0 }) {
+test('marks an encrypted Gen III egg in the backend display projection', () => {
+  const bytes = buildGen3Save({ firstIndex: 3, secondIndex: 7 })
+  writePcRecord(bytes, 0xe000, 0, 0, buildPcRecord({ personality: 0, originalTrainerId: 0x56781234, species: 25, isEgg: true }))
+  refreshCopyChecksums(bytes, 0xe000)
+
+  const records = pokemonGen3Adapter.readAllSlots(bytes)
+  assert.deepEqual(records.find(slot => slot.location.area === 'box' && slot.location.box === 0 && slot.location.slot === 0).record.display, { species: 25, shiny: false, isEgg: true })
+})
+
+function buildPcRecord({ personality, originalTrainerId, species, marker = 0, isEgg = false }) {
   const record = Buffer.alloc(80)
   record.writeUInt32LE(personality, 0)
   record.writeUInt32LE(originalTrainerId, 4)
   const decrypted = Buffer.alloc(48)
   decrypted.writeUInt16LE(species, 0)
   decrypted.writeUInt32LE(marker, 4)
+  if (isEgg) decrypted.writeUInt32LE(1 << 30, 40)
   const key = personality ^ originalTrainerId
   for (let offset = 0; offset < decrypted.length; offset += 4) decrypted.writeUInt32LE((decrypted.readUInt32LE(offset) ^ key) >>> 0, offset)
   decrypted.copy(record, 32)

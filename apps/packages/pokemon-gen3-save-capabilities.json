@@ -1,0 +1,9 @@
+{
+  "titles": {
+    "pokemon-ruby": { "smallOffset": 26, "magic": 218, "eventFlagBase": 4640, "eventWorkBase": 4928, "ordinaryTradeFlag": 2049, "nationalDexFlag": 2102, "nationalDexWorkIndex": 70, "nationalDexWorkValue": 770 },
+    "pokemon-sapphire": { "smallOffset": 26, "magic": 218, "eventFlagBase": 4640, "eventWorkBase": 4928, "ordinaryTradeFlag": 2049, "nationalDexFlag": 2102, "nationalDexWorkIndex": 70, "nationalDexWorkValue": 770 },
+    "pokemon-emerald": { "smallOffset": 26, "magic": 218, "eventFlagBase": 4720, "eventWorkBase": 5020, "ordinaryTradeFlag": 2145, "nationalDexFlag": 2198, "nationalDexWorkIndex": 70, "nationalDexWorkValue": 770 },
+    "pokemon-firered": { "smallOffset": 27, "magic": 185, "eventFlagBase": 3808, "eventWorkBase": 4096, "ordinaryTradeFlag": 2089, "nationalDexFlag": 2112, "nationalDexWorkIndex": 78, "nationalDexWorkValue": 25176, "networkMachineFlag": 2116 },
+    "pokemon-leafgreen": { "smallOffset": 27, "magic": 185, "eventFlagBase": 3808, "eventWorkBase": 4096, "ordinaryTradeFlag": 2089, "nationalDexFlag": 2112, "nationalDexWorkIndex": 78, "nationalDexWorkValue": 25176, "networkMachineFlag": 2116 }
+  }
+}

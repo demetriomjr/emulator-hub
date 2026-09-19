@@ -1,4 +1,5 @@
 import { getGen3NationalDex } from './pokemon-gen3-species.mjs'
+import transferCapabilityProfiles from './pokemon-gen3-save-capabilities.json' with { type: 'json' }
 
 const gen3SaveBytes = 0x20000
 
@@ -74,16 +75,10 @@ export const pokemonGen3Adapter = Object.freeze({
   },
 })
 
-const transferCapabilityProfiles = Object.freeze({
-  'pokemon-ruby-gba': { game: 'pokemon-ruby', smallOffset: 0x1a, magic: 0xda, eventFlagBase: 0x1220, eventWorkBase: 0x1340, ordinaryTradeFlag: 0x801, nationalDexFlag: 0x836, nationalDexWorkIndex: 0x46, nationalDexWorkValue: 0x0302 },
-  'pokemon-sapphire-gba': { game: 'pokemon-sapphire', smallOffset: 0x1a, magic: 0xda, eventFlagBase: 0x1220, eventWorkBase: 0x1340, ordinaryTradeFlag: 0x801, nationalDexFlag: 0x836, nationalDexWorkIndex: 0x46, nationalDexWorkValue: 0x0302 },
-  'pokemon-emerald-gba': { game: 'pokemon-emerald', smallOffset: 0x1a, magic: 0xda, eventFlagBase: 0x1270, eventWorkBase: 0x139c, ordinaryTradeFlag: 0x861, nationalDexFlag: 0x896, nationalDexWorkIndex: 0x46, nationalDexWorkValue: 0x0302 },
-  'pokemon-firered-gba': { game: 'pokemon-firered', smallOffset: 0x1b, magic: 0xb9, eventFlagBase: 0x0ee0, eventWorkBase: 0x1000, ordinaryTradeFlag: 0x829, nationalDexFlag: 0x840, nationalDexWorkIndex: 0x4e, nationalDexWorkValue: 0x6258, networkMachineFlag: 0x844 },
-  'pokemon-leafgreen-gba': { game: 'pokemon-leafgreen', smallOffset: 0x1b, magic: 0xb9, eventFlagBase: 0x0ee0, eventWorkBase: 0x1000, ordinaryTradeFlag: 0x829, nationalDexFlag: 0x840, nationalDexWorkIndex: 0x4e, nationalDexWorkValue: 0x6258, networkMachineFlag: 0x844 },
-})
-
 function transferCapabilityProfile(layout) {
-  return layout?.id && transferCapabilityProfiles[layout.id]
+  const title = layout?.pokemonSaveTitle
+  const profile = title ? transferCapabilityProfiles.titles[title] : null
+  return profile ? { game: title, ...profile } : null
 }
 
 function readTransferCapabilities(saveBytes, newest, layout) {
@@ -93,10 +88,21 @@ function readTransferCapabilities(saveBytes, newest, layout) {
     && readLargeUInt16LE(saveBytes, newest, profile.eventWorkBase + profile.nationalDexWorkIndex * 2) === profile.nationalDexWorkValue
   return {
     game: profile.game,
-    ordinaryTradeReady: readEventFlag(saveBytes, newest, profile, profile.ordinaryTradeFlag),
+    ordinaryTradeReady: readEventFlag(saveBytes, newest, profile, profile.ordinaryTradeFlag) && hasTwoNonEggPartyPokemon(saveBytes, newest, layout?.party),
     nationalDexUnlocked,
     networkMachineRestored: profile.networkMachineFlag === undefined ? null : readEventFlag(saveBytes, newest, profile, profile.networkMachineFlag),
   }
+}
+
+function hasTwoNonEggPartyPokemon(saveBytes, newest, party) {
+  if (!party) return false
+  const count = readPartyCount(saveBytes, newest, party)
+  let nonEgg = 0
+  for (let slot = 0; slot < count; slot += 1) {
+    const decoded = decodePcRecord(readPartyBytes(saveBytes, newest, party, slot).subarray(0, 80))
+    if (decoded?.canonical && !decoded.canonical.isEgg) nonEgg += 1
+  }
+  return nonEgg >= 2
 }
 
 function readSmallByte(bytes, save, offset) {
@@ -130,7 +136,7 @@ function nativeSlot(location, bytes, kind) {
     location,
     record: {
       representation: { adapter: 'gen3-gba-v1', kind, bytes: Buffer.from(bytes) },
-      display: { species: decoded.canonical.species, shiny: decoded.canonical.shiny },
+      display: { species: decoded.canonical.species, shiny: decoded.canonical.shiny, isEgg: decoded.canonical.isEgg },
     },
   }
 }
@@ -138,7 +144,7 @@ function nativeSlot(location, bytes, kind) {
 function describePcSlot(bytes) {
   if (bytes.every(byte => byte === 0)) return { occupied: false }
   const decoded = decodePcRecord(bytes)
-  return { occupied: true, ...(decoded?.canonical ? { species: decoded.canonical.species, shiny: decoded.canonical.shiny } : {}) }
+  return { occupied: true, ...(decoded?.canonical ? { species: decoded.canonical.species, shiny: decoded.canonical.shiny, ...(decoded.canonical.isEgg ? { isEgg: true } : {}) } : {}) }
 }
 
 function describePartySlot(bytes) {
@@ -164,6 +170,7 @@ function decodePcRecord(bytes) {
   for (let offset = 0; offset < encrypted.length; offset += 4) encrypted.writeUInt32LE((encrypted.readUInt32LE(offset) ^ key) >>> 0, offset)
   const order = substructureOrders[personality % 24]
   const growth = encrypted.subarray(order.indexOf('G') * 12, order.indexOf('G') * 12 + 12)
+  const misc = encrypted.subarray(order.indexOf('M') * 12, order.indexOf('M') * 12 + 12)
   const species = getGen3NationalDex(growth.readUInt16LE(0))
   if (species === null) return null
   const trainerId = originalTrainerId & 0xffff
@@ -171,7 +178,7 @@ function decodePcRecord(bytes) {
   const shiny = ((trainerId ^ secretId ^ (personality & 0xffff) ^ (personality >>> 16)) & 0xffff) < 8
   return {
     identity: { personality, originalTrainerId },
-    canonical: { species, shiny, trainer: { trainerId, secretId } },
+    canonical: { species, shiny, isEgg: (misc.readUInt32LE(4) & 0x40000000) !== 0, trainer: { trainerId, secretId } },
   }
 }
 

@@ -17,7 +17,7 @@ export function createPokemonHubTransferPlacementPolicy() {
     if (!pokemon) return { allowed: true }
 
     if (sourceLocation.kind === 'game' && destinationLocation.kind === 'hub') {
-      const sourceCapability = source?.transferCapability
+      const sourceCapability = ruleCapability(source?.transferCapability)
       if (!sourceCapability) return { allowed: true }
       const decision = evaluateGenerationIIITransfer({ operation: 'hub-export', source: sourceCapability, pokemon, sourcePokemonCount })
       if (!decision.allowed) return decision
@@ -25,16 +25,20 @@ export function createPokemonHubTransferPlacementPolicy() {
     }
 
     if (sourceLocation.kind === 'hub' && destinationLocation.kind === 'game') {
-      const destinationCapability = destinationSource?.transferCapability
+      const destinationCapability = ruleCapability(destinationSource?.transferCapability)
       if (!destinationCapability || !record?.hubPassport) return { allowed: true }
       return evaluateGenerationIIITransfer({ operation: 'hub-import', destination: destinationCapability, pokemon, hubPassport: record.hubPassport })
     }
 
-    const sourceCapability = source?.transferCapability
-    const destinationCapability = destinationSource?.transferCapability
+    const sourceCapability = ruleCapability(source?.transferCapability)
+    const destinationCapability = ruleCapability(destinationSource?.transferCapability)
     if (!sourceCapability || !destinationCapability) return { allowed: true }
     return evaluateGenerationIIITransfer({ operation: 'direct', source: sourceCapability, destination: destinationCapability, pokemon, sourcePokemonCount })
   }
+}
+
+function ruleCapability(capability) {
+  return capability?.game && !capability.title ? { ...capability, title: capability.game } : capability
 }
 
 function pokemonForRules(record) {
