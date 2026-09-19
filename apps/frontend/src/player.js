@@ -15,6 +15,7 @@ const leaseGeneration = Number(parameters.get('leaseGeneration'))
 const restoreLocalRecovery = parameters.get('restoreRecovery') === '1'
 const game = document.getElementById('game')
 const isMobilePlayerViewport = window.matchMedia('(max-width: 900px) and (max-height: 500px) and (orientation: landscape)').matches
+const mobileDpadDeadZoneRatio = 0.24
 const mobileGamepadLayout = Object.freeze([
   { id: 'dpad', x: 133, y: 263, size: 195, shape: 'zone' },
   { id: 'a', x: 775, y: 248, size: 91, shape: 'round' },
@@ -160,6 +161,30 @@ function resizeMobileDpad(element, size) {
   front.style.marginTop = `${-size / 4}px`
 }
 
+function configureMobileDpadInput(element, size) {
+  const collection = window.nipplejs?.factory?.collections?.find(({ options }) => options.zone === element)
+  if (!collection) return
+  element.dataset.mobileDpadDeadZone = String(size * mobileDpadDeadZoneRatio)
+  if (element.dataset.mobileDpadInputConfigured) return
+
+  collection.off('move')
+  collection.on('move', (_, info) => {
+    const manager = window.EJS_emulator?.gameManager
+    if (!manager) return
+    const deadZone = Number(element.dataset.mobileDpadDeadZone)
+    if (info.distance < deadZone) {
+      for (const input of [4, 5, 6, 7]) manager.simulateInput(0, input, 0)
+      return
+    }
+    const degree = info.angle.degree
+    manager.simulateInput(0, 4, degree >= 30 && degree < 150 ? 1 : 0)
+    manager.simulateInput(0, 5, degree >= 210 && degree < 330 ? 1 : 0)
+    manager.simulateInput(0, 6, degree >= 120 && degree < 240 ? 1 : 0)
+    manager.simulateInput(0, 7, degree >= 300 || degree < 60 ? 1 : 0)
+  })
+  element.dataset.mobileDpadInputConfigured = 'true'
+}
+
 function applyMobileGamepadLayout() {
   if (!isMobilePlayerViewport) return
   const bounds = game.getBoundingClientRect()
@@ -180,7 +205,12 @@ function applyMobileGamepadLayout() {
     element.style.setProperty('margin', '0', 'important')
     element.style.setProperty('transform', 'translate(-50%, -50%)', 'important')
     element.style.setProperty('z-index', '2', 'important')
-    if (control.shape === 'zone') resizeMobileDpad(element, width)
+    if (control.id === 'l') element.textContent = 'L'
+    if (control.id === 'r') element.textContent = 'R'
+    if (control.shape === 'zone') {
+      resizeMobileDpad(element, width)
+      configureMobileDpadInput(element, width)
+    }
   }
 }
 
