@@ -15,7 +15,7 @@ const leaseGeneration = Number(parameters.get('leaseGeneration'))
 const restoreLocalRecovery = parameters.get('restoreRecovery') === '1'
 const game = document.getElementById('game')
 const isMobilePlayerViewport = window.matchMedia('(max-width: 900px) and (max-height: 500px) and (orientation: landscape)').matches
-const mobileDpadDeadZoneRatio = 0.24
+const mobileDpadDeadZoneRatio = 0.5
 const mobileGamepadLayout = Object.freeze([
   { id: 'dpad', x: 133, y: 263, size: 195, shape: 'zone' },
   { id: 'a', x: 775, y: 248, size: 91, shape: 'round' },

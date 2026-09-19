@@ -21,7 +21,7 @@ test('defines the approved scaled mobile virtual gamepad without upstream speed 
   assert.match(player, /function resizeMobileDpad\(element, size\)/)
   assert.match(player, /collection\.options\.size = size/)
   assert.match(player, /querySelector\('\.back'\)/)
-  assert.match(player, /const mobileDpadDeadZoneRatio = 0\.24/)
+  assert.match(player, /const mobileDpadDeadZoneRatio = 0\.5/)
   assert.match(player, /collection\.off\('move'\)/)
   assert.match(player, /info\.distance < deadZone/)
   assert.match(player, /if \(control\.id === 'l'\) element\.textContent = 'L'/)
