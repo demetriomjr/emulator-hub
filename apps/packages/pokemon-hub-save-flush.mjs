@@ -42,19 +42,20 @@ export function createPokemonHubSaveFlushService({ coordinator, saveStore, resol
       const target = await resolveSaveSource({ profileId: job.profileId, sourceKey: job.sourceKey })
       if (!target) return { status: 'not-a-save-source' }
       const plan = existingPlan ?? await coordinator.getSaveFlushPlan({ profileId: job.profileId, sourceKey: job.sourceKey })
-      const stored = await saveStore.get(job.profileId, target.gameId)
+      const sourceProfileId = target.sourceProfileId ?? job.profileId
+      const stored = await saveStore.get(sourceProfileId, target.gameId)
       if (!stored) throw flushError('SAVE_MISSING', 'Pokemon Hub save is missing during flush.')
       let fenceGeneration = stored.fenceGeneration ?? 0
       if (job.generation !== undefined) {
         if (!Number.isInteger(job.generation) || job.generation < 1) throw flushError('SAVE_FENCE_INVALID', 'Pokemon Hub save fence generation is invalid.')
         if (typeof saveStore.advanceFence !== 'function') throw flushError('SAVE_FENCE_UNAVAILABLE', 'Pokemon Hub save store cannot install a close fence.')
         fenceGeneration = Math.max(fenceGeneration + 1, job.generation)
-        await saveStore.advanceFence(job.profileId, target.gameId, fenceGeneration)
+        await saveStore.advanceFence(sourceProfileId, target.gameId, fenceGeneration)
       }
       const materialized = materialize({ adapter: target.adapter, layout: target.layout, bytes: stored.bytes, source: plan.source, records: plan.records })
       let saveRevision = stored.revision
       if (materialized.changed) {
-        const saved = await saveStore.put(job.profileId, target.gameId, materialized.bytes, stored.revision, { fenceGeneration })
+        const saved = await saveStore.put(sourceProfileId, target.gameId, materialized.bytes, stored.revision, { fenceGeneration })
         saveRevision = saved.revision
       }
       await coordinator.markSaveFlushed({ profileId: job.profileId, sourceKey: job.sourceKey, sourceRevision: plan.source.sourceRevision, saveRevision })

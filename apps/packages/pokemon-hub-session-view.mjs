@@ -29,7 +29,7 @@ export function snapshotToSaveLayout(snapshot, layout) {
 export function visiblePokemonHubPanes(canonicalPanes, visiblePaneCount, profileId) {
   return canonicalPanes.slice(0, visiblePaneCount).map(pane => pane === null ? null : pane.profile.type === 'hub-profile'
     ? { kind: 'hub', hubProfileId: pane.profile.hubProfileId }
-    : { kind: 'game', gameId: pane.profile.gameId, profileId })
+    : { kind: 'game', gameId: pane.profile.gameId, profileId: pane.profile.profileId })
 }
 
 function sourceProjectionFromSaveLayout(layout) {

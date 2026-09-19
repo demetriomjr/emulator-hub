@@ -19,8 +19,9 @@ export async function getSaveProfileGames() {
   return parseGameCatalogResponse(await getJson('/api/pokemon-hub/save-profile-games'))
 }
 
-export async function getSaveProfileLayout(gameId, profileId) {
-  const body = await getJson(`/api/pokemon-hub/save-profiles/${encodeURIComponent(gameId)}/${encodeURIComponent(profileId)}/layout`)
+export async function getSaveProfileLayout(gameId, profileId, workspaceProfileId = null) {
+  const workspace = typeof workspaceProfileId === 'string' && workspaceProfileId ? `?workspaceProfileId=${encodeURIComponent(workspaceProfileId)}` : ''
+  const body = await getJson(`/api/pokemon-hub/save-profiles/${encodeURIComponent(gameId)}/${encodeURIComponent(profileId)}/layout${workspace}`)
   if (!body.layout || !Array.isArray(body.party) || !Array.isArray(body.boxes)) throw new Error('Invalid save layout response')
   return body
 }

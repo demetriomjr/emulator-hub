@@ -699,7 +699,7 @@ function requestedCanonicalSources(snapshot, profileId) {
     if (pane === null) continue
     const sourceKey = pane.profile.type === 'hub-profile'
       ? `hub:${pane.profile.hubProfileId}`
-      : `save:${profileId}:${pane.profile.gameId}`
+      : `save:${pane.profile.profileId}:${pane.profile.gameId}`
     requested.set(sourceKey, pane)
   }
   return requested

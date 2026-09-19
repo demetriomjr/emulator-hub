@@ -309,7 +309,7 @@ test('commits a canonical snapshot without exposing lease internals and releases
     snapshot: {
       revision: 0,
       panes: [
-        { pane: 0, profile: { type: 'save', gameId: 'emerald' }, party: [{ pokemonInstanceId: (await coordinator.getSnapshot({ profileId, sourceKey })).placements[0].pokemonInstanceId, slot: 0 }], boxes: [] },
+        { pane: 0, profile: { type: 'save', profileId, gameId: 'emerald' }, party: [{ pokemonInstanceId: (await coordinator.getSnapshot({ profileId, sourceKey })).placements[0].pokemonInstanceId, slot: 0 }], boxes: [] },
         null,
         null,
       ],
@@ -332,7 +332,7 @@ test('commits a canonical snapshot without exposing lease internals and releases
     profileId, sessionId: opened.sessionId, idempotencyKey: 'canonical-open-close',
     snapshot: {
       revision: 0,
-      panes: [{ pane: 0, profile: { type: 'save', gameId: 'emerald' }, party: [{ pokemonInstanceId: (await coordinator.getSnapshot({ profileId, sourceKey })).placements[0].pokemonInstanceId, slot: 0 }], boxes: [] }, null, null],
+      panes: [{ pane: 0, profile: { type: 'save', profileId, gameId: 'emerald' }, party: [{ pokemonInstanceId: (await coordinator.getSnapshot({ profileId, sourceKey })).placements[0].pokemonInstanceId, slot: 0 }], boxes: [] }, null, null],
     },
     acquireSource: async () => { throw new Error('must not reacquire') },
     flushOutgoingSource: async () => { throw new Error('must not flush') },

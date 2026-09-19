@@ -20,11 +20,23 @@ test('accepts readable Hub and save panes without server-only fields', () => {
     revision: 4,
     panes: [
       { pane: 0, profile: { type: 'hub-profile', hubProfileId: 'home' }, hub: [{ pokemonInstanceId: 'pokemon-a', slot: 7 }] },
-      { pane: 1, profile: { type: 'save', gameId: 'pokemon-emerald' }, party: [{ pokemonInstanceId: 'pokemon-b', slot: 0 }], boxes: [{ pokemonInstanceId: 'pokemon-c', slot: 419 }] },
+      { pane: 1, profile: { type: 'save', profileId: 'may', gameId: 'pokemon-emerald' }, party: [{ pokemonInstanceId: 'pokemon-b', slot: 0 }], boxes: [{ pokemonInstanceId: 'pokemon-c', slot: 419 }] },
       null,
     ],
   }
 
+  assert.deepEqual(validatePokemonHubCanonicalSnapshot(snapshot), snapshot)
+})
+
+test('accepts two saves of the same title when their save profiles differ', () => {
+  const snapshot = {
+    revision: 1,
+    panes: [
+      { pane: 0, profile: { type: 'save', profileId: 'may', gameId: 'pokemon-emerald' }, party: [{ pokemonInstanceId: 'pokemon-a', slot: 0 }], boxes: [] },
+      { pane: 1, profile: { type: 'save', profileId: 'dawn', gameId: 'pokemon-emerald' }, party: [{ pokemonInstanceId: 'pokemon-b', slot: 0 }], boxes: [] },
+      null,
+    ],
+  }
   assert.deepEqual(validatePokemonHubCanonicalSnapshot(snapshot), snapshot)
 })
 
@@ -33,14 +45,14 @@ test('rejects a duplicated Pokemon identity before source authorization', () => 
     revision: 1,
     panes: [
       { pane: 0, profile: { type: 'hub-profile', hubProfileId: 'home' }, hub: [{ pokemonInstanceId: 'pokemon-a', slot: 0 }] },
-      { pane: 1, profile: { type: 'save', gameId: 'pokemon-emerald' }, party: [{ pokemonInstanceId: 'pokemon-a', slot: 0 }], boxes: [] },
+      { pane: 1, profile: { type: 'save', profileId: 'may', gameId: 'pokemon-emerald' }, party: [{ pokemonInstanceId: 'pokemon-a', slot: 0 }], boxes: [] },
       null,
     ],
   }), /duplicate/i)
 })
 
 test('rejects an empty or non-contiguous save Party', () => {
-  const savePane = party => ({ pane: 0, profile: { type: 'save', gameId: 'pokemon-emerald' }, party, boxes: [] })
+  const savePane = party => ({ pane: 0, profile: { type: 'save', profileId: 'may', gameId: 'pokemon-emerald' }, party, boxes: [] })
   const snapshot = pane => ({ revision: 1, panes: [pane, null, null] })
 
   assert.throws(() => validatePokemonHubCanonicalSnapshot(snapshot(savePane([]))), /Party/i)

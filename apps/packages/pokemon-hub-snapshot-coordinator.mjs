@@ -605,10 +605,8 @@ function parseLeaseMember(member) {
   } catch { return null }
 }
 function gameSaveLeaseIdentity(profileId, sourceKey, workspaceId) {
-  const prefix = `save:${profileId}:`
-  if (!sourceKey.startsWith(prefix)) return null
-  const gameId = sourceKey.slice(prefix.length)
-  return gameId.length > 0 && !gameId.includes(':') ? { profileId, gameId, workspaceId } : null
+  const match = /^save:([^:]+):([^:]+)$/.exec(sourceKey)
+  return match ? { profileId: match[1], gameId: match[2], workspaceId } : null
 }
 function syncKey(profileId, workspaceId, idempotencyKey) { return pokemonHubRedisKeys.snapshotSync(profileId, workspaceId, idempotencyKey) }
 function assertString(value, label) { if (typeof value !== 'string' || value.length === 0) throw new TypeError(`${label} is required`) }

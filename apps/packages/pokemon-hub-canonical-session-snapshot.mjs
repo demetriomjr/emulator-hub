@@ -26,8 +26,8 @@ function validatePane(pane, index, profiles, pokemonIds) {
   }
 
   if (profile.type === 'save') {
-    if (!hasOnlyKeys(pane, ['pane', 'profile', 'party', 'boxes']) || !hasOnlyKeys(profile, ['type', 'gameId']) || !isNonEmptyString(profile.gameId)) throw invalidSnapshot('Save pane is invalid.')
-    registerProfile(`save:${profile.gameId}`, profiles)
+    if (!hasOnlyKeys(pane, ['pane', 'profile', 'party', 'boxes']) || !hasOnlyKeys(profile, ['type', 'profileId', 'gameId']) || !isNonEmptyString(profile.profileId) || !isNonEmptyString(profile.gameId)) throw invalidSnapshot('Save pane is invalid.')
+    registerProfile(`save:${profile.profileId}:${profile.gameId}`, profiles)
     validateOccupancy(pane.party, 0, 5, pokemonIds)
     validateParty(pane.party)
     validateOccupancy(pane.boxes, 0, 419, pokemonIds)

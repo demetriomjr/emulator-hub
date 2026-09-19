@@ -272,7 +272,7 @@ async function handleRequest(request, response, config) {
   }
 
   if (saveLayoutRoute) {
-    await getSaveLayout(response, config, saveLayoutRoute)
+    await getSaveLayout(response, config, { ...saveLayoutRoute, workspaceProfileId: route.searchParams.get('workspaceProfileId') || saveLayoutRoute.profileId })
     return
   }
 
@@ -757,7 +757,7 @@ function parseSaveLayoutRoute(pathname) {
   return match ? { gameId: match[1], profileId: match[2] } : null
 }
 
-async function getSaveLayout(response, config, { gameId, profileId }) {
+async function getSaveLayout(response, config, { gameId, profileId, workspaceProfileId = profileId }) {
   const entry = await findEntry(config, gameId)
   if (entry === null) return json(response, 404, { error: 'Game was not found.' })
   if (await config.profileStore.get(entry.id, profileId) === null) return json(response, 404, { error: 'Profile was not found.' })
@@ -779,10 +779,10 @@ async function getSaveLayout(response, config, { gameId, profileId }) {
     const inspection = adapter.inspect(save.bytes, layout)
     let snapshot
     try {
-      snapshot = await config.pokemonHubSnapshotCoordinator.getSnapshot({ profileId, sourceKey: `save:${profileId}:${gameId}` })
+      snapshot = await config.pokemonHubSnapshotCoordinator.getSnapshot({ profileId: workspaceProfileId, sourceKey: `save:${profileId}:${gameId}` })
     } catch (error) {
       if (error.code !== 'SOURCE_NOT_ADOPTED') throw error
-      if (typeof adapter.readAllSlots === 'function') snapshot = await adoptPokemonHubSave({ coordinator: config.pokemonHubSnapshotCoordinator, profileId, gameId, saved: save, adapter, layout })
+      if (typeof adapter.readAllSlots === 'function') snapshot = await adoptPokemonHubSave({ coordinator: config.pokemonHubSnapshotCoordinator, profileId: workspaceProfileId, sourceProfileId: profileId, gameId, saved: save, adapter, layout })
     }
     const pokemonInstanceIds = new Map((snapshot?.placements ?? []).map(placement => [pokemonHubLocationKey(placement.location), placement.pokemonInstanceId]))
     const withPokemonId = (slot, location) => slot.occupied && pokemonInstanceIds.get(pokemonHubLocationKey(location))
@@ -1533,15 +1533,15 @@ async function adoptSaveIfSupported(config, profileId, entry, saved) {
 }
 
 async function resolvePokemonHubSaveSource(config, { profileId, sourceKey }) {
-  const prefix = `save:${profileId}:`
-  if (typeof sourceKey !== 'string' || !sourceKey.startsWith(prefix)) return null
-  const gameId = sourceKey.slice(prefix.length)
+  const match = /^save:([^:]+):([^:]+)$/.exec(sourceKey ?? '')
+  if (!match) return null
+  const [, sourceProfileId, gameId] = match
   const entry = await findEntry(config, gameId)
   if (!entry) throw serverError('SAVE_SOURCE_INVALID', 'Pokemon Hub save source is invalid.')
   const layout = getPokemonSaveLayout(entry.pokemonSave?.layoutProfile, entry.pokemonSave?.adapter, entry.pokemonSave?.title)
   const adapter = layout && config.pokemonSaveAdapters.get(entry.pokemonSave.adapter)
   if (!adapter) throw serverError('SAVE_SOURCE_UNSUPPORTED', 'Pokemon Hub save source is not supported.')
-  return { gameId, adapter, layout }
+  return { gameId, sourceProfileId, adapter, layout }
 }
 
 async function acquirePokemonHubSnapshot(config, profileId, request, logger = config.pokemonHubLogger) {
@@ -1590,12 +1590,12 @@ async function acquirePokemonHubSnapshot(config, profileId, request, logger = co
       logger.info('snapshot.http.save-source-adoption-started', { profileId, workspaceId: request.workspaceId ?? null, sourceKey: request.sourceKey })
       const target = await resolvePokemonHubSaveSource(config, { profileId, sourceKey: request.sourceKey })
       if (!target) throw error
-      reservedGameSave = { profileId, gameId: target.gameId, workspaceId: request.workspaceId }
+      reservedGameSave = { profileId: target.sourceProfileId, gameId: target.gameId, workspaceId: request.workspaceId }
       await config.gameSaveLeases.acquireHub(reservedGameSave)
-      if (await config.profileStore.get(target.gameId, profileId) === null) throw serverError('PROFILE_NOT_FOUND', 'Profile was not found.')
-      const saved = await config.saveStore.get(profileId, target.gameId)
+      if (await config.profileStore.get(target.gameId, target.sourceProfileId) === null) throw serverError('PROFILE_NOT_FOUND', 'Profile was not found.')
+      const saved = await config.saveStore.get(target.sourceProfileId, target.gameId)
       if (!saved) throw serverError('SAVE_MISSING', 'Save was not found.')
-      await adoptPokemonHubSave({ coordinator: config.pokemonHubSnapshotCoordinator, profileId, gameId: target.gameId, saved, adapter: target.adapter, layout: target.layout })
+      await adoptPokemonHubSave({ coordinator: config.pokemonHubSnapshotCoordinator, profileId, sourceProfileId: target.sourceProfileId, gameId: target.gameId, saved, adapter: target.adapter, layout: target.layout })
       const acquired = await config.pokemonHubSnapshotCoordinator.acquire(input)
       logger.info('snapshot.http.save-source-adopted', { profileId, workspaceId: request.workspaceId ?? null, sourceKey: request.sourceKey, gameId: target.gameId, expiresAt: acquired.expiresAt ?? null })
       return acquired

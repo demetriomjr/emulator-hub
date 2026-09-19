@@ -113,11 +113,9 @@ export default function PokemonHub({ onClose, closeSignal = 0 }) {
 
   async function ensurePokemonHubSession(profileId) {
     const current = pokemonHubSessionRef.current
-    if (current?.profileId === profileId) return current
-    if (current) throw new Error('The workspace session is already bound to another save profile.')
+    if (current) return current
     const opening = pokemonHubSessionOpeningRef.current
     if (opening) {
-      if (opening.profileId !== profileId) throw new Error('The workspace session is already bound to another save profile.')
       return opening.promise
     }
     const promise = openPokemonHubSession(profileId).then(opened => {
@@ -163,16 +161,11 @@ export default function PokemonHub({ onClose, closeSignal = 0 }) {
   }
 
   async function persistPokemonHubSessionMove(source, target) {
-    const profileId = source.kind === 'game' ? source.profileId : target.kind === 'game' ? target.profileId : pokemonHubSessionRef.current?.profileId
+    const profileId = pokemonHubSessionRef.current?.profileId ?? (source.kind === 'game' ? source.profileId : target.kind === 'game' ? target.profileId : null)
     if (!profileId) {
       setPokemonHubError('Load a save before moving a Pokémon in this workspace.')
       return
     }
-    if ([source, target].some(location => location.kind === 'game' && location.profileId !== profileId)) {
-      setPokemonHubError('All workspace sources must belong to the same save profile.')
-      return
-    }
-
     setPokemonHubError('')
     setPokemonHubSnapshotStatus('')
     try {
@@ -256,9 +249,10 @@ export default function PokemonHub({ onClose, closeSignal = 0 }) {
       const nextSnapshots = { ...pokemonHubSnapshotsRef.current }
       let loadedSave = null
       if (incomingSource?.kind === 'game') {
-        const layout = await getSaveProfileLayout(incomingSource.gameId, incomingSource.profileId)
+        const session = await ensurePokemonHubSession(profileId)
+        const layout = await getSaveProfileLayout(incomingSource.gameId, incomingSource.profileId, session.profileId)
         const key = saveSourceKey(incomingSource.gameId, incomingSource.profileId)
-        const sourceSnapshot = createGameSessionSourceSnapshot({ profileId, gameId: incomingSource.gameId, layout })
+        const sourceSnapshot = createGameSessionSourceSnapshot({ profileId: incomingSource.profileId, gameId: incomingSource.gameId, layout })
         nextSnapshots[key] = sourceSnapshot
         loadedSave = { key, layout, sourceSnapshot }
       } else if (incomingSource?.kind === 'hub') {
@@ -738,7 +732,7 @@ function createCanonicalPokemonHubSnapshot(session, panes, snapshots) {
       }
       return {
         pane,
-        profile: { type: 'save', gameId: source.gameId },
+        profile: { type: 'save', profileId: source.profileId, gameId: source.gameId },
         party: snapshot.placements.flatMap(placement => placement.location.area === 'party' && placement.pokemonInstanceId ? [{ pokemonInstanceId: placement.pokemonInstanceId, slot: placement.location.slot }] : []),
         boxes: snapshot.placements.flatMap(placement => placement.location.area === 'box' && placement.pokemonInstanceId ? [{ pokemonInstanceId: placement.pokemonInstanceId, slot: placement.location.box * 30 + placement.location.slot }] : []),
       }

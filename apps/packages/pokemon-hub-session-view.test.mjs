@@ -5,7 +5,7 @@ import { createGameSessionSourceSnapshot, snapshotToSaveLayout, visiblePokemonHu
 
 test('keeps the visual workspace at its current pane count when reconciling a three-slot snapshot', () => {
   const panes = visiblePokemonHubPanes([
-    { pane: 0, profile: { type: 'save', gameId: 'pokemon-emerald' }, party: [], boxes: [] },
+      { pane: 0, profile: { type: 'save', profileId: 'may', gameId: 'pokemon-emerald' }, party: [], boxes: [] },
     { pane: 1, profile: { type: 'hub-profile', hubProfileId: 'living-dex' }, hub: [] },
     null,
   ], 2, 'may')
