@@ -17,3 +17,11 @@ test('frontend development server and backend proxy use frontend environment set
   assert.equal(configuration.server.proxy['/roms'], 'http://127.0.0.1:3001')
   assert.ok(configuration.plugins.some(plugin => plugin.name === 'workspace-package-dependency-resolver'))
 })
+
+test('production build emits the standalone emulator player page', () => {
+  const configuration = createFrontendViteConfiguration({})
+
+  assert.deepEqual(Object.keys(configuration.build.rollupOptions.input).sort(), ['main', 'player'])
+  assert.match(configuration.build.rollupOptions.input.main, /index\.html$/)
+  assert.match(configuration.build.rollupOptions.input.player, /player\.html$/)
+})
