@@ -24,6 +24,52 @@ test('selects the newest valid Gen III save copy from ordered sector IDs', () =>
   assert.equal(inspected.boxes.every(box => box.slots.length === 30), true)
 })
 
+test('projects Emerald transfer capabilities from the newest validated save copy', () => {
+  const bytes = buildGen3Save({ firstIndex: 3, secondIndex: 7 })
+  writeCapability(bytes, 0xe000, {
+    smallOffset: 0x1a,
+    magic: 0xda,
+    eventFlagBase: 0x1270,
+    eventWorkBase: 0x139c,
+    ordinaryTradeFlag: 0x861,
+    nationalDexFlag: 0x896,
+    nationalDexWork: { index: 0x46, value: 0x0302 },
+  })
+  refreshCopyChecksums(bytes, 0xe000)
+
+  const inspected = pokemonGen3Adapter.inspect(bytes, { id: 'pokemon-emerald-gba' })
+
+  assert.deepEqual(inspected.transferCapabilities, {
+    game: 'pokemon-emerald',
+    ordinaryTradeReady: true,
+    nationalDexUnlocked: true,
+    networkMachineRestored: null,
+  })
+})
+
+test('requires every National Dex signal and reads FireRed Network Machine separately', () => {
+  const bytes = buildGen3Save({ firstIndex: 3, secondIndex: 7 })
+  writeCapability(bytes, 0xe000, {
+    smallOffset: 0x1b,
+    magic: 0xb9,
+    eventFlagBase: 0x0ee0,
+    eventWorkBase: 0x1000,
+    ordinaryTradeFlag: 0x829,
+    nationalDexFlag: 0x840,
+    nationalDexWork: { index: 0x4e, value: 0x6258 },
+    networkMachineFlag: 0x844,
+    omitNationalDexFlag: true,
+  })
+  refreshCopyChecksums(bytes, 0xe000)
+
+  assert.deepEqual(pokemonGen3Adapter.inspect(bytes, { id: 'pokemon-firered-gba' }).transferCapabilities, {
+    game: 'pokemon-firered',
+    ordinaryTradeReady: true,
+    nationalDexUnlocked: false,
+    networkMachineRestored: true,
+  })
+})
+
 test('rejects a save when both Gen III copies have a bad sector checksum', () => {
   const bytes = buildGen3Save({ firstIndex: 3, secondIndex: 7 })
   bytes[0x20] ^= 0xff
@@ -227,6 +273,31 @@ function refreshCopyChecksums(bytes, copyOffset) {
     const offset = copyOffset + sectionId * 0x1000
     bytes.writeUInt16LE(gen3Checksum(bytes, offset, sectionId), offset + 0xff6)
   }
+}
+
+function writeCapability(bytes, copyOffset, profile) {
+  bytes[copyOffset + profile.smallOffset] = profile.magic
+  for (const flag of [profile.ordinaryTradeFlag, profile.omitNationalDexFlag ? null : profile.nationalDexFlag, profile.networkMachineFlag]) {
+    if (flag === null || flag === undefined) continue
+    const offset = profile.eventFlagBase + Math.floor(flag / 8)
+    writeLargeByte(bytes, copyOffset, offset, readLargeByte(bytes, copyOffset, offset) | (1 << (flag % 8)))
+  }
+  writeLargeUInt16(bytes, copyOffset, profile.eventWorkBase + profile.nationalDexWork.index * 2, profile.nationalDexWork.value)
+}
+
+function readLargeByte(bytes, copyOffset, offset) {
+  const sectionId = 1 + Math.floor(offset / 0xf80)
+  return bytes[copyOffset + sectionId * 0x1000 + (offset % 0xf80)]
+}
+
+function writeLargeByte(bytes, copyOffset, offset, value) {
+  const sectionId = 1 + Math.floor(offset / 0xf80)
+  bytes[copyOffset + sectionId * 0x1000 + (offset % 0xf80)] = value
+}
+
+function writeLargeUInt16(bytes, copyOffset, offset, value) {
+  writeLargeByte(bytes, copyOffset, offset, value & 0xff)
+  writeLargeByte(bytes, copyOffset, offset + 1, value >>> 8)
 }
 
 function buildPcRecord({ personality, originalTrainerId, species, marker = 0 }) {

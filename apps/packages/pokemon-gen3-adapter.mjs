@@ -9,6 +9,7 @@ export const pokemonGen3Adapter = Object.freeze({
     return {
       saveIndex: newest.saveIndex,
       copyOffset: newest.copyOffset,
+      ...(transferCapabilityProfile(layout) ? { transferCapabilities: readTransferCapabilities(saveBytes, newest, layout) } : {}),
       ...(layout?.party ? { party: inspectParty(saveBytes, newest, layout.party) } : {}),
       boxes: Array.from({ length: 14 }, (_, box) => ({
         slots: Array.from({ length: 30 }, (_, slot) => describePcSlot(readPcBytes(saveBytes, newest, box, slot))),
@@ -72,6 +73,54 @@ export const pokemonGen3Adapter = Object.freeze({
     return copy
   },
 })
+
+const transferCapabilityProfiles = Object.freeze({
+  'pokemon-ruby-gba': { game: 'pokemon-ruby', smallOffset: 0x1a, magic: 0xda, eventFlagBase: 0x1220, eventWorkBase: 0x1340, ordinaryTradeFlag: 0x801, nationalDexFlag: 0x836, nationalDexWorkIndex: 0x46, nationalDexWorkValue: 0x0302 },
+  'pokemon-sapphire-gba': { game: 'pokemon-sapphire', smallOffset: 0x1a, magic: 0xda, eventFlagBase: 0x1220, eventWorkBase: 0x1340, ordinaryTradeFlag: 0x801, nationalDexFlag: 0x836, nationalDexWorkIndex: 0x46, nationalDexWorkValue: 0x0302 },
+  'pokemon-emerald-gba': { game: 'pokemon-emerald', smallOffset: 0x1a, magic: 0xda, eventFlagBase: 0x1270, eventWorkBase: 0x139c, ordinaryTradeFlag: 0x861, nationalDexFlag: 0x896, nationalDexWorkIndex: 0x46, nationalDexWorkValue: 0x0302 },
+  'pokemon-firered-gba': { game: 'pokemon-firered', smallOffset: 0x1b, magic: 0xb9, eventFlagBase: 0x0ee0, eventWorkBase: 0x1000, ordinaryTradeFlag: 0x829, nationalDexFlag: 0x840, nationalDexWorkIndex: 0x4e, nationalDexWorkValue: 0x6258, networkMachineFlag: 0x844 },
+  'pokemon-leafgreen-gba': { game: 'pokemon-leafgreen', smallOffset: 0x1b, magic: 0xb9, eventFlagBase: 0x0ee0, eventWorkBase: 0x1000, ordinaryTradeFlag: 0x829, nationalDexFlag: 0x840, nationalDexWorkIndex: 0x4e, nationalDexWorkValue: 0x6258, networkMachineFlag: 0x844 },
+})
+
+function transferCapabilityProfile(layout) {
+  return layout?.id && transferCapabilityProfiles[layout.id]
+}
+
+function readTransferCapabilities(saveBytes, newest, layout) {
+  const profile = transferCapabilityProfile(layout)
+  const nationalDexUnlocked = readSmallByte(saveBytes, newest, profile.smallOffset) === profile.magic
+    && readEventFlag(saveBytes, newest, profile, profile.nationalDexFlag)
+    && readLargeUInt16LE(saveBytes, newest, profile.eventWorkBase + profile.nationalDexWorkIndex * 2) === profile.nationalDexWorkValue
+  return {
+    game: profile.game,
+    ordinaryTradeReady: readEventFlag(saveBytes, newest, profile, profile.ordinaryTradeFlag),
+    nationalDexUnlocked,
+    networkMachineRestored: profile.networkMachineFlag === undefined ? null : readEventFlag(saveBytes, newest, profile, profile.networkMachineFlag),
+  }
+}
+
+function readSmallByte(bytes, save, offset) {
+  const section = save.sectors.get(0)
+  if (!section || offset < 0 || offset >= 3884) throw invalidSave('Gen III Small block is invalid.')
+  return Buffer.from(bytes)[section.offset + offset]
+}
+
+function readEventFlag(bytes, save, profile, flag) {
+  const byte = readLargeByte(bytes, save, profile.eventFlagBase + Math.floor(flag / 8))
+  return (byte & (1 << (flag % 8))) !== 0
+}
+
+function readLargeByte(bytes, save, offset) {
+  const sectionId = 1 + Math.floor(offset / 0xf80)
+  const localOffset = offset % 0xf80
+  const section = save.sectors.get(sectionId)
+  if (!section || sectionId > 4) throw invalidSave('Gen III Large block is invalid.')
+  return Buffer.from(bytes)[section.offset + localOffset]
+}
+
+function readLargeUInt16LE(bytes, save, offset) {
+  return readLargeByte(bytes, save, offset) | (readLargeByte(bytes, save, offset + 1) << 8)
+}
 
 function nativeSlot(location, bytes, kind) {
   if (bytes === null || bytes.subarray(0, 80).every(byte => byte === 0)) return { location, record: null }

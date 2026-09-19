@@ -19,7 +19,7 @@ import { createPokemonHubSessionStore } from '../packages/pokemon-hub-session-st
 import { createPokemonHubSnapshotStore } from '../packages/pokemon-hub-snapshot-store.mjs'
 import { createPokemonHubService } from '../packages/pokemon-hub-service.mjs'
 import { createPokemonHubGridTransferService } from '../packages/pokemon-hub-grid-transfer-service.mjs'
-import { validatePokemonHubTransferPlacement } from '../packages/pokemon-hub-transfer-placement-policy.mjs'
+import { createPokemonHubTransferPlacementPolicy } from '../packages/pokemon-hub-transfer-placement-policy.mjs'
 import { createPokemonHubEventStore } from '../packages/pokemon-hub-event-store.mjs'
 import { createPokemonHubSnapshotCoordinator } from '../packages/pokemon-hub-snapshot-coordinator.mjs'
 import { createPokemonHubSessionService } from '../packages/pokemon-hub-session-service.mjs'
@@ -97,7 +97,7 @@ export function createHubServer(options = {}) {
     playerLeases: options.playerLeases ?? createPlayerLeaseCoordinator({ persistence }),
   }
   config.saveStore = invalidateSnapshotAfterSave(config.saveStore, config.snapshotStore)
-  config.pokemonHubSnapshotCoordinator = options.pokemonHubSnapshotCoordinator ?? createPokemonHubSnapshotCoordinator({ persistence, eventStore: config.pokemonHubEventStore, logger: config.pokemonHubLogger, validatePlacementChange: validatePokemonHubTransferPlacement })
+  config.pokemonHubSnapshotCoordinator = options.pokemonHubSnapshotCoordinator ?? createPokemonHubSnapshotCoordinator({ persistence, eventStore: config.pokemonHubEventStore, logger: config.pokemonHubLogger, validatePlacementChange: createPokemonHubTransferPlacementPolicy() })
   const canCreatePokemonHubSessionService = ['getSnapshot', 'renew', 'release', 'sync', 'reconcileWorkspaceLeases'].every(method => typeof config.pokemonHubSnapshotCoordinator[method] === 'function')
   config.pokemonHubSessionService = options.pokemonHubSessionService ?? (canCreatePokemonHubSessionService
     ? createPokemonHubSessionService({ persistence, coordinator: config.pokemonHubSnapshotCoordinator, logger: config.pokemonHubLogger })
@@ -785,6 +785,7 @@ async function getSaveLayout(response, config, { gameId, profileId }) {
       : slot
     json(response, 200, {
       layout: { id: layout.id, party: { slots: layout.party.slots }, boxes: layout.boxes },
+      ...(inspection.transferCapabilities ? { transferCapabilities: inspection.transferCapabilities } : {}),
       party: inspection.party.map((slot, index) => withPokemonId(slot, { kind: 'game', area: 'party', slot: index })),
       boxes: inspection.boxes.map((box, boxIndex) => ({ ...box, slots: box.slots.map((slot, index) => withPokemonId(slot, { kind: 'game', area: 'box', box: boxIndex, slot: index })) })),
     })
@@ -892,7 +893,7 @@ async function handlePokemonHubSession(request, response, config, route, logger 
         flushOutgoingSource: source => flushPokemonHubSessionSource(config, route.profileId, source, trace),
         releaseSource: source => releasePokemonHubSessionSourceLease(config, route.profileId, route.sessionId, source, trace),
       })
-      if (result.status === 'corrected') json(response, 409, result.snapshot)
+      if (result.status === 'corrected') json(response, 409, { ...result.snapshot, ...(result.reason ? { reason: result.reason } : {}) })
       else empty(response, 200)
       return
     }
@@ -936,7 +937,7 @@ async function handlePokemonHubSession(request, response, config, route, logger 
       return
     }
     trace.warn('snapshot.http.corrected', { snapshot: summarizeCanonicalSnapshot(result.snapshot) })
-    json(response, 409, result.snapshot)
+    json(response, 409, { ...result.snapshot, ...(result.reason ? { reason: result.reason } : {}) })
   } catch (error) {
     if (route.kind === 'snapshot') trace.error('snapshot.http.failed', { error: errorDetails(error) })
     if (route.kind === 'heartbeat') trace.error('heartbeat.http.failed', { error: errorDetails(error) })

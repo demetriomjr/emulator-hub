@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { validatePokemonHubTransferPlacement } from './pokemon-hub-transfer-placement-policy.mjs'
+import { createPokemonHubTransferPlacementPolicy, validatePokemonHubTransferPlacement } from './pokemon-hub-transfer-placement-policy.mjs'
 
 const gameBox = { kind: 'game', area: 'box', box: 0, slot: 0 }
 const gameParty = { kind: 'game', area: 'party', slot: 0 }
@@ -19,4 +19,50 @@ test('allows a valid move into a vacant destination regardless of its pane sourc
 
 test('rejects a move without an origin or destination', () => {
   assert.throws(() => validatePokemonHubTransferPlacement({ origin: { location: gameParty }, destination: null }), { code: 'SAVE_MATERIALIZATION_UNSUPPORTED' })
+})
+
+test('uses the shared Gen III evaluator for a verified save-to-Hub export', () => {
+  const validatePlacementChange = createPokemonHubTransferPlacementPolicy()
+  const decision = validatePlacementChange({
+    origin: { location: gameBox },
+    destination: { location: hub },
+    record: { display: { species: 1, isEgg: true } },
+    source: { transferCapability: { title: 'pokemon-firered', ordinaryTradeReady: true, nationalDexUnlocked: false, networkMachineRestored: false } },
+    sourcePokemonCount: 2,
+  })
+
+  assert.deepEqual(decision, {
+    allowed: false,
+    reason: {
+      code: 'TRANSFER_NATIONAL_DEX_REQUIRED',
+      message: 'Este save ainda não pode enviar ou receber esse Pokémon sem a Pokédex Nacional.',
+    },
+  })
+})
+
+test('creates an immutable first-admission Hub passport from a verified source title', () => {
+  const validatePlacementChange = createPokemonHubTransferPlacementPolicy()
+  const decision = validatePlacementChange({
+    origin: { location: gameBox },
+    destination: { location: hub },
+    record: { display: { species: 252, isEgg: false } },
+    source: { transferCapability: { title: 'pokemon-ruby', ordinaryTradeReady: true, nationalDexUnlocked: false, networkMachineRestored: false } },
+    sourcePokemonCount: 2,
+  })
+
+  assert.deepEqual(decision, { allowed: true, hubPassport: { sourceTitle: 'pokemon-ruby', sourceFamily: 'hoenn-rs' } })
+})
+
+test('applies the shared evaluator to verified moves between two different game saves', () => {
+  const validatePlacementChange = createPokemonHubTransferPlacementPolicy()
+  const decision = validatePlacementChange({
+    origin: { location: gameBox },
+    destination: { location: { ...gameBox, slot: 1 } },
+    record: { display: { species: 252, isEgg: true } },
+    source: { sourceKey: 'save:profile:ruby', transferCapability: { title: 'pokemon-ruby', ordinaryTradeReady: true, nationalDexUnlocked: false, networkMachineRestored: false } },
+    destinationSource: { sourceKey: 'save:profile:emerald', transferCapability: { title: 'pokemon-emerald', ordinaryTradeReady: true, nationalDexUnlocked: false, networkMachineRestored: false } },
+    sourcePokemonCount: 2,
+  })
+
+  assert.equal(decision.reason?.code, 'TRANSFER_NATIONAL_DEX_REQUIRED')
 })

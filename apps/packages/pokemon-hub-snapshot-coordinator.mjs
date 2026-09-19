@@ -116,6 +116,7 @@ export function createPokemonHubSnapshotCoordinator({ persistence, eventStore, l
         saveRevision: source.sourceRevision,
         needsSaveFlush: false,
         adapter: source.adapter,
+        ...(source.transferCapability ? { transferCapability: structuredClone(source.transferCapability) } : {}),
         placements,
         pokemonDisplay,
       }
@@ -303,6 +304,7 @@ export function createPokemonHubSnapshotCoordinator({ persistence, eventStore, l
         rejectCrossSourceOccupiedDestinations(prior, next)
         const changedPokemonIds = [...next].filter(([pokemonInstanceId, destination]) => !samePlacement(prior.get(pokemonInstanceId), destination)).map(([pokemonInstanceId]) => pokemonInstanceId)
         const changedRecords = new Map()
+        const placementDecisions = new Map()
         for (const pokemonInstanceId of changedPokemonIds) {
           const document = await readRecord(request.profileId, pokemonInstanceId)
           if (!document) throw coordinatorError('POKEMON_UNKNOWN', 'Pokemon instance is unknown.')
@@ -312,25 +314,36 @@ export function createPokemonHubSnapshotCoordinator({ persistence, eventStore, l
         for (const [pokemonInstanceId, destination] of next) {
           const origin = prior.get(pokemonInstanceId)
           if (samePlacement(origin, destination)) continue
-          await validatePlacementChange({
+          const validation = await validatePlacementChange({
             profileId: request.profileId,
             pokemonInstanceId,
             origin,
             destination,
+            record: changedRecords.get(pokemonInstanceId),
+            source: sourceFor(sources, origin?.sourceKey),
+            destinationSource: sourceFor(sources, destination.sourceKey),
+            sourcePokemonCount: pokemonCountForSource(sources, origin?.sourceKey),
             sourceAdapter: sourceAdapterFor(sources, origin?.sourceKey),
             destinationAdapter: sourceAdapterFor(sources, destination.sourceKey),
           })
+          if (validation?.allowed === false) return correction(validation.reason?.code ?? 'TRANSFER_GAME_PAIR_UNSUPPORTED', request, sources, now().getTime(), validation.reason)
+          placementDecisions.set(pokemonInstanceId, validation)
         }
         for (const [pokemonInstanceId, origin] of prior) {
           if (next.has(pokemonInstanceId)) continue
-          await validatePlacementChange({
+          const validation = await validatePlacementChange({
             profileId: request.profileId,
             pokemonInstanceId,
             origin,
             destination: null,
+            record: changedRecords.get(pokemonInstanceId),
+            source: sourceFor(sources, origin.sourceKey),
+            destinationSource: null,
+            sourcePokemonCount: pokemonCountForSource(sources, origin.sourceKey),
             sourceAdapter: sourceAdapterFor(sources, origin.sourceKey),
             destinationAdapter: null,
           })
+          if (validation?.allowed === false) return correction(validation.reason?.code ?? 'TRANSFER_GAME_PAIR_UNSUPPORTED', request, sources, now().getTime(), validation.reason)
         }
         trace.info('snapshot.coordinator.placement-policy-finished', { ...summarizeSyncRequest(request), changedPokemonCount: changedPokemonIds.length })
         const displayById = Object.assign({}, ...sources.map(({ source }) => source.pokemonDisplay ?? {}))
@@ -352,10 +365,11 @@ export function createPokemonHubSnapshotCoordinator({ persistence, eventStore, l
           const origin = prior.get(pokemonInstanceId)
           if (samePlacement(origin, destination)) continue
           const document = changedRecords.get(pokemonInstanceId)
+          const decision = placementDecisions.get(pokemonInstanceId)
           const sourceAdapter = sourceAdapterFor(sources, origin?.sourceKey) ?? document.representations[0]?.adapter
           const destinationAdapter = sourceAdapterFor(sources, destination.sourceKey) ?? sourceAdapterFor(request.sources, destination.sourceKey) ?? sourceAdapterFor(sources, origin?.sourceKey)
           const hash = document.representations[0]?.sha256
-          const revised = { ...document, placement: { sourceKey: destination.sourceKey, location: destination.location }, revision: document.revision + 1 }
+          const revised = { ...document, ...(document.hubPassport || !decision?.hubPassport ? {} : { hubPassport: structuredClone(decision.hubPassport) }), placement: { sourceKey: destination.sourceKey, location: destination.location }, revision: document.revision + 1 }
           await writeRecord(revised)
           await eventStore.append({
             profileId: request.profileId,
@@ -485,7 +499,8 @@ function normalizeAdoption(input) {
   if (!input || typeof input !== 'object' || !Array.isArray(input.slots)) throw new TypeError('Pokemon Hub source adoption is invalid')
   assertString(input.profileId, 'Profile ID'); assertString(input.sourceKey, 'Source key'); assertString(input.adapter, 'Adapter')
   if (!Number.isInteger(input.sourceRevision) || input.sourceRevision < 0) throw new TypeError('Source revision is invalid')
-  return { ...input, slots: input.slots.map(slot => ({ location: normalizeLocation(slot.location), record: slot.record ? normalizeRecord(slot.record) : null })) }
+  if (input.transferCapability !== undefined && (!input.transferCapability || typeof input.transferCapability !== 'object')) throw new TypeError('Pokemon Hub transfer capability is invalid')
+  return { ...input, ...(input.transferCapability ? { transferCapability: structuredClone(input.transferCapability) } : {}), slots: input.slots.map(slot => ({ location: normalizeLocation(slot.location), record: slot.record ? normalizeRecord(slot.record) : null })) }
 }
 
 function normalizeRecord(record) {
@@ -521,7 +536,7 @@ function normalizeWorkspaceSources(request) {
 }
 
 function safeSnapshot(source) {
-  return { sourceKey: source.sourceKey, sourceRevision: source.sourceRevision, snapshotRevision: source.snapshotRevision, adapter: source.adapter, placements: clonePlacements(source.placements), pokemonDisplay: structuredClone(source.pokemonDisplay ?? {}) }
+  return { sourceKey: source.sourceKey, sourceRevision: source.sourceRevision, snapshotRevision: source.snapshotRevision, adapter: source.adapter, ...(source.transferCapability ? { transferCapability: structuredClone(source.transferCapability) } : {}), placements: clonePlacements(source.placements), pokemonDisplay: structuredClone(source.pokemonDisplay ?? {}) }
 }
 
 function clonePlacements(placements) { return placements.map(placement => ({ location: normalizeLocation(placement.location), pokemonInstanceId: placement.pokemonInstanceId ?? null })) }
@@ -560,10 +575,12 @@ function rejectCrossSourceOccupiedDestinations(prior, next) {
 function placementKey(placement) { return `${placement.sourceKey}\u0000${pokemonHubLocationKey(placement.location)}` }
 function samePlacement(left, right) { return left?.sourceKey === right?.sourceKey && pokemonHubLocationKey(left?.location) === pokemonHubLocationKey(right?.location) }
 function sourceAdapterFor(sources, sourceKey) { return sources.find(item => (item.source?.sourceKey ?? item.sourceKey) === sourceKey)?.source?.adapter ?? sources.find(item => item.sourceKey === sourceKey)?.adapter ?? null }
+function sourceFor(sources, sourceKey) { return sources.find(item => item.source?.sourceKey === sourceKey)?.source ?? null }
+function pokemonCountForSource(sources, sourceKey) { return sourceFor(sources, sourceKey)?.placements.filter(placement => placement.pokemonInstanceId).length ?? null }
 function sourceRevisionFor(snapshots, sourceKey) { return snapshots.find(snapshot => snapshot.sourceKey === sourceKey)?.sourceRevision ?? null }
-function correction(code, request, sources, serverSequence) {
+function correction(code, request, sources, serverSequence, reason = null) {
   const snapshots = sources.map(({ source }) => safeSnapshot(source)).sort((left, right) => left.sourceKey.localeCompare(right.sourceKey))
-  return { status: 'corrected', code, clientSequence: request.clientSequence, idempotencyKey: request.idempotencyKey, serverSequence, snapshots }
+  return { status: 'corrected', code, ...(reason ? { reason: structuredClone(reason) } : {}), clientSequence: request.clientSequence, idempotencyKey: request.idempotencyKey, serverSequence, snapshots }
 }
 function sha256(bytes) { return createHash('sha256').update(bytes).digest('hex') }
 function sourceKeyFor(profileId, sourceKey) { return pokemonHubRedisKeys.source(profileId, sourceKey) }

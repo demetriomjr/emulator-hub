@@ -776,7 +776,7 @@ describe('hub backend HTTP contract', () => {
       romRegistry: { async load() { return [] }, async replace(entries) { return entries } },
       profileStore: { async get(gameId, profileId) { return gameId === 'pokemon-emerald' && profileId === 'profile-may' ? { id: profileId } : null } },
       saveStore: { async get() { return { bytes: Buffer.alloc(0x20000), revision: 1 } }, async put() { return { revision: 2 } } },
-      pokemonSaveAdapters: { get(adapterId) { return adapterId === 'gen3-gba-v1' ? { inspect() { return { party: [], boxes: [] } } } : null } },
+      pokemonSaveAdapters: { get(adapterId) { return adapterId === 'gen3-gba-v1' ? { inspect() { return { party: [], boxes: [], transferCapabilities: { game: 'pokemon-emerald', ordinaryTradeReady: true, nationalDexUnlocked: false, networkMachineRestored: null } } } } : null } },
     })
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
     liveServers.add(server)
@@ -785,6 +785,7 @@ describe('hub backend HTTP contract', () => {
     const response = await fetch(`${baseUrl}/api/pokemon-hub/save-profiles/pokemon-emerald/profile-may/layout`)
 
     assert.equal(response.status, 200)
+    assert.deepEqual((await jsonResponse(response)).transferCapabilities, { game: 'pokemon-emerald', ordinaryTradeReady: true, nationalDexUnlocked: false, networkMachineRestored: null })
   })
 
   test('creates and lists Hub profiles from the Redis-backed Hub collection', async () => {

@@ -316,7 +316,7 @@ export function createPokemonHubSessionService({ persistence, coordinator, logge
         trace.info('snapshot.canonical.coordinator-sync-finished', { profileId, sessionId, idempotencyKey, status: result.status, code: result.code ?? null })
         if (result.status !== 'accepted') {
           trace.warn('snapshot.canonical.coordinator-corrected', { profileId, sessionId, idempotencyKey, code: result.code ?? null })
-          return await canonicalReject(session, idempotencyKey, authority, fingerprint)
+          return await canonicalReject(session, idempotencyKey, authority, fingerprint, result.reason)
         }
 
         for (const source of outgoing) {
@@ -570,8 +570,8 @@ export function createPokemonHubSessionService({ persistence, coordinator, logge
     })
   }
 
-  async function canonicalReject(session, idempotencyKey, snapshot, fingerprint) {
-    const response = { status: 'corrected', snapshot: structuredClone(snapshot) }
+  async function canonicalReject(session, idempotencyKey, snapshot, fingerprint, reason = null) {
+    const response = { status: 'corrected', snapshot: structuredClone(snapshot), ...(reason ? { reason: structuredClone(reason) } : {}) }
     await persistence.set(operationKey(session.profileId, session.sessionId, `canonical:${idempotencyKey}`), JSON.stringify({ fingerprint, response }), { NX: true })
     return response
   }

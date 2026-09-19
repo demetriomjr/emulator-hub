@@ -157,3 +157,9 @@ test('renders only the transparent Pokémon sprite in the drag preview', async (
   assert.doesNotMatch(css, /\.pokemon-hub-drag-preview\s*\{[^}]*border:/)
   assert.doesNotMatch(css, /\.pokemon-hub-drag-preview\s*\{[^}]*box-shadow:/)
 })
+
+test('shows the authoritative transfer-rule message after the backend corrects a workspace snapshot', async () => {
+  const source = await readFile(sourceFile, 'utf8')
+
+  assert.match(source, /setPokemonHubError\(snapshot\.reason\?\.message \?\? 'The backend corrected the workspace snapshot\.'\)/)
+})

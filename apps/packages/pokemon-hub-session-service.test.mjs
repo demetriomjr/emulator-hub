@@ -42,6 +42,32 @@ test('creates a fresh empty identity for every workspace opening', async () => {
   assert.deepEqual(second.snapshot, { revision: 0, panes: [null, null, null] })
 })
 
+test('preserves a placement-rule reason when the snapshot coordinator corrects the workspace', async () => {
+  const persistence = createMemoryRedisPersistence()
+  const reason = { code: 'TRANSFER_NATIONAL_DEX_REQUIRED', message: 'Este save ainda não pode enviar ou receber esse Pokémon sem a Pokédex Nacional.' }
+  const coordinator = {
+    async getSnapshot() { throw new Error('empty snapshot has no sources') },
+    async renew() {},
+    async release() {},
+    async reconcileWorkspaceLeases() {},
+    async sync() { return { status: 'corrected', code: reason.code, reason } },
+  }
+  const service = createPokemonHubSessionService({ persistence, coordinator, newId: () => 'session-rule-reason' })
+  const opened = await service.open({ profileId })
+
+  const corrected = await service.syncCanonicalSnapshot({
+    profileId,
+    sessionId: opened.sessionId,
+    idempotencyKey: 'rule-reason',
+    snapshot: { revision: 0, panes: [null, null, null] },
+    acquireSource: async () => { throw new Error('must not acquire') },
+    flushOutgoingSource: async () => { throw new Error('must not flush') },
+    releaseSource: async () => { throw new Error('must not release') },
+  })
+
+  assert.deepEqual(corrected, { status: 'corrected', snapshot: { revision: 0, panes: [null, null, null] }, reason })
+})
+
 test('returns a fresh server clock sample when renewing a session heartbeat', async () => {
   let instant = 1_000
   const persistence = createMemoryRedisPersistence()

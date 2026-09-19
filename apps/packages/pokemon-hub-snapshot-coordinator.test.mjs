@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import { createPokemonHubEventStore } from './pokemon-hub-event-store.mjs'
 import { createPokemonHubSnapshotCoordinator } from './pokemon-hub-snapshot-coordinator.mjs'
-import { validatePokemonHubTransferPlacement } from './pokemon-hub-transfer-placement-policy.mjs'
+import { createPokemonHubTransferPlacementPolicy, validatePokemonHubTransferPlacement } from './pokemon-hub-transfer-placement-policy.mjs'
 import { pokemonHubRedisKeys } from './pokemon-hub-redis-keys.mjs'
 import { createMemoryRedisPersistence } from './redis-persistence.mjs'
 
@@ -334,6 +334,64 @@ test('returns a corrected snapshot rather than accepting a duplicated instance',
   assert.equal(corrected.code, 'DUPLICATE_INSTANCE_CORRECTED')
   assert.equal(corrected.snapshots[0].placements[0].pokemonInstanceId, pokemonInstanceId)
   assert.equal(corrected.snapshots[1].placements[0].pokemonInstanceId, null)
+})
+
+test('persists a first-admission Hub passport only after the rule policy permits the export', async () => {
+  const { coordinator } = await fixture({ validatePlacementChange: createPokemonHubTransferPlacementPolicy() })
+  const game = await coordinator.adopt({
+    profileId,
+    sourceKey: 'save:profile-may:ruby',
+    sourceRevision: 4,
+    adapter: 'gen3-gba-v1',
+    transferCapability: { title: 'pokemon-ruby', ordinaryTradeReady: true, nationalDexUnlocked: false, networkMachineRestored: false },
+    slots: [
+      { location: { kind: 'game', area: 'box', box: 0, slot: 0 }, record: record(7, { species: 252, shiny: false, isEgg: false }) },
+      { location: { kind: 'game', area: 'box', box: 0, slot: 1 }, record: record(8, { species: 253, shiny: false, isEgg: false }) },
+    ],
+  })
+  const hubProfileId = '11111111-1111-4111-8111-111111111111'
+  const hubSource = await coordinator.ensureHubSource({ profileId, sourceKey: `hub:${hubProfileId}`, hubProfileId, minimumSlotCount: 1 })
+  const [gameLease, hubLease] = await Promise.all([
+    coordinator.acquire({ profileId, sourceKey: game.sourceKey, workspaceId: 'workspace-passport' }),
+    coordinator.acquire({ profileId, sourceKey: hubSource.sourceKey, workspaceId: 'workspace-passport' }),
+  ])
+  const pokemonInstanceId = game.placements[0].pokemonInstanceId
+
+  const accepted = await coordinator.sync({
+    profileId, workspaceId: 'workspace-passport', clientSequence: 1, idempotencyKey: 'admit-ruby',
+    sources: [
+      { sourceKey: game.sourceKey, sourceSessionId: gameLease.sourceSessionId, leaseToken: gameLease.leaseToken, baseRevision: game.sourceRevision, placements: [{ location: { kind: 'game', area: 'box', box: 0, slot: 0 }, pokemonInstanceId: null }, game.placements[1]] },
+      { sourceKey: hubSource.sourceKey, sourceSessionId: hubLease.sourceSessionId, leaseToken: hubLease.leaseToken, baseRevision: hubSource.sourceRevision, placements: [{ location: hub(hubProfileId, 0), pokemonInstanceId }] },
+    ],
+  })
+
+  assert.equal(accepted.status, 'accepted')
+  assert.deepEqual((await coordinator.getSaveFlushPlan({ profileId, sourceKey: hubSource.sourceKey })).records.get(pokemonInstanceId).hubPassport, { sourceTitle: 'pokemon-ruby', sourceFamily: 'hoenn-rs' })
+})
+
+test('returns an authoritative correction with a placement-rule reason without changing either source', async () => {
+  const reason = { code: 'TRANSFER_NATIONAL_DEX_REQUIRED', message: 'Este save ainda não pode enviar ou receber esse Pokémon sem a Pokédex Nacional.' }
+  const { coordinator } = await fixture({ validatePlacementChange: () => ({ allowed: false, reason }) })
+  const source = await coordinator.adopt({ profileId, sourceKey: 'save:profile-may:emerald', sourceRevision: 4, adapter: 'gen3-gba-v1', slots: [{ location: party(0), record: record(7, { species: 289, shiny: false }) }] })
+  const destination = await coordinator.adopt({ profileId, sourceKey: 'save:profile-may:firered', sourceRevision: 8, adapter: 'gen3-gba-v1', slots: [{ location: party(0), record: null }] })
+  const [sourceLease, destinationLease] = await Promise.all([
+    coordinator.acquire({ profileId, sourceKey: source.sourceKey, workspaceId: 'workspace-a' }),
+    coordinator.acquire({ profileId, sourceKey: destination.sourceKey, workspaceId: 'workspace-a' }),
+  ])
+
+  const corrected = await coordinator.sync({
+    profileId, workspaceId: 'workspace-a', clientSequence: 1, idempotencyKey: 'blocked-by-rule',
+    sources: [
+      { sourceKey: source.sourceKey, sourceSessionId: sourceLease.sourceSessionId, leaseToken: sourceLease.leaseToken, baseRevision: source.sourceRevision, placements: [{ location: party(0), pokemonInstanceId: null }] },
+      { sourceKey: destination.sourceKey, sourceSessionId: destinationLease.sourceSessionId, leaseToken: destinationLease.leaseToken, baseRevision: destination.sourceRevision, placements: [{ location: party(0), pokemonInstanceId: source.placements[0].pokemonInstanceId }] },
+    ],
+  })
+
+  assert.equal(corrected.status, 'corrected')
+  assert.equal(corrected.code, 'TRANSFER_NATIONAL_DEX_REQUIRED')
+  assert.deepEqual(corrected.reason, reason)
+  assert.equal(corrected.snapshots.find(snapshot => snapshot.sourceKey === source.sourceKey).placements[0].pokemonInstanceId, source.placements[0].pokemonInstanceId)
+  assert.equal(corrected.snapshots.find(snapshot => snapshot.sourceKey === destination.sourceKey).placements[0].pokemonInstanceId, null)
 })
 
 test('rejects an identifier that is not authorized by a leased source', async () => {

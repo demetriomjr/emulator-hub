@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "titles": {
+    "pokemon-ruby": { "family": "hoenn-rs", "regionalDex": "hoenn", "nationalDexGate": "none" },
+    "pokemon-sapphire": { "family": "hoenn-rs", "regionalDex": "hoenn", "nationalDexGate": "none" },
+    "pokemon-emerald": { "family": "hoenn-emerald", "regionalDex": "hoenn", "nationalDexGate": "regional-and-cross-region" },
+    "pokemon-firered": { "family": "kanto", "regionalDex": "kanto", "nationalDexGate": "regional-and-cross-region", "networkMachineGate": "hoenn-links" },
+    "pokemon-leafgreen": { "family": "kanto", "regionalDex": "kanto", "nationalDexGate": "regional-and-cross-region", "networkMachineGate": "hoenn-links" }
+  },
+  "reasonMessages": {
+    "TRANSFER_SOURCE_EMPTY_AFTER_MOVE": "Este movimento deixaria o save de origem sem nenhum Pokémon.",
+    "TRANSFER_TRADE_NOT_READY": "Os dois saves precisam estar prontos para trocar Pokémon.",
+    "TRANSFER_NATIONAL_DEX_REQUIRED": "Este save ainda não pode enviar ou receber esse Pokémon sem a Pokédex Nacional.",
+    "TRANSFER_NETWORK_MACHINE_REQUIRED": "FireRed ou LeafGreen precisa ter a Máquina de Rede restaurada para esta transferência.",
+    "TRANSFER_GAME_PAIR_UNSUPPORTED": "Esta combinação de jogos ainda não é compatível com o Pokémon Hub."
+  },
+  "directTrade": {
+    "sameTitle": { "minimumPokemonAfterTransaction": 1, "allowEgg": true, "requiresOrdinaryTradeReady": false },
+    "differentTitle": { "requiresOrdinaryTradeReady": true, "evaluateSourceAndDestination": true },
+    "directionalPairGroups": [
+      { "sourceTitles": ["pokemon-ruby"], "destinationTitles": ["pokemon-sapphire"], "allowEgg": true, "reverseAlso": true },
+      { "sourceTitles": ["pokemon-ruby", "pokemon-sapphire"], "destinationTitles": ["pokemon-emerald"], "destinationRegionalGate": "hoenn", "reverseAlso": true },
+      { "sourceTitles": ["pokemon-firered"], "destinationTitles": ["pokemon-leafgreen"], "sourceAndDestinationRegionalGate": "kanto", "reverseAlso": true },
+      { "sourceTitles": ["pokemon-ruby", "pokemon-sapphire"], "destinationTitles": ["pokemon-firered", "pokemon-leafgreen"], "destinationRequires": ["nationalDexUnlocked", "networkMachineRestored"], "reverseAlso": true },
+      { "sourceTitles": ["pokemon-emerald"], "destinationTitles": ["pokemon-firered", "pokemon-leafgreen"], "sourceRequires": ["nationalDexUnlocked"], "destinationRequires": ["nationalDexUnlocked", "networkMachineRestored"], "reverseAlso": true }
+    ]
+  },
+  "hubBoundary": {
+    "requiresOrdinaryTradeReady": false,
+    "export": {
+      "minimumPokemonAfterMove": 1,
+      "useSourceRegionalGate": true,
+      "preserveFirstAdmissionPassport": true
+    },
+    "import": {
+      "useDestinationRegionalGate": true,
+      "ignoreSameTitleDirectTradeException": true,
+      "networkMachineWhenPassportSourceFamilies": ["hoenn-rs", "hoenn-emerald"]
+    }
+  }
+}

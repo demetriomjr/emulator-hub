@@ -135,7 +135,7 @@ export default function PokemonHub({ onClose, closeSignal = 0 }) {
           if (pokemonHubSessionRef.current !== session) return
           setPokemonHubSnapshotStatus('')
           applyCanonicalSessionSnapshot(snapshot)
-          setPokemonHubError('The backend corrected the workspace snapshot.')
+          setPokemonHubError(snapshot.reason?.message ?? 'The backend corrected the workspace snapshot.')
         },
         onFailure: cause => {
           if (pokemonHubSessionRef.current !== session) return
@@ -271,7 +271,7 @@ export default function PokemonHub({ onClose, closeSignal = 0 }) {
       const correction = await session.requestGate.run(() => syncPokemonHubSessionSnapshot(session.profileId, session.sessionId, candidate, crypto.randomUUID()))
       if (correction) {
         applyCanonicalSessionSnapshot(correction)
-        setPokemonHubError('The backend corrected the workspace snapshot.')
+        setPokemonHubError(correction.reason?.message ?? 'The backend corrected the workspace snapshot.')
         return false
       }
       session.version = candidate.revision + 1
