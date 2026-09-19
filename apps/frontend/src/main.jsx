@@ -24,6 +24,7 @@ import { closePlayerAfterSaveAttempts } from '../../packages/player-close.mjs'
 import { isMobileLandscapeViewport, isNarrowPortraitViewport } from '../../packages/mobile-viewport.mjs'
 import { shouldReloadForFrontendRevision } from '../../packages/frontend-revision.mjs'
 import { readFastForwardSpeed, writeFastForwardSpeed } from '../../packages/fast-forward-preference.mjs'
+import { createLocalRuntimeRecoveryStore } from '../../packages/local-runtime-recovery-store.mjs'
 import hubLayout from './hub-layout.json'
 import './styles.css'
 
@@ -51,6 +52,7 @@ const gbaControls = Object.freeze({
 
 const fastForwardSpeeds = Object.freeze([1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5])
 const configuredPlayerFrames = new WeakSet()
+const localRecoveryStore = createLocalRuntimeRecoveryStore()
 const pokemonHubDragSensors = [PointerSensor.configure({
   activationConstraints: [new PointerActivationConstraints.Distance({ value: 6 })],
 })]
@@ -96,6 +98,7 @@ function playerFrameUrl(session) {
     leaseGeneration: String(session.leaseGeneration),
     fastForward: session.initialFastForwardEnabled ? '1' : '0',
     fastForwardSpeed: String(session.initialFastForwardSpeed),
+    restoreRecovery: session.restoreRecovery ? '1' : '0',
   }), clientDiagnosticsOptions)
   return `/player.html?${parameters}`
 }
@@ -200,6 +203,7 @@ function App() {
   const [creatingProfile, setCreatingProfile] = useState(false)
   const [profileError, setProfileError] = useState('')
   const [profileBusy, setProfileBusy] = useState(false)
+  const [recoveryCandidate, setRecoveryCandidate] = useState(null)
   const [error, setError] = useState('')
   const [installHelpOpen, setInstallHelpOpen] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
@@ -247,7 +251,7 @@ function App() {
   useEffect(() => {
     const receive = event => {
       if (event.origin !== window.location.origin || event.data?.type !== 'emulator-hub:lease-lost') return
-      if (event.data.sessionId && event.data.profileId && event.data.gameId && Number.isInteger(event.data.generation)) {
+      if (!event.data.unavailable && event.data.sessionId && event.data.profileId && event.data.gameId && Number.isInteger(event.data.generation)) {
         void releasePlayerLease(event.data.sessionId, { profileId: event.data.profileId, gameId: event.data.gameId, generation: event.data.generation }).catch(() => {})
       }
       setActiveSessions(current => current.filter(session => session.sessionId !== event.data.sessionId))
@@ -320,7 +324,7 @@ function App() {
           setCreatingProfile(false)
         }
         else if (instancePicker) setInstancePicker(false)
-        else setActiveSessions([])
+        else void closePlayer()
       }
     }
     document.addEventListener('fullscreenchange', syncFullscreen)
@@ -439,7 +443,7 @@ function App() {
     const result = await closePlayerAfterSaveAttempts({
       saveAttempts: activeSessions.map((session, index) => {
         const frame = document.querySelectorAll('.player-grid iframe')[index]
-        return Promise.resolve(frame ? flushPlayerSave(frame) : undefined).finally(() => releasePlayerLease(session.sessionId, { profileId: session.profileId, gameId: session.gameId, generation: session.leaseGeneration }).catch(() => {}))
+        return Promise.resolve(frame ? flushPlayerSave(frame).finally(() => clearPlayerRecovery(frame)) : undefined).finally(() => releasePlayerLease(session.sessionId, { profileId: session.profileId, gameId: session.gameId, generation: session.leaseGeneration }).catch(() => {}))
       }),
       close: async () => {
         try {
@@ -483,6 +487,15 @@ function App() {
     })
   }
 
+  function clearPlayerRecovery(frame) {
+    try {
+      const clear = frame.contentWindow?.emulatorHubClearLocalRecovery
+      if (typeof clear === 'function') return Promise.resolve(clear())
+    } catch {}
+    frame.contentWindow?.postMessage({ type: 'emulator-hub:clear-local-recovery' }, window.location.origin)
+    return Promise.resolve()
+  }
+
   async function openProfilePicker(game, purpose = 'launch', anchor = null) {
     const request = ++profilePickerRequestRef.current
     setError('')
@@ -512,6 +525,17 @@ function App() {
   }
 
   async function launchWithProfile(profile) {
+    const game = profileGame
+    let candidate = null
+    try { candidate = await localRecoveryStore.get(profile.id, game.id) } catch {}
+    if (candidate) {
+      setRecoveryCandidate({ ...candidate, profile })
+      return
+    }
+    return startPlayerWithProfile(profile, false)
+  }
+
+  async function startPlayerWithProfile(profile, restoreRecovery) {
     setError('')
     setProfileError('')
     setProfileBusy(true)
@@ -528,6 +552,7 @@ function App() {
         leaseGeneration: lease.leaseGeneration,
         initialFastForwardEnabled: fastForwardEnabled,
         initialFastForwardSpeed: fastForwardSpeed,
+        restoreRecovery,
       }
       if (profilePurpose === 'add-instance') {
         setActiveSessions(current => [...current, session])
@@ -539,6 +564,21 @@ function App() {
     } finally {
       setProfileBusy(false)
     }
+  }
+
+  async function restoreLocalRecovery() {
+    if (!recoveryCandidate) return
+    const candidate = recoveryCandidate
+    setRecoveryCandidate(null)
+    await startPlayerWithProfile(candidate.profile, true)
+  }
+
+  async function discardLocalRecovery() {
+    if (!recoveryCandidate) return
+    const candidate = recoveryCandidate
+    await localRecoveryStore.clear(recoveryCandidate.profileId, recoveryCandidate.gameId)
+    setRecoveryCandidate(null)
+    await startPlayerWithProfile(candidate.profile, false)
   }
 
   async function submitProfile(event) {
@@ -1185,7 +1225,14 @@ function App() {
         </div>
       </div>
     </div>}
-    {profileGame && <div className={`profile-overlay${profilePickerPlacement ? ' profile-picker-overlay' : ''} profile-picker-mobile`} role="dialog" aria-modal="true" aria-label="Selecionar perfil">
+    {recoveryCandidate && <div className="profile-overlay" role="dialog" aria-modal="true" aria-label="Recuperação local disponível">
+      <div className="profile-panel">
+        <header className="profile-header"><h2>Recuperação local</h2></header>
+        <div className="profile-body"><p>{recoveryCandidate.reason === 'runtime-break' ? 'O emulador foi interrompido. Restaurar a recuperação local?' : 'Há uma possível recuperação local. Restaurar?'}</p></div>
+        <div className="profile-actions"><button type="button" onClick={discardLocalRecovery}>Descartar</button><button type="button" onClick={restoreLocalRecovery}>Restaurar</button></div>
+      </div>
+    </div>}
+    {profileGame && !recoveryCandidate && <div className={`profile-overlay${profilePickerPlacement ? ' profile-picker-overlay' : ''} profile-picker-mobile`} role="dialog" aria-modal="true" aria-label="Selecionar perfil">
       <div className={`profile-panel${profilePickerPlacement ? ' profile-picker-panel' : ''}`} style={profilePickerPlacement ? profilePickerPlacement : undefined}>
         <header className="profile-header">
           <h2>{profileGame.title}</h2>

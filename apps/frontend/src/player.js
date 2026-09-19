@@ -5,12 +5,14 @@ import { createClientDiagnostics, getClientDiagnosticsOptions } from '../../pack
 import { getEmulatorAudioContext, installAudioResumeOnUserGesture } from '../../packages/mobile-audio-resume.mjs'
 import { monitorEmulatorFrameProgress } from '../../packages/emulator-frame-progress.mjs'
 import { instrumentEmulatorLifecycle } from '../../packages/emulator-lifecycle-diagnostics.mjs'
+import { createLocalRuntimeRecoveryStore } from '../../packages/local-runtime-recovery-store.mjs'
 
 const parameters = new URLSearchParams(location.search)
 const id = parameters.get('id')
 const profileId = parameters.get('profileId')
 const sessionId = parameters.get('sessionId')
 const leaseGeneration = Number(parameters.get('leaseGeneration'))
+const restoreLocalRecovery = parameters.get('restoreRecovery') === '1'
 const game = document.getElementById('game')
 // The upstream `latest` channel keeps stable cores while receiving runtime
 // fixes ahead of the pinned 4.2.3 release. This branch exercises it against
@@ -37,6 +39,11 @@ let gamepadInput = null
 let gamepadBindings = []
 let cloudSaveSynchronizer = null
 let cloudSaveInterval = null
+let localRecoveryInterval = null
+let localRecoveryCapture = null
+let preserveLocalRecovery = false
+let localRecovery = null
+const localRecoveryStore = createLocalRuntimeRecoveryStore()
 let removeAudioResumeGesture = null
 let stopFrameProgressMonitor = null
 let stopLifecycleDiagnostics = null
@@ -46,9 +53,11 @@ let leaseLost = false
 function loseLease() {
   if (leaseLost) return
   leaseLost = true
+  preserveLocalRecovery = true
   if (leaseHeartbeat) window.clearInterval(leaseHeartbeat)
   if (cloudSaveInterval) window.clearInterval(cloudSaveInterval)
-  window.parent.postMessage({ type: 'emulator-hub:lease-lost', sessionId, profileId, gameId: id, generation: leaseGeneration }, location.origin)
+  if (localRecoveryInterval) window.clearInterval(localRecoveryInterval)
+  void Promise.resolve(localRecoveryCapture).catch(() => {}).finally(() => localRecoveryStore.markRuntimeBreak(profileId, id)).finally(() => window.parent.postMessage({ type: 'emulator-hub:lease-lost', unavailable: true, sessionId, profileId, gameId: id, generation: leaseGeneration }, location.origin))
 }
 
 function startLeaseHeartbeat() {
@@ -67,8 +76,34 @@ async function hashSave(bytes) {
 
 async function synchronizeCloudSave() {
   if (leaseLost || !cloudSaveSynchronizer || !window.EJS_emulator?.gameManager) return false
+  window.EJS_emulator.gameManager.saveSaveFiles?.()
   return cloudSaveSynchronizer.sync(window.EJS_emulator.gameManager)
 }
+
+async function captureLocalRecovery() {
+  if (leaseLost || localRecoveryCapture || !launchDescriptor) return localRecoveryCapture
+  const manager = window.EJS_emulator?.gameManager
+  if (!manager) return false
+  localRecoveryCapture = (async () => {
+    manager.saveSaveFiles?.()
+    const save = manager.getSaveFile?.()
+    const state = manager.getState?.()
+    if (!save || !state) return false
+    if (leaseLost) return false
+    await localRecoveryStore.put({ profileId, gameId: id, core: launchDescriptor.core, romSha256: launchDescriptor.romSha256, runtimeId: launchDescriptor.runtimeId, state: new Uint8Array(state), save: new Uint8Array(save) })
+    return true
+  })().finally(() => { localRecoveryCapture = null })
+  return localRecoveryCapture
+}
+
+async function clearLocalRecovery() {
+  preserveLocalRecovery = false
+  if (localRecoveryInterval) window.clearInterval(localRecoveryInterval)
+  await localRecoveryStore.clear(profileId, id)
+}
+
+window.emulatorHubClearLocalRecovery = clearLocalRecovery
+window.addEventListener('pagehide', () => { if (!preserveLocalRecovery) void clearLocalRecovery().catch(() => {}) })
 
 window.emulatorHubSyncSave = synchronizeCloudSave
 
@@ -172,6 +207,7 @@ window.addEventListener('message', event => {
       error => window.parent.postMessage({ type: 'emulator-hub:save-synced', requestId: event.data.requestId, ok: false, error: error.message }, location.origin),
     )
   }
+  if (event.data?.type === 'emulator-hub:clear-local-recovery') void clearLocalRecovery()
 })
 
 async function start() {
@@ -181,6 +217,12 @@ async function start() {
   const [launch, controlProfile] = await Promise.all([getPlayerLeaseLaunch(sessionId, { profileId, gameId: id, generation: leaseGeneration }), getControlProfile()])
   if (!launch.romUrl || !launch.core) throw new Error('Incomplete launch configuration')
   launchDescriptor = launch
+  if (restoreLocalRecovery) {
+    const candidate = await localRecoveryStore.get(profileId, id)
+    if (!candidate) throw new Error('Local recovery is no longer available.')
+    if (candidate.core !== launch.core || candidate.romSha256 !== launch.romSha256 || candidate.runtimeId !== launch.runtimeId) throw new Error('Local recovery is incompatible with this launch.')
+    localRecovery = candidate
+  }
   cloudSaveSynchronizer = createCloudSaveSynchronizer({
     load: () => getCloudSave(launch.saveUrl, { sessionId, generation: leaseGeneration }),
     upload: (bytes, revision) => putCloudSave(launch.saveUrl, bytes, revision, { sessionId, generation: leaseGeneration }),
@@ -262,8 +304,14 @@ async function start() {
     })
     gamepadInput = createEmulatorGamepadInput(window.EJS_emulator, controlProfile.bindings)
     gamepadInput.update(gamepadBindings)
-    if (!loadEmulatorState()) cloudSaveSynchronizer.restore(window.EJS_emulator.gameManager)
+    if (localRecovery) {
+      window.EJS_emulator.gameManager.FS.writeFile(window.EJS_emulator.gameManager.getSaveFilePath(), localRecovery.save)
+      window.EJS_emulator.gameManager.loadSaveFiles()
+      window.EJS_emulator.gameManager.loadState(new Uint8Array(localRecovery.state))
+    } else if (!loadEmulatorState()) cloudSaveSynchronizer.restore(window.EJS_emulator.gameManager)
     cloudSaveInterval = window.setInterval(() => synchronizeCloudSave().catch(() => {}), 15000)
+    localRecoveryInterval = window.setInterval(() => void captureLocalRecovery(), 2_500)
+    void captureLocalRecovery()
     stopFrameProgressMonitor?.()
     if (clientDiagnostics) {
       stopFrameProgressMonitor = monitorEmulatorFrameProgress({

@@ -1,5 +1,7 @@
 # Specifications
 
+- [Spec 035 — Generation III regional transfer gates](035-generation-iii-regional-transfer-gates.md): save-level National Dex, regional-membership, and FireRed/LeafGreen Network Machine gates for Ruby, Sapphire, Emerald, FireRed, and LeafGreen Hub transfers.
+
 - [Spec 034 — Global emulator snapshots](034-global-emulator-snapshots.md): one authoritative cross-device EmulatorJS state per profile/game, atomic state-plus-save bundles, and preflight before engine startup.
 
 - [Spec 034 implementation plan](034-global-emulator-snapshots-plan.md): test-first tasks for the snapshot envelope, backend resource, preflight, and player lifecycle.

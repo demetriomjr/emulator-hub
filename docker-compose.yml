@@ -1,0 +1,27 @@
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/frontend.Dockerfile
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: deploy/backend.Dockerfile
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3001"
+      REDIS_URL: ${REDIS_URL:?Set REDIS_URL in deploy/.env}
+      REDIS_NAMESPACE: ${REDIS_NAMESPACE:-emulator-hub:v1}
+    volumes:
+      - emulator-hub-data:/app/apps/backend/data
+      - ./deploy/roms:/app/apps/backend/roms:ro
+    restart: unless-stopped
+
+volumes:
+  emulator-hub-data:

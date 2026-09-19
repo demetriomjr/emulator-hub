@@ -1,0 +1,14 @@
+FROM node:26-alpine AS build
+
+WORKDIR /app/apps
+COPY apps/package.json apps/package-lock.json ./
+RUN npm ci
+COPY apps/frontend ./frontend
+COPY apps/packages ./packages
+WORKDIR /app/apps/frontend
+RUN npm run build
+
+FROM nginx:1.29-alpine
+COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/apps/frontend/dist /usr/share/nginx/html
+EXPOSE 8080
