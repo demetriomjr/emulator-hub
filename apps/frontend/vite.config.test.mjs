@@ -15,4 +15,5 @@ test('frontend development server and backend proxy use frontend environment set
   assert.equal(configuration.server.strictPort, true)
   assert.equal(configuration.server.proxy['/api'], 'http://127.0.0.1:3001')
   assert.equal(configuration.server.proxy['/roms'], 'http://127.0.0.1:3001')
+  assert.ok(configuration.plugins.some(plugin => plugin.name === 'workspace-package-dependency-resolver'))
 })

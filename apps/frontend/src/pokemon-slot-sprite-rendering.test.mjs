@@ -2,13 +2,13 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-const sourceFile = new URL('./main.jsx', import.meta.url)
+const sourceFile = new URL('../../packages/pokemon-hub-ui.jsx', import.meta.url)
 const stylesheet = new URL('./styles.css', import.meta.url)
 
 test('renders every occupied slot through one pointer-transparent local sprite component', async () => {
   const source = await readFile(sourceFile, 'utf8')
 
-  assert.match(source, /import \{ getPokemonSlotSprite, hidePokemonSlotSprite \} from '\.\.\/\.\.\/packages\/pokemon-slot-sprite\.mjs'/)
+  assert.match(source, /import \{ getPokemonSlotSprite, hidePokemonSlotSprite \} from '\.\/pokemon-slot-sprite\.mjs'/)
   assert.match(source, /function PokemonSlotSprite\(\{ slot \}\)/)
   assert.match(source, /src=\{sprite\}/)
   assert.match(source, /draggable=\{false\}/)
