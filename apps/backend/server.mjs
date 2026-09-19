@@ -1395,7 +1395,8 @@ async function handlePlayerLease(request, response, config, route, searchParams)
     const verification = await verifyRom(entry, config.romsDirectory)
     if (!verification.ok) return json(response, 409, { error: verification.reason })
     try {
-      const lease = await config.playerLeases.acquire({ profileId: body.profileId, gameId: entry.id, deviceId, sessionId: body.sessionId })
+      const minimumGeneration = await nextPlayerLeaseGeneration(config, body.profileId, entry.id)
+      const lease = await config.playerLeases.acquire({ profileId: body.profileId, gameId: entry.id, deviceId, sessionId: body.sessionId, minimumGeneration })
       try { await config.saveStore.advanceFence(body.profileId, entry.id, lease.generation) } catch (error) { if (error.code !== 'SAVE_MISSING') throw error }
       try { await config.snapshotStore.advanceFence(body.profileId, entry.id, lease.generation) } catch (error) { if (error.code !== 'SNAPSHOT_MISSING') throw error }
       return json(response, 200, { ...(await launchDescriptor(config, entry, body.profileId)), leaseGeneration: lease.generation })
@@ -1414,6 +1415,14 @@ async function handlePlayerLease(request, response, config, route, searchParams)
     if (!verification.ok) return json(response, 409, { error: verification.reason })
     return json(response, 200, { ...(await launchDescriptor(config, entry, input.profileId)), leaseGeneration: input.generation })
   } catch (error) { return json(response, error.code === 'PLAYER_LEASE_INVALID' ? 410 : error.code === 'PLAYER_LEASE_HELD' ? 409 : 400, { error: error.message, code: error.code }) }
+}
+
+async function nextPlayerLeaseGeneration(config, profileId, gameId) {
+  const [save, snapshot] = await Promise.all([
+    config.saveStore.get(profileId, gameId),
+    config.snapshotStore.get(profileId, gameId),
+  ])
+  return Math.max(save?.fenceGeneration ?? 0, snapshot?.metadata?.fenceGeneration ?? 0) + 1
 }
 
 function playerDeviceId(request, response) {

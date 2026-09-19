@@ -10,7 +10,10 @@ if input.action == 'acquire' then
   if active and lease.deviceId ~= input.deviceId then
     result = { status = 'held' }
   else
-    local generation = (lease and tonumber(lease.generation) or 0) + ((active and lease.deviceId == input.deviceId and lease.sessionId == input.sessionId) and 0 or 1)
+    local minimumGeneration = tonumber(input.minimumGeneration) or 1
+    local currentGeneration = lease and tonumber(lease.generation) or 0
+    local sameSession = active and lease.deviceId == input.deviceId and lease.sessionId == input.sessionId
+    local generation = sameSession and math.max(currentGeneration, minimumGeneration) or math.max(currentGeneration, minimumGeneration - 1) + 1
     local next = { profileId = input.profileId, gameId = input.gameId, deviceId = input.deviceId, sessionId = input.sessionId, generation = generation, expiresAt = now + tonumber(input.duration) }
     redis.call('SET', KEYS[1], cjson.encode(next))
     result = { status = 'ok', lease = next }
@@ -34,7 +37,10 @@ return cjson.encode(result)`,
     const active = lease && lease.expiresAt > input.now
     if (input.action === 'acquire') {
       if (active && lease.deviceId !== input.deviceId) return JSON.stringify({ status: 'held' })
-      const generation = (lease?.generation ?? 0) + (active && lease.deviceId === input.deviceId && lease.sessionId === input.sessionId ? 0 : 1)
+      const minimumGeneration = input.minimumGeneration ?? 1
+      const currentGeneration = lease?.generation ?? 0
+      const sameSession = active && lease.deviceId === input.deviceId && lease.sessionId === input.sessionId
+      const generation = sameSession ? Math.max(currentGeneration, minimumGeneration) : Math.max(currentGeneration, minimumGeneration - 1) + 1
       const next = { profileId: input.profileId, gameId: input.gameId, deviceId: input.deviceId, sessionId: input.sessionId, generation, expiresAt: input.now + input.duration }
       await set(key, JSON.stringify(next))
       return JSON.stringify({ status: 'ok', lease: next })
@@ -83,5 +89,6 @@ function key(profileId, gameId) { return `player-lease:${profileId}:${gameId}` }
 function validate(input, needsGeneration) {
   for (const field of ['profileId', 'gameId', 'deviceId', 'sessionId']) if (typeof input?.[field] !== 'string' || input[field].length === 0) throw new TypeError(`Player lease ${field} is invalid.`)
   if (needsGeneration && (!Number.isInteger(input.generation) || input.generation < 1)) throw new TypeError('Player lease generation is invalid.')
+  if (input.minimumGeneration !== undefined && (!Number.isInteger(input.minimumGeneration) || input.minimumGeneration < 1)) throw new TypeError('Player lease minimum generation is invalid.')
 }
 function leaseError(code, message) { const error = new Error(message); error.code = code; return error }

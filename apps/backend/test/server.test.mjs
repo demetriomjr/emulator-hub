@@ -8,6 +8,7 @@ import { afterEach, describe, test } from 'node:test'
 import { bootstrapHubServer, createHubServer, createListenFailureDiagnostic } from '../server.mjs'
 import { createMemoryRedisPersistence } from '../../packages/redis-persistence.mjs'
 import { encodeSnapshotBundle } from '../../packages/emulator-snapshot.mjs'
+import { createSaveStore } from '../../packages/save-store.mjs'
 
 const liveServers = new Set()
 const liveFixtures = new Set()
@@ -158,6 +159,20 @@ describe('hub backend HTTP contract', () => {
     assert.equal(staleHeartbeat.status, 410)
     const staleWrite = await fetch(`${baseUrl}/api/profiles/${profile.id}/games/pokemon-red/save`, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream', 'If-Match': '*', Cookie: first.cookie, 'X-Player-Session-Id': 'session-one', 'X-Player-Lease-Generation': String(first.body.leaseGeneration) }, body: Buffer.from([1]) })
     assert.equal(staleWrite.status, 410)
+  })
+
+  test('starts a new lease beyond the fence persisted before Redis was initialized', async () => {
+    const rom = Buffer.from('migrated fenced game')
+    const { baseUrl, savesPath } = await startFixture([{ id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom) }], { 'pokemon-red.gb': rom })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Red' }) }))
+    const persistedSave = createSaveStore({ dataPath: savesPath })
+    await persistedSave.put(profile.id, 'pokemon-red', Buffer.from([1]), null, { fenceGeneration: 2 })
+
+    const lease = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id)
+
+    assert.equal(lease.response.status, 200)
+    assert.equal(lease.body.leaseGeneration, 3)
+    assert.equal((await persistedSave.get(profile.id, 'pokemon-red')).fenceGeneration, 3)
   })
 
   test('identifies Emulator Hub responses for the development supervisor', async () => {
