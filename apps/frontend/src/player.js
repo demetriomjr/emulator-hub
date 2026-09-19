@@ -187,12 +187,13 @@ function installMaxRangeDpadInput(element) {
     stopNativeZone(event)
     const bounds = element.getBoundingClientRect()
     const maxDistance = Math.min(bounds.width, bounds.height) / 2
+    const triggerDistance = maxDistance * 0.88
     const dx = event.clientX - bounds.left - bounds.width / 2
     const dy = event.clientY - bounds.top - bounds.height / 2
     const distance = Math.hypot(dx, dy)
     const ratio = Math.min(distance, maxDistance) / Math.max(distance, 1)
     front.style.transform = `translate(${dx * ratio}px, ${dy * ratio}px)`
-    if (distance < maxDistance) return clearInputs()
+    if (distance < triggerDistance) return clearInputs()
     const degree = (Math.atan2(-dy, dx) * 180 / Math.PI + 360) % 360
     const manager = window.EJS_emulator?.gameManager
     manager?.simulateInput(0, 4, degree >= 30 && degree < 150 ? 1 : 0)

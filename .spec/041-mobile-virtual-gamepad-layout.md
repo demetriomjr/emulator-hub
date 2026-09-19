@@ -14,7 +14,7 @@ Apply the approved landscape mobile control layout to EmulatorJS while keeping i
 ## Scope
 
 - The mobile player uses a digital EmulatorJS `zone` for GBA directions, so a player can slide a finger between directions.
-- The D-pad captures pointer events before EmulatorJS's zone handler. It sends a direction only when the finger reaches the pizza edge (the maximum physical stick range); all shorter displacements send no direction.
+- The D-pad captures pointer events before EmulatorJS's zone handler. It sends a direction at 88% of the maximum physical stick range, providing a 12% grace distance before the pizza edge; all shorter displacements send no direction.
 - A/B, Start, Select, L, and R remain native EmulatorJS buttons.
 - The native shoulder buttons always display the literal labels `L` and `R`.
 - The approved logical 844 by 390 layout is: D-pad zone `(133, 263, 195)`; A `(775, 248, 91)`; B `(672, 323, 91)`; Start `(494, 313, 95)`; Select `(350, 313, 89)`; L `(121, 48, 150)`; R `(723, 48, 150)`.
