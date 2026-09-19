@@ -70,7 +70,7 @@ export function createPokemonHubSessionService({ persistence, coordinator, logge
   if (!coordinator || typeof coordinator.getSnapshot !== 'function' || typeof coordinator.renew !== 'function' || typeof coordinator.release !== 'function' || typeof coordinator.sync !== 'function' || typeof coordinator.reconcileWorkspaceLeases !== 'function') throw new TypeError('Pokemon Hub snapshot coordinator is invalid')
   const queues = new Map()
 
-  return { open, attach, heartbeat, syncSnapshot, syncCanonicalSnapshot, closeCanonicalSession, getCanonicalSnapshot, detach, close, listExpired, releaseExpired }
+  return { open, attach, loadCanonicalPane, heartbeat, syncSnapshot, syncCanonicalSnapshot, closeCanonicalSession, getCanonicalSnapshot, detach, close, listExpired, releaseExpired }
 
   async function open({ profileId }) {
     assertString(profileId, 'Profile ID')
@@ -86,6 +86,47 @@ export function createPokemonHubSessionService({ persistence, coordinator, logge
     const session = await read(profileId, sessionId)
     if (!session) throw sessionError('SESSION_INVALID', 'Workspace session is invalid.')
     return canonicalSnapshotForSession(session)
+  }
+
+  async function loadCanonicalPane({ profileId, sessionId, pane, sourceKey, profile, acquireSource, flushOutgoingSource, releaseSource } = {}) {
+    assertString(profileId, 'Profile ID'); assertString(sessionId, 'Session ID'); assertString(sourceKey, 'Source key')
+    if (!Number.isInteger(pane) || pane < 0 || pane > 2) throw sessionError('SESSION_SOURCE_INVALID', 'Workspace pane is invalid.')
+    if (typeof acquireSource !== 'function' || typeof flushOutgoingSource !== 'function' || typeof releaseSource !== 'function') throw new TypeError('Pokemon Hub pane load lifecycle is invalid')
+    return enqueue(sessionId, async () => {
+      const session = await requireLive(profileId, sessionId)
+      const authority = canonicalSnapshotForSession(session)
+      const currentPane = authority.panes[pane]
+      const currentKey = currentPane ? pokemonHubCanonicalSourceKey(currentPane.profile) : null
+      if (currentKey === sourceKey) return { status: 'accepted', snapshot: authority }
+      if (authority.panes.some((candidate, index) => index !== pane && candidate !== null && pokemonHubCanonicalSourceKey(candidate.profile) === sourceKey)) return { status: 'corrected', snapshot: authority }
+
+      let acquired = null
+      try {
+        acquired = normalizeLeasedSource(await acquireSource(sourceKey), sourceKey)
+        const incoming = { sourceId: newId(), sourceKey, sourceSessionId: acquired.sourceSessionId, leaseToken: acquired.leaseToken }
+        const outgoing = currentKey ? session.sources.find(source => source.sourceKey === currentKey) ?? null : null
+        if (outgoing) await flushOutgoingSource(outgoing)
+
+        const snapshot = {
+          revision: authority.revision + 1,
+          panes: authority.panes.map((candidate, index) => index === pane ? canonicalPaneFromSourceSnapshot(pane, profile, acquired) : candidate),
+        }
+        const expectedVersion = session.version
+        session.sources = [...session.sources.filter(source => source.sourceKey !== currentKey), incoming]
+        session.version += 1
+        session.canonicalSnapshot = snapshot
+        session.expiresAt = now() + leaseMs
+        await writeOpenSession(session, expectedVersion)
+        if (outgoing) await releaseSource(outgoing)
+        return { status: 'accepted', snapshot }
+      } catch (error) {
+        if (acquired) {
+          await releaseSource({ sourceKey, sourceSessionId: acquired.sourceSessionId, leaseToken: acquired.leaseToken }).catch(() => {})
+        }
+        if (error.code) return { status: 'corrected', snapshot: authority }
+        throw error
+      }
+    })
   }
 
   async function attach({ profileId, sessionId, sourceKey, sourceSnapshot, acquireSource }) {
@@ -703,6 +744,26 @@ function requestedCanonicalSources(snapshot, profileId) {
     requested.set(sourceKey, pane)
   }
   return requested
+}
+function pokemonHubCanonicalSourceKey(profile) {
+  return profile?.type === 'hub-profile'
+    ? `hub:${profile.hubProfileId}`
+    : profile?.type === 'save'
+      ? `save:${profile.profileId}:${profile.gameId}`
+      : null
+}
+function canonicalPaneFromSourceSnapshot(pane, profile, source) {
+  if (profile.type === 'hub-profile') return {
+    pane,
+    profile: { type: 'hub-profile', hubProfileId: profile.hubProfileId },
+    hub: source.placements.flatMap(placement => placement.pokemonInstanceId ? [{ pokemonInstanceId: placement.pokemonInstanceId, slot: placement.location.slot }] : []),
+  }
+  return {
+    pane,
+    profile: { type: 'save', profileId: profile.profileId, gameId: profile.gameId },
+    party: source.placements.flatMap(placement => placement.location.area === 'party' && placement.pokemonInstanceId ? [{ pokemonInstanceId: placement.pokemonInstanceId, slot: placement.location.slot }] : []),
+    boxes: source.placements.flatMap(placement => placement.location.area === 'box' && placement.pokemonInstanceId ? [{ pokemonInstanceId: placement.pokemonInstanceId, slot: placement.location.box * 30 + placement.location.slot }] : []),
+  }
 }
 function placementsForCanonicalPane(source, pane) {
   const requested = new Map()

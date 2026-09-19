@@ -73,6 +73,8 @@ test('player boot keeps backend controls authoritative and applies pre-start par
     parent,
     addEventListener: (type, listener) => listeners.set(type, listener),
     setInterval: () => 1,
+    clearInterval() {},
+    matchMedia: () => ({ matches: false }),
     EJS_emulator: {
       gamepad: { terminate: () => calls.push('stop') },
       gameManager: { simulateInput: (...args) => calls.push(args) },
@@ -82,14 +84,25 @@ test('player boot keeps backend controls authoritative and applies pre-start par
   const loaderAdded = new Promise(resolve => { loaded = resolve })
   const game = { querySelectorAll: () => [] }
   vm.runInNewContext(source, {
-    window, location: { origin, search: '?id=game&profileId=profile' }, URLSearchParams,
+    window, location: { origin, search: '?id=game&profileId=profile&sessionId=session&leaseGeneration=1' }, URLSearchParams, URL, Blob, Uint8Array,
     document: { getElementById: () => game, createElement: () => ({}), body: { appendChild: loaded } },
     MutationObserver: class { observe() {} },
-    getLaunch: async () => ({ romUrl: '/roms/game.gba', core: 'gba', gameId: 'game', title: 'Game', saveUrl: '/api/profiles/profile/games/game/save' }),
+    crypto: { subtle: { digest: async () => Uint8Array.from([227, 176, 196, 66, 152, 252, 28, 20, 154, 251, 244, 200, 153, 111, 185, 36, 39, 174, 65, 228, 100, 155, 147, 76, 164, 149, 153, 27, 120, 82, 184, 85]).buffer } },
+    fetch: async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) }),
+    getPlayerLeaseLaunch: async () => ({ romUrl: '/roms/game.gba', core: 'gba', gameId: 'game', title: 'Game', saveUrl: '/api/profiles/profile/games/game/save', snapshotUrl: '/snapshot', romSha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', runtimeId: 'gba-v1' }),
     getControlProfile: async () => ({ bindings }),
     getCloudSave: async () => null,
+    getEmulatorSnapshot: async () => null,
     putCloudSave: async () => ({ revision: 1 }),
+    putEmulatorSnapshot: async () => ({ revision: 1 }),
+    heartbeatPlayerLease: async () => {},
     createCloudSaveSynchronizer: () => ({ load: async () => null, restore: () => false, sync: async () => false }),
+    getClientDiagnosticsOptions: () => ({ enabled: false, sessionId: null }),
+    createLocalRuntimeRecoveryStore: () => ({ markRuntimeBreak() {}, get: async () => null, put: async () => {}, clear() {} }),
+    getEmulatorAudioContext: () => null,
+    installAudioResumeOnUserGesture: () => () => {},
+    monitorEmulatorFrameProgress: () => () => {},
+    instrumentEmulatorLifecycle: () => () => {},
     createEmulatorGamepadInput,
   })
   await loaderAdded

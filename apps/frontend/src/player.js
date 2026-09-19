@@ -176,6 +176,7 @@ function loadEmulatorState() {
 
 window.addEventListener('message', event => {
   if (event.origin !== location.origin) return
+  if (event.source !== window.parent) return
   if (event.data?.type === 'emulator-hub:gamepad') {
     if (!Array.isArray(event.data.bindings) || !event.data.bindings.every(value => typeof value === 'string')) return
     gamepadBindings = event.data.bindings

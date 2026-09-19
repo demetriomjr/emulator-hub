@@ -246,7 +246,7 @@ async function handleRequest(request, response, config) {
     || (request.method === 'PUT' && (isControlProfileRoute || saveRoute || snapshotRoute))
     || (playerLeaseRoute && ((request.method === 'POST' && ['acquire', 'heartbeat'].includes(playerLeaseRoute.kind)) || (request.method === 'DELETE' && playerLeaseRoute.kind === 'release') || (request.method === 'GET' && playerLeaseRoute.kind === 'launch')))
     || (request.method === 'POST' && ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute?.kind))
-    || (pokemonHubSessionRoute && ((request.method === 'POST' && ['open', 'attach', 'heartbeat', 'snapshot', 'close-command'].includes(pokemonHubSessionRoute.kind)) || (request.method === 'DELETE' && ['detach', 'close'].includes(pokemonHubSessionRoute.kind))))
+    || (pokemonHubSessionRoute && ((request.method === 'POST' && ['open', 'attach', 'pane-load', 'heartbeat', 'snapshot', 'close-command'].includes(pokemonHubSessionRoute.kind)) || (request.method === 'DELETE' && ['detach', 'close'].includes(pokemonHubSessionRoute.kind))))
     || (request.method === 'PATCH' && gameProfileRoute)
     || (request.method === 'DELETE' && gameProfileRoute)
     || (isClientDiagnosticsRoute && request.method === 'POST')
@@ -740,12 +740,13 @@ function parsePokemonHubRoute(pathname) {
 }
 
 function parsePokemonHubSessionRoute(pathname) {
-  const match = /^\/api\/profiles\/([^/]+)\/pokemon-hub\/sessions(?:\/([^/]+)(?:\/(sources)(?:\/([^/]+))?|\/(heartbeat|snapshots|close))?)?$/.exec(pathname)
+  const match = /^\/api\/profiles\/([^/]+)\/pokemon-hub\/sessions(?:\/([^/]+)(?:\/(sources)(?:\/([^/]+))?|\/(panes)\/(\d+)|\/(heartbeat|snapshots|close))?)?$/.exec(pathname)
   if (!match) return null
-  const [, profileId, sessionId, sources, sourceId, action] = match
+  const [, profileId, sessionId, sources, sourceId, panes, pane, action] = match
   if (!sessionId) return { profileId, kind: 'open' }
   if (sources && sourceId) return { profileId, sessionId, sourceId, kind: 'detach' }
   if (sources) return { profileId, sessionId, kind: 'attach' }
+  if (panes) return { profileId, sessionId, pane: Number(pane), kind: 'pane-load' }
   if (action === 'heartbeat') return { profileId, sessionId, kind: 'heartbeat' }
   if (action === 'snapshots') return { profileId, sessionId, kind: 'snapshot' }
   if (action === 'close') return { profileId, sessionId, kind: 'close-command' }
@@ -780,6 +781,9 @@ async function getSaveLayout(response, config, { gameId, profileId, workspacePro
     let snapshot
     try {
       snapshot = await config.pokemonHubSnapshotCoordinator.getSnapshot({ profileId: workspaceProfileId, sourceKey: `save:${profileId}:${gameId}` })
+      if (snapshot.saveRevision !== save.revision && !snapshot.needsSaveFlush && typeof adapter.readAllSlots === 'function') {
+        snapshot = await adoptPokemonHubSave({ coordinator: config.pokemonHubSnapshotCoordinator, profileId: workspaceProfileId, sourceProfileId: profileId, gameId, saved: save, adapter, layout })
+      }
     } catch (error) {
       if (error.code !== 'SOURCE_NOT_ADOPTED') throw error
       if (typeof adapter.readAllSlots === 'function') snapshot = await adoptPokemonHubSave({ coordinator: config.pokemonHubSnapshotCoordinator, profileId: workspaceProfileId, sourceProfileId: profileId, gameId, saved: save, adapter, layout })
@@ -911,6 +915,11 @@ async function handlePokemonHubSession(request, response, config, route, logger 
       }))
       return
     }
+    if (route.kind === 'pane-load') {
+      const result = await loadPokemonHubSessionPane(config, route, body, trace)
+      json(response, result.corrected ? 409 : 200, result.snapshot)
+      return
+    }
     if (route.kind === 'heartbeat') {
       const result = await config.pokemonHubSessionService.heartbeat({ profileId: route.profileId, sessionId: route.sessionId, sequence: body.sequence })
       json(response, 200, result)
@@ -949,6 +958,33 @@ async function handlePokemonHubSession(request, response, config, route, logger 
     jsonPokemonHubError(response, error)
   }
 }
+
+async function loadPokemonHubSessionPane(config, route, body, logger) {
+  const source = body?.source
+  const sourceKey = pokemonHubPaneSourceKey(source)
+  if (!sourceKey) throw serverError('SESSION_SOURCE_INVALID', 'Pokemon Hub pane source is invalid.')
+  const profile = source.kind === 'hub'
+    ? { type: 'hub-profile', hubProfileId: source.hubProfileId }
+    : { type: 'save', profileId: source.profileId, gameId: source.gameId }
+  const result = await config.pokemonHubSessionService.loadCanonicalPane({
+    profileId: route.profileId,
+    sessionId: route.sessionId,
+    pane: route.pane,
+    sourceKey,
+    profile,
+    acquireSource: requestedSourceKey => acquirePokemonHubSnapshot(config, route.profileId, { sourceKey: requestedSourceKey, workspaceId: route.sessionId }, logger),
+    flushOutgoingSource: source => flushPokemonHubSessionSource(config, route.profileId, source, logger),
+    releaseSource: source => releasePokemonHubSessionSourceLease(config, route.profileId, route.sessionId, source, logger),
+  })
+  return { corrected: result.status === 'corrected', snapshot: result.snapshot }
+}
+
+function pokemonHubPaneSourceKey(source) {
+  if (source?.kind === 'hub' && typeof source.hubProfileId === 'string' && source.hubProfileId) return `hub:${source.hubProfileId}`
+  if (source?.kind === 'game' && typeof source.profileId === 'string' && source.profileId && typeof source.gameId === 'string' && source.gameId) return `save:${source.profileId}:${source.gameId}`
+  return null
+}
+
 
 async function releasePokemonHubSessionSources(config, profileId, sessionId, sources, { ignoreLeaseInvalid = false } = {}) {
   for (const source of sources) {

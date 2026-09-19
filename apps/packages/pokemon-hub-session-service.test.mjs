@@ -42,6 +42,30 @@ test('creates a fresh empty identity for every workspace opening', async () => {
   assert.deepEqual(second.snapshot, { revision: 0, panes: [null, null, null] })
 })
 
+test('loads a save into one pane without sending a canonical sync candidate', async () => {
+  const persistence = createMemoryRedisPersistence()
+  const baseCoordinator = createPokemonHubSnapshotCoordinator({ persistence, eventStore: createPokemonHubEventStore({ persistence }) })
+  await baseCoordinator.adopt({ profileId, sourceKey, sourceRevision: 1, adapter: 'gen3-gba-v1', slots: [{ location: { kind: 'game', area: 'box', box: 0, slot: 0 }, record: null }] })
+  const coordinator = { ...baseCoordinator, async sync() { throw new Error('pane load must not call coordinator.sync') } }
+  const service = createPokemonHubSessionService({ persistence, coordinator, newId: (() => { let id = 0; return () => `pane-${++id}` })() })
+  const opened = await service.open({ profileId })
+  const lifecycle = {
+    acquireSource: key => baseCoordinator.acquire({ profileId, sourceKey: key, workspaceId: opened.sessionId }),
+    flushOutgoingSource: async () => {},
+    releaseSource: source => baseCoordinator.release({ profileId, sourceKey: source.sourceKey, workspaceId: opened.sessionId, sourceSessionId: source.sourceSessionId, leaseToken: source.leaseToken }),
+  }
+
+  const loaded = await service.loadCanonicalPane({
+    profileId, sessionId: opened.sessionId, pane: 1, sourceKey,
+    profile: { type: 'save', profileId, gameId: 'emerald' }, ...lifecycle,
+  })
+
+  assert.deepEqual(loaded, { status: 'accepted', snapshot: {
+    revision: 1,
+    panes: [null, { pane: 1, profile: { type: 'save', profileId, gameId: 'emerald' }, party: [], boxes: [] }, null],
+  } })
+})
+
 test('preserves a placement-rule reason when the snapshot coordinator corrects the workspace', async () => {
   const persistence = createMemoryRedisPersistence()
   const reason = { code: 'TRANSFER_NATIONAL_DEX_REQUIRED', message: 'Este save ainda não pode enviar ou receber esse Pokémon sem a Pokédex Nacional.' }

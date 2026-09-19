@@ -2,9 +2,10 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from '@dnd-kit/react'
 import { PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom'
 import { Button, Form, Input, Modal, Popconfirm, Select } from 'antd'
-import { CloseOutlined, CodeSandboxOutlined, DeleteOutlined, EditOutlined, FolderAddOutlined, InboxOutlined, LeftOutlined, PlusOutlined, RightOutlined, SaveOutlined } from '@ant-design/icons'
-import { closePokemonHubSession, createPokemonHubProfile, deletePokemonHubProfile, getGames, getPokemonHubProfiles, getSaveProfileLayout, heartbeatPokemonHubSession, openPokemonHubSession, renamePokemonHubProfile, syncPokemonHubSessionSnapshot } from './hub-client.js'
+import { CloseOutlined, CodeSandboxOutlined, DeleteOutlined, EditOutlined, FolderAddOutlined, InboxOutlined, LeftOutlined, PlusOutlined, RightOutlined, SaveOutlined, StopOutlined } from '@ant-design/icons'
+import { closePokemonHubSession, createPokemonHubProfile, deletePokemonHubProfile, getGames, getPokemonHubProfiles, getSaveProfileLayout, heartbeatPokemonHubSession, loadPokemonHubSessionPane, openPokemonHubSession, renamePokemonHubProfile, syncPokemonHubSessionSnapshot } from './hub-client.js'
 import { isPokemonHubDraggable, pokemonHubDragId } from './pokemon-hub-drag-identity.mjs'
+import { getPokemonHubDragFeedback } from './pokemon-hub-drag-feedback.mjs'
 import { getPokemonHubColumnCount, getPokemonHubGridWidth, getPokemonHubVisibleSlotCount } from './pokemon-hub-grid.mjs'
 import { createPokemonHubHeartbeatMonitor } from './pokemon-hub-heartbeat-monitor.mjs'
 import { createPokemonHubRequestGate } from './pokemon-hub-request-gate.mjs'
@@ -264,14 +265,26 @@ export default function PokemonHub({ onClose, closeSignal = 0 }) {
         nextSnapshots[`hub:${incomingSource.hubProfileId}`] = createHubSessionSourceSnapshot({ profileId, hubProfileId: incomingSource.hubProfileId, source: sourceProjectionFromHubProfile(profile) })
       }
       const session = await ensurePokemonHubSession(profileId)
-      const candidate = createCanonicalPokemonHubSnapshot(session, nextPanes, nextSnapshots)
-      const correction = await session.requestGate.run(() => syncPokemonHubSessionSnapshot(session.profileId, session.sessionId, candidate, crypto.randomUUID()))
-      if (correction) {
-        applyCanonicalSessionSnapshot(correction)
-        setPokemonHubError(correction.reason?.message ?? 'The backend corrected the workspace snapshot.')
-        return false
+      if (incomingSource) {
+        const pane = nextPanes.findIndex(source => samePokemonHubPaneSource(source, incomingSource))
+        if (pane < 0) throw new Error('The workspace pane source is invalid.')
+        const loaded = await session.requestGate.run(() => loadPokemonHubSessionPane(session.profileId, session.sessionId, pane, incomingSource))
+        if (loaded.corrected) {
+          applyCanonicalSessionSnapshot(loaded.snapshot)
+          setPokemonHubError(loaded.snapshot.reason?.message ?? 'The backend corrected the workspace snapshot.')
+          return false
+        }
+        session.version = loaded.snapshot.revision
+      } else {
+        const candidate = createCanonicalPokemonHubSnapshot(session, nextPanes, nextSnapshots)
+        const correction = await session.requestGate.run(() => syncPokemonHubSessionSnapshot(session.profileId, session.sessionId, candidate, crypto.randomUUID()))
+        if (correction) {
+          applyCanonicalSessionSnapshot(correction)
+          setPokemonHubError(correction.reason?.message ?? 'The backend corrected the workspace snapshot.')
+          return false
+        }
+        session.version = candidate.revision + 1
       }
-      session.version = candidate.revision + 1
       setPokemonHubSnapshotStatus('Snapshot sincronizado.')
       pokemonHubPanesRef.current = nextPanes
       setPokemonHubPanes(nextPanes)
@@ -462,7 +475,7 @@ export default function PokemonHub({ onClose, closeSignal = 0 }) {
         <Button className="dialog-close" type="text" aria-label="Fechar Pokémon Hub" icon={<CloseOutlined />} onClick={() => void closePokemonHub()} />
       </header>
       <div className={`pokemon-workspace-body pokemon-workspace-body-${pokemonHubPanes.length}`}>
-        {pokemonHubPanes.map((source, index) => <PokemonHubPane key={index} side={index} panes={pokemonHubPanes} paneCount={pokemonHubPanes.length} source={source} data={pokemonHubData} hubProfiles={pokemonHubProfiles} profilesLoading={pokemonHubProfilesLoading} saveProfileGames={saveProfileGames} saveProfileGamesLoading={catalogLoading} saveProfileGamesError={catalogError} saveProfilesByGame={saveProfilesByGame} saveLayoutsBySource={saveLayoutsBySource} saveLayoutsLoading={saveLayoutsLoading} saveLayoutsError={saveLayoutsError} selected={pokemonHubSelection} selectedBox={pokemonHubBoxes[saveSourceKey(source?.gameId, source?.profileId)]} busy={pokemonHubBusy} onSourceChange={nextSource => selectPokemonHubPane(index, nextSource)} onCreate={() => openPokemonHubProfileCreator(index)} onAddPane={addPokemonHubPane} onClosePane={() => closePokemonHubPane(index)} onBoxChange={(gameId, profileId, box) => setPokemonHubBoxes(current => ({ ...current, [saveSourceKey(gameId, profileId)]: box }))} onSlotSelect={selectPokemonHubLocation} onRename={openPokemonHubProfileRenamer} onDelete={deleteHubProfile} />)}
+        {pokemonHubPanes.map((source, index) => <PokemonHubPane key={index} side={index} panes={pokemonHubPanes} paneCount={pokemonHubPanes.length} source={source} activeDrag={pokemonHubActiveDrag} data={pokemonHubData} hubProfiles={pokemonHubProfiles} profilesLoading={pokemonHubProfilesLoading} saveProfileGames={saveProfileGames} saveProfileGamesLoading={catalogLoading} saveProfileGamesError={catalogError} saveProfilesByGame={saveProfilesByGame} saveLayoutsBySource={saveLayoutsBySource} saveLayoutsLoading={saveLayoutsLoading} saveLayoutsError={saveLayoutsError} selected={pokemonHubSelection} selectedBox={pokemonHubBoxes[saveSourceKey(source?.gameId, source?.profileId)]} busy={pokemonHubBusy} onSourceChange={nextSource => selectPokemonHubPane(index, nextSource)} onCreate={() => openPokemonHubProfileCreator(index)} onAddPane={addPokemonHubPane} onClosePane={() => closePokemonHubPane(index)} onBoxChange={(gameId, profileId, box) => setPokemonHubBoxes(current => ({ ...current, [saveSourceKey(gameId, profileId)]: box }))} onSlotSelect={selectPokemonHubLocation} onRename={openPokemonHubProfileRenamer} onDelete={deleteHubProfile} />)}
       </div>
       {pokemonHubBusy && <div className="pokemon-workspace-stale" role="status" aria-label="Processando alteração do workspace"><span>Processando…</span></div>}
       <footer className="pokemon-workspace-footer">{pokemonHubSnapshotStatus && <p className="pokemon-hub-snapshot-status" role="status">{pokemonHubSnapshotStatus}</p>}{pokemonHubError && <p className="profile-error" role="alert">{pokemonHubError}</p>}</footer>
@@ -538,7 +551,7 @@ function PokemonHubPaneControls({ side, panes, source, hubProfiles, profilesLoad
   </div>
 }
 
-function PokemonHubSlotGrid({ profile, entries, layoutVersion, side, title, selected, pokemonCount, busy, onSlotSelect, onRename, onDelete }) {
+function PokemonHubSlotGrid({ profile, entries, layoutVersion, side, title, selected, pokemonCount, busy, onSlotSelect, onRename, onDelete, dragPermission }) {
   const frameRef = useRef(null)
   const [columns, setColumns] = useState(5)
 
@@ -578,8 +591,9 @@ function PokemonHubSlotGrid({ profile, entries, layoutVersion, side, title, sele
             const entry = entries[slot] ?? null
             const location = { kind: 'hub', slot }
             const occupied = Boolean(entry)
-            const slotProjection = { occupied, species: entry?.species, shiny: entry?.shiny }
-            return <PokemonHubDragSlot key={slot} location={{ ...location, hubProfileId: profile.hubProfileId }} slot={slotProjection}><button className={`pokemon-hub-slot${occupied ? ' occupied' : ''}${isSelected(location) ? ' selected' : ''}`} type="button" aria-label={`${title}, posição ${slot + 1}, ${occupied ? 'ocupada' : 'vazia'}`} onClick={() => onSlotSelect(location, side)}><span className="pokemon-hub-slot-index">{slot + 1}</span>{occupied && <span className="pokemon-hub-slot-content">#{entry.species ?? '●'}</span>}<PokemonSlotSprite slot={slotProjection} /></button></PokemonHubDragSlot>
+            const slotProjection = { occupied, species: entry?.species, shiny: entry?.shiny, isEgg: entry?.isEgg, hubPassport: entry?.hubPassport }
+            const permission = dragPermission(slotProjection)
+            return <PokemonHubDragSlot key={slot} location={{ ...location, hubProfileId: profile.hubProfileId }} slot={slotProjection} dragDisabled={permission.dragDisabled} dragBlockReason={permission.reason?.message}><button className={`pokemon-hub-slot${occupied ? ' occupied' : ''}${isSelected(location) ? ' selected' : ''}`} type="button" aria-label={`${title}, posição ${slot + 1}, ${occupied ? 'ocupada' : 'vazia'}`} onClick={() => onSlotSelect(location, side)}><span className="pokemon-hub-slot-index">{slot + 1}</span>{occupied && <span className="pokemon-hub-slot-content">#{entry.species ?? '●'}</span>}<PokemonSlotSprite slot={slotProjection} /></button></PokemonHubDragSlot>
           })}
         </div>
       </div>
@@ -587,7 +601,7 @@ function PokemonHubSlotGrid({ profile, entries, layoutVersion, side, title, sele
   </div>
 }
 
-function PokemonHubPane({ side, panes, paneCount, source, data, hubProfiles, profilesLoading, saveProfileGames, saveProfileGamesLoading, saveProfileGamesError, saveProfilesByGame, saveLayoutsBySource, saveLayoutsLoading, saveLayoutsError, selected, selectedBox, busy, onSourceChange, onCreate, onAddPane, onClosePane, onBoxChange, onSlotSelect, onRename, onDelete }) {
+function PokemonHubPane({ side, panes, paneCount, source, activeDrag, data, hubProfiles, profilesLoading, saveProfileGames, saveProfileGamesLoading, saveProfileGamesError, saveProfilesByGame, saveLayoutsBySource, saveLayoutsLoading, saveLayoutsError, selected, selectedBox, busy, onSourceChange, onCreate, onAddPane, onClosePane, onBoxChange, onSlotSelect, onRename, onDelete }) {
   const games = data?.games ?? []
   const game = source?.kind === 'game' ? games.find(candidate => candidate.id === source.gameId) : null
   const hubProfile = source?.kind === 'hub' ? hubProfiles.find(candidate => candidate.hubProfileId === source.hubProfileId) : null
@@ -595,6 +609,10 @@ function PokemonHubPane({ side, panes, paneCount, source, data, hubProfiles, pro
   const saveProfile = source?.kind === 'game' && source.gameId ? (saveProfilesByGame[source.gameId] ?? []).find(candidate => candidate.id === source.profileId) : null
   const sourceKey = saveSourceKey(source?.gameId, source?.profileId)
   const saveLayout = saveLayoutsBySource[sourceKey]
+  const dragPermission = slot => getPokemonHubDragFeedback({ panes, source, slot, saveLayoutsBySource })
+  const activeSource = activeDrag ? sourceForPokemonHubLocation(panes, activeDrag.location) : null
+  const activeFeedback = activeSource ? getPokemonHubDragFeedback({ panes, source: activeSource, slot: activeDrag.slot, saveLayoutsBySource }) : null
+  const dragOverlayMessage = activeFeedback?.destinations.find(destination => samePokemonHubPaneSource(destination.source, source) && !destination.allowed)?.reason?.message ?? ''
   const gameBoxes = game?.boxes ?? []
   const boxIndex = gameBoxes.length ? Math.min(selectedBox ?? 0, gameBoxes.length - 1) : 0
   const gameSlots = gameBoxes[boxIndex]?.slots ?? []
@@ -604,7 +622,7 @@ function PokemonHubPane({ side, panes, paneCount, source, data, hubProfiles, pro
   const canAdd = paneCount < 3 && side === paneCount - 1
   const isSelected = location => selected.some(candidate => candidate.kind === location.kind && candidate.gameId === location.gameId && candidate.box === location.box && candidate.slot === location.slot)
   const slotGrid = source && (hubProfile || game?.status === 'ready') && (hubProfile
-    ? <PokemonHubSlotGrid profile={hubProfile} entries={hubProfile.grid.entries} layoutVersion={paneCount} side={side} title={title} selected={selected} pokemonCount={pokemonCount} busy={busy} onSlotSelect={onSlotSelect} onRename={onRename} onDelete={onDelete} />
+    ? <PokemonHubSlotGrid profile={hubProfile} entries={hubProfile.grid.entries} layoutVersion={paneCount} side={side} title={title} selected={selected} pokemonCount={pokemonCount} busy={busy} onSlotSelect={onSlotSelect} onRename={onRename} onDelete={onDelete} dragPermission={dragPermission} />
     : <div className="pokemon-workspace-grid" aria-label={`${title} slots`}>
     {gameSlots.map((entry, slot) => {
       const location = source.kind === 'hub' ? { kind: 'hub', slot } : { kind: 'game', gameId: game.id, box: boxIndex, slot }
@@ -625,20 +643,21 @@ function PokemonHubPane({ side, panes, paneCount, source, data, hubProfiles, pro
       {saveLayoutsLoading[sourceKey] && <p className="pokemon-pane-note">Carregando Party e Boxes...</p>}
       {saveLayoutsError[sourceKey] && <p className="pokemon-pane-note" role="alert">{saveLayoutsError[sourceKey]}</p>}
       {saveLayout?.missing && <PokemonSaveLayoutMissing />}
-      {saveLayout && !saveLayout.missing && <PokemonSaveLayout layout={saveLayout} gameId={source.gameId} profileId={source.profileId} selectedBox={selectedBox ?? 0} onBoxChange={onBoxChange} />}
+      {saveLayout && !saveLayout.missing && <PokemonSaveLayout layout={saveLayout} gameId={source.gameId} profileId={source.profileId} selectedBox={selectedBox ?? 0} onBoxChange={onBoxChange} dragPermission={dragPermission} />}
       {slotGrid}
+      {dragOverlayMessage && <div className="pokemon-hub-transfer-block-overlay" role="status">{dragOverlayMessage}</div>}
       {game && game.status !== 'ready' && <p className="pokemon-pane-note">{game.status === 'active' ? 'Feche o jogo antes de usar o Hub.' : 'Este save ainda não está disponível.'}</p>}
     </div>
   </section>
 }
 
-function PokemonSaveLayout({ layout, gameId, profileId, selectedBox, onBoxChange }) {
+function PokemonSaveLayout({ layout, gameId, profileId, selectedBox, onBoxChange, dragPermission }) {
   const boxIndex = Math.max(0, Math.min(selectedBox, layout.boxes.length - 1))
   const box = layout.boxes[boxIndex]
   return <div className="pokemon-save-layout">
-    <section aria-label="Party"><div className="pokemon-save-party">{layout.party.map((slot, index) => <SaveSlot key={index} location={{ kind: 'game', gameId, profileId, area: 'party', slot: index }} slot={slot} position={getSavePartySlotPosition(index, layout.party.length)} label={`Party, posição ${index + 1}`} showPartyStrip />)}</div></section>
+    <section aria-label="Party"><div className="pokemon-save-party">{layout.party.map((slot, index) => <SaveSlot key={index} location={{ kind: 'game', gameId, profileId, area: 'party', slot: index }} slot={slot} position={getSavePartySlotPosition(index, layout.party.length)} label={`Party, posição ${index + 1}`} showPartyStrip dragPermission={dragPermission(slot)} />)}</div></section>
     <div className="pokemon-save-divider" />
-    <section aria-label="Boxes"><div className="pokemon-save-box-nav"><Button aria-label="Box anterior" icon={<LeftOutlined />} onClick={() => onBoxChange(gameId, profileId, getPreviousSaveBoxIndex(boxIndex, layout.boxes.length))} /><h4>Box {boxIndex + 1} de {layout.boxes.length}</h4><Button aria-label="Próxima Box" icon={<RightOutlined />} onClick={() => onBoxChange(gameId, profileId, getNextSaveBoxIndex(boxIndex, layout.boxes.length))} /></div><div className="pokemon-save-box-grid">{box.slots.map((slot, index) => <SaveSlot key={index} location={{ kind: 'game', gameId, profileId, area: 'box', box: boxIndex, slot: index }} slot={slot} position={getSaveBoxSlotPosition(boxIndex, index, box.slots.length)} label={`Box ${boxIndex + 1}, posição ${index + 1}`} />)}</div></section>
+    <section aria-label="Boxes"><div className="pokemon-save-box-nav"><Button aria-label="Box anterior" icon={<LeftOutlined />} onClick={() => onBoxChange(gameId, profileId, getPreviousSaveBoxIndex(boxIndex, layout.boxes.length))} /><h4>Box {boxIndex + 1} de {layout.boxes.length}</h4><Button aria-label="Próxima Box" icon={<RightOutlined />} onClick={() => onBoxChange(gameId, profileId, getNextSaveBoxIndex(boxIndex, layout.boxes.length))} /></div><div className="pokemon-save-box-grid">{box.slots.map((slot, index) => <SaveSlot key={index} location={{ kind: 'game', gameId, profileId, area: 'box', box: boxIndex, slot: index }} slot={slot} position={getSaveBoxSlotPosition(boxIndex, index, box.slots.length)} label={`Box ${boxIndex + 1}, posição ${index + 1}`} dragPermission={dragPermission(slot)} />)}</div></section>
   </div>
 }
 
@@ -646,8 +665,8 @@ function PokemonSaveLayoutMissing() {
   return <div className="pokemon-save-layout-missing"><div className="pokemon-save-layout-missing-card"><InboxOutlined /><h3>Este perfil ainda não possui um save.</h3><p>Abra o jogo e salve uma partida para carregar Party e Boxes.</p></div></div>
 }
 
-function SaveSlot({ location, slot, position, label, showPartyStrip = false }) {
-  return <PokemonHubDragSlot location={location} slot={slot}><div className={`pokemon-hub-slot${slot.occupied ? ' occupied' : ''}`} role="img" aria-label={`${label}, ${slot.occupied ? `ocupada${slot.species ? `, espécie ${slot.species}` : ''}` : 'vazia'}`}><span className="pokemon-hub-slot-index">{position}</span>{slot.occupied && <span className="pokemon-hub-slot-content">#{slot.species ?? '●'}</span>}<PokemonSlotSprite slot={slot} />{showPartyStrip && <span className="pokemon-save-party-strip">Party</span>}</div></PokemonHubDragSlot>
+function SaveSlot({ location, slot, position, label, showPartyStrip = false, dragPermission = { dragDisabled: false } }) {
+  return <PokemonHubDragSlot location={location} slot={slot} dragDisabled={dragPermission.dragDisabled} dragBlockReason={dragPermission.reason?.message}><div className={`pokemon-hub-slot${slot.occupied ? ' occupied' : ''}`} role="img" aria-label={`${label}, ${slot.occupied ? `ocupada${slot.species ? `, espécie ${slot.species}` : ''}` : 'vazia'}`}><span className="pokemon-hub-slot-index">{position}</span>{slot.occupied && <span className="pokemon-hub-slot-content">#{slot.species ?? '●'}</span>}<PokemonSlotSprite slot={slot} />{showPartyStrip && <span className="pokemon-save-party-strip">Party</span>}</div></PokemonHubDragSlot>
 }
 
 function PokemonSlotSprite({ slot }) {
@@ -656,10 +675,11 @@ function PokemonSlotSprite({ slot }) {
   return <img className="pokemon-hub-slot-sprite" src={sprite} alt="" aria-hidden="true" draggable={false} onError={event => hidePokemonSlotSprite(event.currentTarget)} />
 }
 
-function PokemonHubDragSlot({ location, slot, children }) {
+function PokemonHubDragSlot({ location, slot, children, dragDisabled = false, dragBlockReason = '' }) {
   const id = pokemonHubDragId(location)
   const data = { location, slot }
-  const draggable = useDraggable({ id, data, disabled: !isPokemonHubDraggable(slot) })
+  const blocked = isPokemonHubDraggable(slot) && dragDisabled
+  const draggable = useDraggable({ id, data, disabled: !isPokemonHubDraggable(slot) || blocked })
   const droppable = useDroppable({ id, data: { location } })
   const setNodeRef = node => {
     draggable.ref(node)
@@ -669,9 +689,10 @@ function PokemonHubDragSlot({ location, slot, children }) {
     children.props.className,
     draggable.isDragging && 'dragging',
     droppable.isDropTarget && !draggable.isDragging && 'drag-over',
+    blocked && 'drag-blocked',
   ].filter(Boolean).join(' ')
 
-  return React.cloneElement(children, { ref: setNodeRef, className })
+  return React.cloneElement(children, { ref: setNodeRef, className, ...(blocked ? { title: dragBlockReason, 'aria-disabled': true } : {}), children: <>{children.props.children}{blocked && <span className="pokemon-hub-slot-block-icon" aria-label={dragBlockReason}><StopOutlined /></span>}</> })
 }
 
 function PokemonHubDragOverlay({ slot }) {
@@ -736,6 +757,17 @@ function createCanonicalPokemonHubSnapshot(session, panes, snapshots) {
       }
     }),
   }
+}
+
+function samePokemonHubPaneSource(left, right) {
+  return left?.kind === right?.kind
+    && (left?.kind === 'hub' ? left.hubProfileId === right.hubProfileId : left?.gameId === right?.gameId && left?.profileId === right?.profileId)
+}
+
+function sourceForPokemonHubLocation(panes, location) {
+  if (location?.kind === 'hub') return panes.find(source => source?.kind === 'hub' && source.hubProfileId === location.hubProfileId) ?? null
+  if (location?.kind === 'game') return panes.find(source => source?.kind === 'game' && source.gameId === location.gameId && source.profileId === location.profileId) ?? null
+  return null
 }
 
 function canonicalPaneOccupancy(pane) {

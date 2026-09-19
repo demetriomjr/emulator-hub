@@ -40,7 +40,7 @@ export function createPokemonHubSnapshotCoordinator({ persistence, eventStore, l
       assertString(profileId, 'Profile ID'); assertString(sourceKey, 'Source key')
       const source = await readSource(profileId, sourceKey)
       if (!source) throw coordinatorError('SOURCE_NOT_ADOPTED', 'Pokemon Hub source has not been adopted.')
-      return safeSnapshot(source)
+      return publicSnapshot(source)
     },
 
     async ensureHubSource({ profileId, sourceKey, hubProfileId, minimumSlotCount }) {
@@ -413,6 +413,15 @@ export function createPokemonHubSnapshotCoordinator({ persistence, eventStore, l
     const stored = await persistence.get(recordKey(profileId, pokemonInstanceId))
     return stored === null ? null : JSON.parse(stored)
   }
+  async function publicSnapshot(source) {
+    const snapshot = safeSnapshot(source)
+    for (const placement of snapshot.placements) {
+      if (!placement.pokemonInstanceId) continue
+      const record = await readRecord(source.profileId, placement.pokemonInstanceId)
+      if (record?.hubPassport) snapshot.pokemonDisplay[placement.pokemonInstanceId] = { ...snapshot.pokemonDisplay[placement.pokemonInstanceId], hubPassport: structuredClone(record.hubPassport) }
+    }
+    return snapshot
+  }
   async function writeRecord(record) { await persistence.set(recordKey(record.profileId, record.pokemonInstanceId), JSON.stringify(record)) }
   async function reusableRecords(source) {
     const result = new Map()
@@ -545,7 +554,7 @@ function normalizeWorkspaceSources(request) {
 }
 
 function safeSnapshot(source) {
-  return { sourceKey: source.sourceKey, sourceRevision: source.sourceRevision, snapshotRevision: source.snapshotRevision, adapter: source.adapter, ...(source.transferCapability ? { transferCapability: structuredClone(source.transferCapability) } : {}), placements: clonePlacements(source.placements), pokemonDisplay: structuredClone(source.pokemonDisplay ?? {}) }
+  return { sourceKey: source.sourceKey, sourceRevision: source.sourceRevision, snapshotRevision: source.snapshotRevision, saveRevision: source.saveRevision, needsSaveFlush: source.needsSaveFlush, adapter: source.adapter, ...(source.transferCapability ? { transferCapability: structuredClone(source.transferCapability) } : {}), placements: clonePlacements(source.placements), pokemonDisplay: structuredClone(source.pokemonDisplay ?? {}) }
 }
 
 function clonePlacements(placements) { return placements.map(placement => ({ location: normalizeLocation(placement.location), pokemonInstanceId: placement.pokemonInstanceId ?? null })) }

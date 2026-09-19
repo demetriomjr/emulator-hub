@@ -124,6 +124,21 @@ export function heartbeatPokemonHubSession(profileId, sessionId, sequence) {
   return postPokemonHubSession(profileId, `/${encodeURIComponent(sessionId)}/heartbeat`, { sequence })
 }
 
+export async function loadPokemonHubSessionPane(profileId, sessionId, pane, source) {
+  if (!Number.isInteger(pane) || pane < 0 || pane > 2) throw new TypeError('Pokemon Hub pane is invalid')
+  const response = await fetch(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/sessions/${encodeURIComponent(sessionId)}/panes/${pane}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source }),
+  })
+  const snapshot = await response.json().catch(() => ({}))
+  if (response.status === 409) return { corrected: true, snapshot }
+  if (!response.ok) {
+    const error = new Error(snapshot.error || `Request failed (${response.status})`)
+    if (typeof snapshot.code === 'string') error.code = snapshot.code
+    throw error
+  }
+  return { corrected: false, snapshot }
+}
+
 export async function syncPokemonHubSessionSnapshot(profileId, sessionId, snapshot, idempotencyKey) {
   if (typeof idempotencyKey !== 'string' || idempotencyKey.length === 0) throw new TypeError('Pokemon Hub snapshot idempotency key is required')
   const response = await fetch(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/sessions/${encodeURIComponent(sessionId)}/snapshots`, {

@@ -382,6 +382,7 @@ test('persists a first-admission Hub passport only after the rule policy permits
 
   assert.equal(accepted.status, 'accepted')
   assert.deepEqual((await coordinator.getSaveFlushPlan({ profileId, sourceKey: hubSource.sourceKey })).records.get(pokemonInstanceId).hubPassport, { sourceTitle: 'pokemon-ruby', sourceFamily: 'hoenn-rs' })
+  assert.deepEqual((await coordinator.getSnapshot({ profileId, sourceKey: hubSource.sourceKey })).pokemonDisplay[pokemonInstanceId].hubPassport, { sourceTitle: 'pokemon-ruby', sourceFamily: 'hoenn-rs' })
 })
 
 test('returns an authoritative correction with a placement-rule reason without changing either source', async () => {

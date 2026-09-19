@@ -38,3 +38,19 @@ test('serializes structural source changes before constructing another workspace
   assert.match(packageSource, /choosePaneSource\(pokemonHubPanesRef\.current, index, source \|\| null\)/)
   assert.match(packageSource, /saveSourceKey\(pane\.profile\.gameId, pane\.profile\.profileId\)/)
 })
+
+test('loads a selected pane through the server-owned pane command', async () => {
+  const packageSource = await readFile(packageFile, 'utf8')
+
+  assert.match(packageSource, /loadPokemonHubSessionPane/)
+  assert.match(packageSource, /session\.requestGate\.run\(\(\) => loadPokemonHubSessionPane\(session\.profileId, session\.sessionId, pane, incomingSource\)\)/)
+  assert.match(packageSource, /if \(incomingSource\) \{[\s\S]*loadPokemonHubSessionPane/)
+})
+
+test('uses shared drag feedback for disabled sprites and blocked destination overlays', async () => {
+  const packageSource = await readFile(packageFile, 'utf8')
+
+  assert.match(packageSource, /getPokemonHubDragFeedback/)
+  assert.match(packageSource, /dragDisabled=\{permission\.dragDisabled\}/)
+  assert.match(packageSource, /pokemon-hub-transfer-block-overlay/)
+})
