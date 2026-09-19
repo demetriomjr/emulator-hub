@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mobile Gamepad Layout</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #07100e; color: #e8f5ef; }
+    body { max-width: 1100px; margin: 0 auto; padding: 20px; }
+    h1 { margin: 0 0 4px; font-size: 22px; } p { margin: 0 0 16px; color: #b9d6c8; }
+    main { display: grid; grid-template-columns: minmax(0, 844px) 220px; gap: 16px; align-items: start; }
+    canvas { width: 100%; height: auto; display: block; background: #000; border: 1px solid #397c67; border-radius: 16px; touch-action: none; }
+    aside { display: grid; gap: 10px; padding: 14px; border: 1px solid #397c67; border-radius: 14px; background: #10262a; }
+    label { display: grid; gap: 4px; color: #bfe6d3; font-size: 12px; } input { width: 100%; box-sizing: border-box; }
+    button { min-height: 36px; color: #e8f5ef; background: #176044; border: 1px solid #4ea780; border-radius: 8px; cursor: pointer; }
+    output { min-height: 42px; color: #b9ffdc; font: 12px ui-monospace, monospace; overflow-wrap: anywhere; }
+    @media (max-width: 760px) { body { padding: 12px; } main { grid-template-columns: 1fr; } aside { grid-template-columns: repeat(3, 1fr); } output { grid-column: 1 / -1; } }
+  </style>
+</head>
+<body>
+  <h1>Mobile gamepad layout</h1>
+  <p>Drag a control on the landscape canvas. Select it by tapping, then fine-tune its position and size.</p>
+  <main>
+    <canvas id="layout-canvas" width="844" height="390" aria-label="Landscape mobile gamepad layout editor"></canvas>
+    <aside>
+      <strong id="selected-name">D-pad</strong>
+      <label>X <input id="x" type="number" min="0" max="844" /></label>
+      <label>Y <input id="y" type="number" min="0" max="390" /></label>
+      <label>Size <input id="size" type="range" min="34" max="300" /></label>
+      <output id="values"></output>
+      <button id="copy" type="button">Copy layout</button>
+      <button id="reset" type="button">Reset</button>
+    </aside>
+  </main>
+  <script>
+    const canvas = document.getElementById('layout-canvas')
+    const context = canvas.getContext('2d')
+    const selectedName = document.getElementById('selected-name')
+    const xInput = document.getElementById('x')
+    const yInput = document.getElementById('y')
+    const sizeInput = document.getElementById('size')
+    const values = document.getElementById('values')
+    const initialControls = [
+      { id: 'dpad', label: 'D-pad', kind: 'zone', x: 133, y: 263, size: 195 },
+      { id: 'a', label: 'A', kind: 'round', x: 672, y: 323, size: 91 },
+      { id: 'b', label: 'B', kind: 'round', x: 775, y: 248, size: 91 },
+      { id: 'start', label: 'Start', kind: 'block', x: 494, y: 313, size: 95 },
+      { id: 'select', label: 'Select', kind: 'block', x: 350, y: 313, size: 89 },
+      { id: 'l', label: 'L', kind: 'shoulder', x: 121, y: 48, size: 150 },
+      { id: 'r', label: 'R', kind: 'shoulder', x: 723, y: 48, size: 150 },
+    ]
+    const controls = initialControls.map(control => ({ ...control }))
+    let selected = controls[0]
+    let dragOffset = null
+
+    function clamp(value, min, max) { return Math.max(min, Math.min(max, value)) }
+    function pointFromEvent(event) {
+      const bounds = canvas.getBoundingClientRect()
+      return { x: (event.clientX - bounds.left) * canvas.width / bounds.width, y: (event.clientY - bounds.top) * canvas.height / bounds.height }
+    }
+    function hitTest(point, control) {
+      if (control.kind === 'round' || control.kind === 'zone') return Math.hypot(point.x - control.x, point.y - control.y) <= control.size / 2
+      const width = control.kind === 'block' ? control.size : control.size
+      const height = control.kind === 'block' || control.kind === 'shoulder' ? 31 : control.size
+      return Math.abs(point.x - control.x) <= width / 2 && Math.abs(point.y - control.y) <= height / 2
+    }
+    function drawControl(control) {
+      const active = control === selected
+      context.save()
+      context.lineWidth = active ? 3 : 1.5
+      context.strokeStyle = active ? '#b9ffdc' : '#b5d2c4'
+      context.fillStyle = active ? '#31ae7b80' : '#d9f3e12b'
+      if (control.kind === 'round') {
+        context.beginPath(); context.arc(control.x, control.y, control.size / 2, 0, Math.PI * 2); context.fill(); context.stroke()
+      } else if (control.kind === 'zone') {
+        context.beginPath(); context.arc(control.x, control.y, control.size / 2, 0, Math.PI * 2); context.fill(); context.stroke()
+        context.fillStyle = active ? '#b9ffdc88' : '#b5d2c466'
+        context.beginPath(); context.arc(control.x, control.y, control.size * 0.22, 0, Math.PI * 2); context.fill(); context.stroke()
+      } else if (control.kind === 'dpad') {
+        const arm = control.size * 36 / 125
+        context.fillStyle = '#787878'
+        context.fillRect(control.x - arm / 2, control.y - control.size / 2, arm, control.size)
+        context.fillRect(control.x - control.size / 2, control.y - arm / 2, control.size, arm)
+        context.strokeRect(control.x - arm / 2, control.y - control.size / 2, arm, control.size)
+        context.strokeRect(control.x - control.size / 2, control.y - arm / 2, control.size, arm)
+      } else {
+        const height = control.kind === 'block' || control.kind === 'shoulder' ? 31 : 26
+        context.beginPath(); context.roundRect(control.x - control.size / 2, control.y - height / 2, control.size, height, 8); context.fill(); context.stroke()
+      }
+      if (control.kind !== 'zone') {
+        context.fillStyle = '#f4fff8'; context.font = `600 ${Math.max(13, control.kind === 'block' ? 13 : control.size / 3)}px system-ui`; context.textAlign = 'center'; context.textBaseline = 'middle'
+        context.fillText(control.label, control.x, control.y)
+      }
+      context.restore()
+    }
+    function draw() {
+      context.clearRect(0, 0, canvas.width, canvas.height)
+      context.fillStyle = '#10141a'; context.fillRect(0, 0, canvas.width, canvas.height)
+      controls.forEach(drawControl)
+    }
+    function updatePanel() {
+      selectedName.textContent = selected.label
+      xInput.value = Math.round(selected.x); yInput.value = Math.round(selected.y); sizeInput.value = Math.round(selected.size)
+      values.textContent = JSON.stringify(controls.map(({ id, x, y, size }) => ({ id, x: Math.round(x), y: Math.round(y), size: Math.round(size) })), null, 2)
+      draw()
+    }
+    function updateSelected() {
+      selected.x = clamp(Number(xInput.value), 0, canvas.width)
+      selected.y = clamp(Number(yInput.value), 0, canvas.height)
+      selected.size = Number(sizeInput.value)
+      updatePanel()
+    }
+    canvas.addEventListener('pointerdown', event => {
+      const point = pointFromEvent(event)
+      const target = [...controls].reverse().find(control => hitTest(point, control))
+      if (!target) return
+      selected = target; dragOffset = { x: point.x - target.x, y: point.y - target.y }
+      canvas.setPointerCapture(event.pointerId); updatePanel()
+    })
+    canvas.addEventListener('pointermove', event => {
+      if (!dragOffset) return
+      const point = pointFromEvent(event)
+      selected.x = clamp(point.x - dragOffset.x, 0, canvas.width)
+      selected.y = clamp(point.y - dragOffset.y, 0, canvas.height)
+      updatePanel()
+    })
+    function stopDragging() { dragOffset = null }
+    canvas.addEventListener('pointerup', stopDragging); canvas.addEventListener('pointercancel', stopDragging)
+    xInput.addEventListener('input', updateSelected); yInput.addEventListener('input', updateSelected); sizeInput.addEventListener('input', updateSelected)
+    document.getElementById('copy').addEventListener('click', async () => {
+      await navigator.clipboard.writeText(values.textContent)
+      document.getElementById('copy').textContent = 'Copied'
+      setTimeout(() => { document.getElementById('copy').textContent = 'Copy layout' }, 1200)
+    })
+    document.getElementById('reset').addEventListener('click', () => {
+      controls.splice(0, controls.length, ...initialControls.map(control => ({ ...control })))
+      selected = controls[0]; updatePanel()
+    })
+    updatePanel()
+  </script>
+</body>
+</html>

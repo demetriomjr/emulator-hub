@@ -14,6 +14,16 @@ const sessionId = parameters.get('sessionId')
 const leaseGeneration = Number(parameters.get('leaseGeneration'))
 const restoreLocalRecovery = parameters.get('restoreRecovery') === '1'
 const game = document.getElementById('game')
+const isMobilePlayerViewport = window.matchMedia('(max-width: 900px) and (max-height: 500px) and (orientation: landscape)').matches
+const mobileGamepadLayout = Object.freeze([
+  { id: 'dpad', x: 133, y: 263, size: 195, shape: 'zone' },
+  { id: 'a', x: 672, y: 323, size: 91, shape: 'round' },
+  { id: 'b', x: 775, y: 248, size: 91, shape: 'round' },
+  { id: 'start', x: 494, y: 313, size: 95, shape: 'block' },
+  { id: 'select', x: 350, y: 313, size: 89, shape: 'block' },
+  { id: 'l', x: 121, y: 48, size: 150, shape: 'block' },
+  { id: 'r', x: 723, y: 48, size: 150, shape: 'block' },
+])
 // The upstream `latest` channel keeps stable cores while receiving runtime
 // fixes ahead of the pinned 4.2.3 release. This branch exercises it against
 // the known iPhone WebKit rendering stall.
@@ -128,6 +138,29 @@ function hideFastForwardOverlay() {
 function normalizeEmulatorChrome() {
   hideContextMenuButton()
   hideFastForwardOverlay()
+}
+
+function applyMobileGamepadLayout() {
+  if (!isMobilePlayerViewport) return
+  const bounds = game.getBoundingClientRect()
+  const scale = Math.min(bounds.width / 844, bounds.height / 390)
+  const offsetX = bounds.left + (bounds.width - 844 * scale) / 2
+  const offsetY = bounds.top + (bounds.height - 390 * scale) / 2
+  for (const control of mobileGamepadLayout) {
+    const element = game.querySelector(`.b_${control.id}`)
+    if (!element) continue
+    const width = control.size * scale
+    const height = control.shape === 'block' ? 31 * scale : width
+    element.style.setProperty('position', 'fixed', 'important')
+    element.style.setProperty('left', `${offsetX + control.x * scale}px`, 'important')
+    element.style.setProperty('top', `${offsetY + control.y * scale}px`, 'important')
+    element.style.setProperty('width', `${width}px`, 'important')
+    element.style.setProperty('height', `${height}px`, 'important')
+    element.style.setProperty('line-height', `${height}px`, 'important')
+    element.style.setProperty('margin', '0', 'important')
+    element.style.setProperty('transform', 'translate(-50%, -50%)', 'important')
+    element.style.setProperty('z-index', '2', 'important')
+  }
 }
 
 const contextMenuObserver = new MutationObserver(normalizeEmulatorChrome)
@@ -248,16 +281,15 @@ async function start() {
   window.EJS_defaultControls = { 0: controlProfile.bindings, 1: {}, 2: {}, 3: {} }
   // EmulatorJS only detects touch once during startup. Match the Hub's mobile
   // player breakpoint so Chrome's device viewport simulation is deterministic.
-  const isMobilePlayerViewport = window.matchMedia('(max-width: 900px) and (max-height: 500px) and (orientation: landscape)').matches
   window.EJS_browserMode = isMobilePlayerViewport ? 'mobile' : undefined
-  // Replace EmulatorJS's GBA touch layout with its normal gameplay controls.
+  // Replace EmulatorJS's GBA touch layout with the approved Hub mobile layout.
   // The upstream default also adds Fast and Slow below Start/Select; speed is
   // already controlled by the Hub toolbar, so those duplicate touch buttons
   // are deliberately omitted.
   window.EJS_VirtualGamepadSettings = [
     { type: 'button', text: 'B', id: 'b', location: 'right', left: 10, top: 70, bold: true, input_value: 0 },
     { type: 'button', text: 'A', id: 'a', location: 'right', left: 81, top: 40, bold: true, input_value: 8 },
-    { type: 'dpad', id: 'dpad', location: 'left', left: '50%', top: '50%', joystickInput: false, inputValues: [4, 5, 6, 7] },
+    { type: 'zone', id: 'dpad', location: 'left', left: '50%', top: '50%', joystickInput: false, inputValues: [4, 5, 6, 7] },
     { type: 'button', text: 'Start', id: 'start', location: 'center', left: 60, fontSize: 15, block: true, input_value: 3 },
     { type: 'button', text: 'Select', id: 'select', location: 'center', left: -5, fontSize: 15, block: true, input_value: 2 },
     { type: 'button', text: 'L', id: 'l', location: 'left', left: 3, top: -90, bold: true, block: true, input_value: 10 },
@@ -287,6 +319,10 @@ async function start() {
   window.EJS_ready = () => {
     stopLifecycleDiagnostics?.()
     if (isMobilePlayerViewport) window.EJS_emulator?.changeSettingOption?.('virtual-gamepad', 'enabled')
+    if (isMobilePlayerViewport) {
+      applyMobileGamepadLayout()
+      window.addEventListener('resize', applyMobileGamepadLayout)
+    }
     if (clientDiagnostics) {
       stopLifecycleDiagnostics = instrumentEmulatorLifecycle({
         emulator: window.EJS_emulator,
