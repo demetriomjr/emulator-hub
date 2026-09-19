@@ -19,3 +19,12 @@ test('Pokemon Hub is a self-contained lazy UI package', async () => {
   assert.match(frontendSource, /React\.lazy\(\(\) => import\('\.\.\/\.\.\/packages\/pokemon-hub-ui\.jsx'\)\)/)
   assert.doesNotMatch(frontendSource, /from '@dnd-kit\//)
 })
+
+test('choosing a source type leaves save and Hub profile selection explicit', async () => {
+  const packageSource = await readFile(packageFile, 'utf8')
+
+  assert.doesNotMatch(packageSource, /firstAvailableSaveSource/)
+  assert.doesNotMatch(packageSource, /firstAvailableHubSource/)
+  assert.match(packageSource, /onClick=\{\(\) => setSelectionDraft\(\{ kind: 'game' \}\)\}/)
+  assert.match(packageSource, /onClick=\{\(\) => setSelectionDraft\(\{ kind: 'hub' \}\)\}/)
+})

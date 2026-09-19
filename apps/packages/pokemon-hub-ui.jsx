@@ -14,7 +14,7 @@ import { getNextSaveBoxIndex, getPreviousSaveBoxIndex, getSaveBoxSlotPosition, g
 import { getPokemonSlotSprite, hidePokemonSlotSprite } from './pokemon-slot-sprite.mjs'
 import { createGameSessionSourceSnapshot, snapshotToSaveLayout, visiblePokemonHubPanes } from './pokemon-hub-session-view.mjs'
 import { deriveSaveProfileCatalog } from './save-profile-catalog.mjs'
-import { activePaneSourceKind, addWorkspacePane, choosePaneSource, createPokemonHubWorkspaceState, firstAvailableHubSource, firstAvailableSaveSource, hasAvailableSaveProfile, isCompletePaneSource, isPaneSourceAvailable, removeWorkspacePane } from './pokemon-hub-workspace.mjs'
+import { activePaneSourceKind, addWorkspacePane, choosePaneSource, createPokemonHubWorkspaceState, hasAvailableSaveProfile, isCompletePaneSource, isPaneSourceAvailable, removeWorkspacePane } from './pokemon-hub-workspace.mjs'
 
 export default function PokemonHub({ onClose, closeSignal = 0 }) {
   const [catalogLoading, setCatalogLoading] = useState(true)
@@ -506,22 +506,10 @@ function PokemonHubPaneControls({ side, panes, source, hubProfiles, profilesLoad
   const selectedGameId = selectedSaveSource?.gameId ?? null
   const saveProfiles = selectedGameId ? saveProfilesByGame[selectedGameId] ?? [] : []
   const availableSaveProfileGames = saveProfileGames.filter(game => hasAvailableSaveProfile(panes, side, game.id, saveProfilesByGame[game.id]))
-  const selectFirstHubProfile = () => {
-    const nextSource = firstAvailableHubSource(panes, side, hubProfiles)
-    if (!isCompletePaneSource(nextSource)) { setSelectionDraft(nextSource); return }
-    setSelectionDraft(null)
-    onSourceChange(nextSource)
-  }
-  const selectFirstSaveProfile = () => {
-    const nextSource = firstAvailableSaveSource(panes, side, availableSaveProfileGames, saveProfilesByGame)
-    if (!isCompletePaneSource(nextSource)) { setSelectionDraft(nextSource); return }
-    setSelectionDraft(null)
-    onSourceChange(nextSource)
-  }
   return <div className="pokemon-pane-controls">
     <div className="pokemon-pane-source-toggle" role="group" aria-label="Tipo de perfil">
-      <Button className={`pokemon-pane-source-button${activeSourceKind === 'hub' ? ' is-active' : ''}`} type="default" aria-label="Perfil do Hub" title="Perfil do Hub" icon={<CodeSandboxOutlined />} disabled={busy || profilesLoading} onClick={selectFirstHubProfile} />
-      <Button className={`pokemon-pane-source-button${activeSourceKind === 'game' ? ' is-active' : ''}`} type="default" aria-label="Perfil de Save" title="Perfil de Save" icon={<SaveOutlined />} disabled={busy || saveProfileGamesLoading} onClick={selectFirstSaveProfile} />
+      <Button className={`pokemon-pane-source-button${activeSourceKind === 'hub' ? ' is-active' : ''}`} type="default" aria-label="Perfil do Hub" title="Perfil do Hub" icon={<CodeSandboxOutlined />} disabled={busy || profilesLoading} onClick={() => setSelectionDraft({ kind: 'hub' })} />
+      <Button className={`pokemon-pane-source-button${activeSourceKind === 'game' ? ' is-active' : ''}`} type="default" aria-label="Perfil de Save" title="Perfil de Save" icon={<SaveOutlined />} disabled={busy || saveProfileGamesLoading} onClick={() => setSelectionDraft({ kind: 'game' })} />
     </div>
     {selectedSaveSource && <>
       <Select className="pokemon-pane-profile" classNames={{ popup: { root: 'pokemon-hub-select-popup' } }} aria-label="ROM com perfil" value={selectedGameId} placeholder={saveProfileGamesLoading ? 'Carregando ROMs...' : 'Escolher ROM...'} loading={saveProfileGamesLoading} disabled={busy || saveProfileGamesLoading} allowClear onChange={gameId => setSelectionDraft(gameId ? { kind: 'game', gameId } : { kind: 'game' })} options={availableSaveProfileGames.map(game => ({ value: game.id, label: game.title }))} />
