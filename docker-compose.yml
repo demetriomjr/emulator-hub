@@ -33,6 +33,7 @@ services:
       start_period: 15s
     networks:
       - application
+      - redis
     restart: unless-stopped
 
 volumes:
@@ -43,4 +44,7 @@ networks:
   application:
   caddy:
     name: ${CADDY_NETWORK:?Set CADDY_NETWORK in deploy/.env}
+    external: true
+  redis:
+    name: ${REDIS_NETWORK:?Set REDIS_NETWORK in deploy/.env}
     external: true

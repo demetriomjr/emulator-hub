@@ -13,7 +13,8 @@ Caddy and Redis are external services.
    ```
 
 2. Copy `deploy/.env.example` to `deploy/.env`, set the real external
-   `REDIS_URL`, and set `CADDY_NETWORK` to that network name.
+   `REDIS_URL`, set `CADDY_NETWORK` to the Caddy network, and set
+   `REDIS_NETWORK` to the Docker network containing Redis.
 3. Put authorized ROM files in `deploy/roms/`.
 4. Start the application from the repository root:
 
@@ -22,9 +23,10 @@ Caddy and Redis are external services.
    ```
 
 For a containerized Caddy, configure the upstream as `frontend:8080` and
-attach Caddy to `CADDY_NETWORK`. For Caddy running directly on the VPS host,
-use `127.0.0.1:8080`. Caddy owns the public hostname and TLS; this project
-does not bind ports 80 or 443.
+attach Caddy to `CADDY_NETWORK`. The backend joins `REDIS_NETWORK` so its
+`REDIS_URL` must use the Redis container DNS name on that network. For Caddy
+running directly on the VPS host, use `127.0.0.1:8080`. Caddy owns the public
+hostname and TLS; this project does not bind ports 80 or 443.
 
 ## Persistent data backup
 

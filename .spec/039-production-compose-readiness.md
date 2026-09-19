@@ -34,6 +34,10 @@ managed Caddy container is attached. The frontend joins that network; the
 backend does not. The frontend also binds only `127.0.0.1:8080` for an
 externally managed Caddy process running directly on the VPS host.
 
+`REDIS_NETWORK` names the pre-existing Docker network hosting the external
+Redis container. Only the backend joins it; the frontend remains unable to
+reach Redis directly.
+
 An internal Docker network was rejected because the backend must reach the
 externally managed Redis endpoint. The non-published application network still
 prevents direct host exposure of the backend.
@@ -44,14 +48,16 @@ prevents direct host exposure of the backend.
 2. The frontend joins the required external Caddy network and binds only
    `127.0.0.1:8080` on the VPS host. The backend is reachable only as
    `backend:3001` from the frontend.
-3. The backend exposes a Compose healthcheck that confirms its HTTP service is
+3. The backend joins the required external Redis network and receives its
+   Redis endpoint through `REDIS_URL`.
+4. The backend exposes a Compose healthcheck that confirms its HTTP service is
    responding. The frontend uses long-form `depends_on` with
    `condition: service_healthy`.
-4. `restart: unless-stopped`, external Redis environment variables, read-only
+5. `restart: unless-stopped`, external Redis environment variables, read-only
    ROM mount, and persistent backend data remain intact.
-5. The persistent volume has a stable configurable Docker name so its backup
+6. The persistent volume has a stable configurable Docker name so its backup
    is not coupled to an incidental Compose project name.
-6. `deploy/.env.example` and a production runbook specify network creation,
+7. `deploy/.env.example` and a production runbook specify network creation,
    deployment, Caddy upstream, backup, restore, and the distinct Redis backup
    responsibility.
 
