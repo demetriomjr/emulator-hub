@@ -9,6 +9,7 @@ button { font: inherit; }
 .hub-sidebar-action:hover { background: #216553; }
 .hub-sidebar-action:focus-visible { outline: 3px solid #ddffe9; outline-offset: 3px; }
 .hub-sidebar-action svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.control-configuration-icon { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
 .hub-content { width: min(1400px, calc(100% - clamp(32px, 5vw, 96px))); margin: 0 auto; padding: clamp(24px, 5vw, 64px) 0; }
 .hub-section + .hub-section { margin-top: clamp(32px, 5vw, 56px); }
 .hub-section-header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
@@ -90,7 +91,6 @@ button { font: inherit; }
 .pokemon-pane-type, .pokemon-pane-profile { width: auto; max-width: 190px; min-width: 0; flex: 1 1 148px; }
 .pokemon-pane-source-toggle { display: flex; flex: none; gap: 5px; }
 .pokemon-pane-source-button.ant-btn { display: grid; place-items: center; width: 42px; height: 42px; border-color: #397c67; border-radius: 8px; color: #9edfc0; background: #10262a; font-size: 18px; }
-.pokemon-pane-source-button .gamepad-icon { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
 .pokemon-pane-source-button.ant-btn:hover { border-color: #72cda0; color: #e8f5ef; background: #1c5748; }
 .pokemon-pane-source-button.ant-btn.is-active { border-color: #8dffd0; color: #e8f5ef; background: #1c5748; box-shadow: inset 0 0 0 1px #8dffd055; }
 .pokemon-pane-header .ant-select .ant-select-clear { display: grid; place-items: center; width: 20px; height: 20px; margin-top: -10px; color: #e8f5ef !important; background: #10262a !important; opacity: 1; }

@@ -8,9 +8,9 @@
   "theme_color": "#102b30",
   "icons": [
     {
-      "src": "/emulator-hub-icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "/app-icon.png",
+      "sizes": "1254x1254",
+      "type": "image/png",
       "purpose": "any maskable"
     }
   ]

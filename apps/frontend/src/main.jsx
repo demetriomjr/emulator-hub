@@ -626,7 +626,10 @@ function App() {
     <div className="hub-layout" inert={activeSessions.length || profileGame || instancePicker || controlPanelOpen || pokemonHubOpen ? true : undefined}>
       <aside className="hub-sidebar" aria-label="Ações globais">
         <button className="hub-sidebar-action" type="button" aria-label="Configurar controles" title="Configurar controles" onClick={openControlPanel}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8h10M7 16h10M5 5h14v14H5zM9 8v8M15 8v8" /></svg>
+          <svg viewBox="0 0 24 24" className="control-configuration-icon" aria-hidden="true">
+            <path d="M7.1 8.5h9.8c1.5 0 2.8 1 3.2 2.45l1.08 4.15a2.35 2.35 0 0 1-4.08 2.1l-1.55-1.7H8.4l-1.55 1.7a2.35 2.35 0 0 1-4.08-2.1l1.08-4.15A3.3 3.3 0 0 1 7.1 8.5Z" />
+            <path d="M7.3 11.15v3.1M5.75 12.7h3.1M16.35 11.8h.01M18.25 13.65h.01" />
+          </svg>
         </button>
         {!isStandalone && <button className="hub-sidebar-action hub-sidebar-install" type="button" aria-label="Instalar no iPhone" title="Instalar no iPhone" onClick={() => setInstallHelpOpen(true)}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11M8 10l4 4 4-4M5 17v3h14v-3" /></svg>
@@ -638,8 +641,8 @@ function App() {
           <div className="boxes">
           <button className="box pokemon-hub-card" type="button" aria-label="Abrir Pokémon Hub" onClick={() => setPokemonHubOpen(true)}>
             <div className="cover">
+              <img className="cover-image" src="/pokemon-hub-icon.png" alt="Pokémon Hub" />
             </div>
-            <div className="title"><small>Pokémon Hub</small></div>
           </button>
           </div>
         </section>
@@ -793,7 +796,10 @@ function App() {
         <header className="player-header">
           <div className="player-global-controls">
             <button className="player-control-button" type="button" aria-label="Configurar controles" onClick={openControlPanel}>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8h10M7 16h10M5 5h14v14H5zM9 8v8M15 8v8" /></svg>
+              <svg viewBox="0 0 24 24" className="control-configuration-icon" aria-hidden="true">
+                <path d="M7.1 8.5h9.8c1.5 0 2.8 1 3.2 2.45l1.08 4.15a2.35 2.35 0 0 1-4.08 2.1l-1.55-1.7H8.4l-1.55 1.7a2.35 2.35 0 0 1-4.08-2.1l1.08-4.15A3.3 3.3 0 0 1 7.1 8.5Z" />
+                <path d="M7.3 11.15v3.1M5.75 12.7h3.1M16.35 11.8h.01M18.25 13.65h.01" />
+              </svg>
             </button>
             <button className="player-control-button" type="button" aria-label="Salvar estado" title="Salvar estado" onClick={() => broadcastPlayerMessage('emulator-hub:save-state')}>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5zM8 4v6h8V4M8 20v-6h8v6" /></svg>

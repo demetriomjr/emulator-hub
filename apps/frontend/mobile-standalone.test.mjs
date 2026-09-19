@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { access, readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 
 const frontend = new URL('./', import.meta.url)
@@ -11,7 +11,11 @@ test('declares the Hub as a standalone installable web app', async () => {
   assert.equal(manifest.name, 'Emulator Hub')
   assert.equal(manifest.start_url, '/')
   assert.equal(manifest.display, 'standalone')
+  assert.deepEqual(manifest.icons, [{ src: '/app-icon.png', sizes: '1254x1254', type: 'image/png', purpose: 'any maskable' }])
   assert.match(html, /rel="manifest" href="\/manifest\.webmanifest"/)
+  assert.match(html, /rel="icon" href="\/app-icon\.png" type="image\/png"/)
+  assert.match(html, /rel="apple-touch-icon" href="\/app-icon\.png"/)
+  await access(new URL('./public/app-icon.png', frontend))
 })
 
 test('blocks the Hub with rotate guidance until the narrow viewport becomes landscape', async () => {
