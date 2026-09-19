@@ -14,13 +14,17 @@ test('keeps a pending heartbeat behind every active session request', async () =
   const gate = module.createPokemonHubRequestGate()
   const first = deferred()
   const second = deferred()
-  void gate.run(() => first.promise)
-  void gate.run(() => second.promise)
+  const started = []
+  void gate.run(() => { started.push('first'); return first.promise })
+  void gate.run(() => { started.push('second'); return second.promise })
   let idle = false
   const waiting = gate.waitForIdle().then(() => { idle = true })
 
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(started, ['first'])
   first.resolve()
   await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(started, ['first', 'second'])
   assert.equal(idle, false)
   second.resolve()
   await waiting

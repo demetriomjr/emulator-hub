@@ -1,20 +1,22 @@
 export function createPokemonHubRequestGate() {
-  const active = new Set()
+  let tail = Promise.resolve()
+  let pending = 0
 
   return {
     run(request) {
       if (typeof request !== 'function') throw new TypeError('Pokemon Hub session request must be a function')
-      const promise = Promise.resolve().then(request)
-      active.add(promise)
-      void promise.finally(() => active.delete(promise)).catch(() => {})
+      pending += 1
+      const promise = tail.then(request, request)
+      tail = promise.catch(() => {})
+      void promise.finally(() => { pending -= 1 }).catch(() => {})
       return promise
     },
 
     async waitForIdle() {
-      while (active.size > 0) await Promise.allSettled([...active])
+      while (pending > 0) await tail
       return true
     },
 
-    isInFlight() { return active.size > 0 },
+    isInFlight() { return pending > 0 },
   }
 }

@@ -43,6 +43,7 @@ export default function PokemonHub({ onClose, closeSignal = 0 }) {
   const pokemonHubSnapshotTimerRef = useRef(null)
   const pokemonHubSnapshotsRef = useRef({})
   const pokemonHubPanesRef = useRef([])
+  const pokemonHubBusyRef = useRef(false)
   pokemonHubPanesRef.current = pokemonHubPanes
   const games = pokemonHubData?.games || []
   const { profilesByGame: saveProfilesByGame, saveProfileGames } = deriveSaveProfileCatalog(games)
@@ -236,6 +237,8 @@ export default function PokemonHub({ onClose, closeSignal = 0 }) {
   }
 
   async function submitStructuralPokemonHubPaneChange(nextPanes, incomingSource, { retainBusy = false } = {}) {
+    if (pokemonHubBusyRef.current) return false
+    pokemonHubBusyRef.current = true
     setPokemonHubBusy(true)
     setPokemonHubError('')
     setPokemonHubSnapshotStatus('')
@@ -270,6 +273,7 @@ export default function PokemonHub({ onClose, closeSignal = 0 }) {
       }
       session.version = candidate.revision + 1
       setPokemonHubSnapshotStatus('Snapshot sincronizado.')
+      pokemonHubPanesRef.current = nextPanes
       setPokemonHubPanes(nextPanes)
       commitSessionSnapshots(nextSnapshots)
       if (loadedSave) setSaveLayoutsBySource(current => ({ ...current, [loadedSave.key]: snapshotToSaveLayout(loadedSave.sourceSnapshot, loadedSave.layout) }))
@@ -280,7 +284,12 @@ export default function PokemonHub({ onClose, closeSignal = 0 }) {
       console.error('[Pokemon Hub] structural snapshot failed', { code: cause.code, message: cause.message })
       setPokemonHubError(cause.message)
       return false
-    } finally { if (!retainBusy) setPokemonHubBusy(false) }
+    } finally {
+      if (!retainBusy) {
+        pokemonHubBusyRef.current = false
+        setPokemonHubBusy(false)
+      }
+    }
   }
 
   function applyCanonicalSessionSnapshot(snapshot) {
@@ -290,7 +299,7 @@ export default function PokemonHub({ onClose, closeSignal = 0 }) {
     const next = {}
     for (const pane of snapshot.panes.slice(0, pokemonHubPanes.length)) {
       if (pane === null) continue
-      const key = pane.profile.type === 'hub-profile' ? `hub:${pane.profile.hubProfileId}` : saveSourceKey(pane.profile.gameId, session?.profileId)
+      const key = pane.profile.type === 'hub-profile' ? `hub:${pane.profile.hubProfileId}` : saveSourceKey(pane.profile.gameId, pane.profile.profileId)
       const existing = pokemonHubSnapshotsRef.current[key]
       if (!existing) continue
       const requested = canonicalPaneOccupancy(pane)
@@ -341,7 +350,8 @@ export default function PokemonHub({ onClose, closeSignal = 0 }) {
   }
 
   function selectPokemonHubPane(index, source) {
-    const result = choosePaneSource(pokemonHubPanes, index, source || null)
+    if (pokemonHubBusyRef.current) return
+    const result = choosePaneSource(pokemonHubPanesRef.current, index, source || null)
     if (result.error) { setPokemonHubError(result.error); return }
     if (source && !isCompletePaneSource(source)) return
     void submitStructuralPokemonHubPaneChange(result.panes, source)
@@ -357,7 +367,7 @@ export default function PokemonHub({ onClose, closeSignal = 0 }) {
 
   async function closePokemonHubPane(index) {
     try {
-      await submitStructuralPokemonHubPaneChange(removeWorkspacePane(pokemonHubPanes, index), null)
+      await submitStructuralPokemonHubPaneChange(removeWorkspacePane(pokemonHubPanesRef.current, index), null)
     } catch (cause) { setPokemonHubError(cause.message) }
   }
 

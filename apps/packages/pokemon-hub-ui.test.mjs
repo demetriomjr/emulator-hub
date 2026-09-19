@@ -28,3 +28,13 @@ test('choosing a source type leaves save and Hub profile selection explicit', as
   assert.match(packageSource, /onClick=\{\(\) => setSelectionDraft\(\{ kind: 'game' \}\)\}/)
   assert.match(packageSource, /onClick=\{\(\) => setSelectionDraft\(\{ kind: 'hub' \}\)\}/)
 })
+
+test('serializes structural source changes before constructing another workspace snapshot', async () => {
+  const packageSource = await readFile(packageFile, 'utf8')
+
+  assert.match(packageSource, /const pokemonHubBusyRef = useRef\(false\)/)
+  assert.match(packageSource, /if \(pokemonHubBusyRef\.current\) return false/)
+  assert.match(packageSource, /if \(pokemonHubBusyRef\.current\) return/)
+  assert.match(packageSource, /choosePaneSource\(pokemonHubPanesRef\.current, index, source \|\| null\)/)
+  assert.match(packageSource, /saveSourceKey\(pane\.profile\.gameId, pane\.profile\.profileId\)/)
+})
