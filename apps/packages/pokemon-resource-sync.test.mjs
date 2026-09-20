@@ -134,6 +134,19 @@ test('replaces an incomplete catalog with every expected local resource and mani
   })
 })
 
+test('normalizes a trailing slash before atomically replacing the catalog', async t => {
+  const directory = await fixture(t)
+
+  const result = await syncPokemonResources({
+    targetDirectory: `${directory}/`,
+    loadRecords: async () => [record],
+    download: async () => opaqueSprite(),
+  })
+
+  assert.deepEqual(result, { status: 'synchronized', count: 1 })
+  assert.equal(await getPokemonResourceCatalogStatus(`${directory}/`).then(({ status }) => status), 'complete')
+})
+
 test('preserves a complete catalog when explicit refresh cannot download a new catalog', async t => {
   const directory = await fixture(t)
   await writeCompleteCatalog(directory, 'previous-normal', 'previous-shiny')

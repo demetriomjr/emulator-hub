@@ -1,5 +1,5 @@
 import { access, mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import sharp from 'sharp'
 
 import { selectPokemonResources } from './pokemon-resource-catalog.mjs'
@@ -8,6 +8,11 @@ const SCHEMA_VERSION = 1
 export const SPRITE_NORMALIZATION_VERSION = 1
 const SPRITE_CANVAS_SIZE = 96
 const SPRITE_CONTENT_SIZE = 76
+
+function normalizeTargetDirectory(targetDirectory) {
+  if (typeof targetDirectory !== 'string' || targetDirectory.length === 0) throw new TypeError('Target directory is required')
+  return resolve(targetDirectory)
+}
 
 function manifestEntries(resources) {
   return resources.map(({ nationalDex, region, variant, sourceId, normalFile, shinyFile }) => ({ nationalDex, region, variant, sourceId, normalFile, shinyFile }))
@@ -47,6 +52,7 @@ function lockPath(targetDirectory) {
 }
 
 export async function getPokemonResourceCatalogStatus(targetDirectory) {
+  targetDirectory = normalizeTargetDirectory(targetDirectory)
   const count = await completeCatalog(targetDirectory)
   if (count != null) return { status: 'complete', count }
   return {
@@ -135,7 +141,7 @@ async function replaceDirectory(targetDirectory, stageDirectory) {
 }
 
 export async function syncPokemonResources({ targetDirectory, loadRecords, download, refresh = false } = {}) {
-  if (typeof targetDirectory !== 'string' || targetDirectory.length === 0) throw new TypeError('Target directory is required')
+  targetDirectory = normalizeTargetDirectory(targetDirectory)
   if (typeof loadRecords !== 'function') throw new TypeError('Record loader is required')
   if (typeof download !== 'function') throw new TypeError('Resource downloader is required')
 
