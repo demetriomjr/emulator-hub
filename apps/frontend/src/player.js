@@ -296,6 +296,12 @@ window.addEventListener('message', event => {
     gamepadInput?.update(gamepadBindings)
     return
   }
+  if (event.data?.type === 'emulator-hub:control-profile') {
+    const bindings = event.data.bindings
+    if (!bindings || typeof bindings !== 'object' || !Object.values(bindings).every(binding => binding && typeof binding.gamepad === 'string')) return
+    gamepadInput?.setBindings(bindings)
+    return
+  }
   if (event.data?.type === 'emulator-hub:reset') {
     window.EJS_emulator?.gameManager?.restart()
     return

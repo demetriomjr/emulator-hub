@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, test } from 'node:test'
@@ -30,6 +30,21 @@ test('returns and persists a complete default GBA control profile', async () => 
   updated.bindings['8'] = { keyboard: 'k', gamepad: 'BUTTON_4' }
   assert.deepEqual(await profiles.replace(updated), updated)
   assert.deepEqual(await createControlProfileStore({ dataPath }).get(), updated)
+})
+
+test('adds default L2 and R2 trigger bindings to an existing control profile', async () => {
+  const dataPath = await profilePath()
+  const legacy = structuredClone(defaultControlProfile)
+  delete legacy.triggerBindings
+  await mkdir(join(dataPath, '..'), { recursive: true })
+  await writeFile(dataPath, JSON.stringify(legacy), 'utf8')
+
+  const profile = await createControlProfileStore({ dataPath }).get()
+
+  assert.deepEqual(profile.triggerBindings, {
+    l2: 'LEFT_BOTTOM_SHOULDER',
+    r2: 'RIGHT_BOTTOM_SHOULDER',
+  })
 })
 
 test('rejects invalid control profiles without replacing the stored profile', async () => {

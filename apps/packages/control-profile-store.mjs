@@ -3,6 +3,11 @@ import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
 const inputIds = Object.freeze(['0', '2', '3', '4', '5', '6', '7', '8', '10', '11'])
+const triggerIds = Object.freeze(['l2', 'r2'])
+const defaultTriggerBindings = Object.freeze({
+  l2: 'LEFT_BOTTOM_SHOULDER',
+  r2: 'RIGHT_BOTTOM_SHOULDER',
+})
 
 export const defaultControlProfile = Object.freeze({
   version: 1,
@@ -20,6 +25,7 @@ export const defaultControlProfile = Object.freeze({
     10: Object.freeze({ keyboard: 'a', gamepad: 'LEFT_TOP_SHOULDER' }),
     11: Object.freeze({ keyboard: 's', gamepad: 'RIGHT_TOP_SHOULDER' }),
   }),
+  triggerBindings: defaultTriggerBindings,
 })
 
 export function createControlProfileStore({ dataPath }) {
@@ -117,7 +123,21 @@ function normalizeProfile(profile) {
     bindings[id] = { keyboard, gamepad }
   }
 
-  return { version: 1, name, system: 'gba', bindings }
+  const triggerBindings = normalizeTriggerBindings(profile.triggerBindings)
+  return { version: 1, name, system: 'gba', bindings, triggerBindings }
+}
+
+function normalizeTriggerBindings(value) {
+  if (value === undefined) return { ...defaultTriggerBindings }
+  if (!value || typeof value !== 'object' || Object.keys(value).length !== triggerIds.length || triggerIds.some(id => !(id in value))) throw profileError()
+
+  const bindings = {}
+  for (const id of triggerIds) {
+    const binding = normalizeValue(value[id])
+    if (!binding || binding.length > 64) throw profileError()
+    bindings[id] = binding
+  }
+  return bindings
 }
 
 function normalizeValue(value) {
@@ -125,7 +145,11 @@ function normalizeValue(value) {
 }
 
 function copyProfile(profile) {
-  return { ...profile, bindings: Object.fromEntries(Object.entries(profile.bindings).map(([id, binding]) => [id, { ...binding }])) }
+  return {
+    ...profile,
+    bindings: Object.fromEntries(Object.entries(profile.bindings).map(([id, binding]) => [id, { ...binding }])),
+    triggerBindings: { ...profile.triggerBindings },
+  }
 }
 
 function profileError() {

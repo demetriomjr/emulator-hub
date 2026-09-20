@@ -62,6 +62,22 @@ test('disconnect releases input while another controller holding the same bindin
   assert.deepEqual(events, [[0, 8, 1], [0, 8, 0]])
 })
 
+test('replaces gamepad bindings without restarting a running emulator', () => {
+  const events = []
+  const input = createEmulatorGamepadInput({
+    gamepad: { terminate: () => events.push('stop') },
+    gameManager: { simulateInput: (...args) => events.push(args) },
+  }, { 8: { gamepad: 'BUTTON_1' } })
+
+  input.update(['BUTTON_1'])
+  input.setBindings({ 8: { gamepad: 'BUTTON_2' } })
+  input.update(['BUTTON_2'])
+
+  assert.deepEqual(events, [
+    'stop', [0, 8, 0], [0, 8, 1], [0, 8, 0], [0, 8, 0], [0, 8, 1],
+  ])
+})
+
 test('player boot keeps backend controls authoritative and applies pre-start parent input', async () => {
   const source = (await readFile(new URL('../frontend/src/player.js', import.meta.url), 'utf8')).replace(/^import .+\r?\n/gm, '')
   const listeners = new Map()

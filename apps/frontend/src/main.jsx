@@ -12,6 +12,7 @@ import { isMobileLandscapeViewport, isNarrowPortraitViewport } from '../../packa
 import { shouldReloadForFrontendRevision } from '../../packages/frontend-revision.mjs'
 import { readFastForwardSpeed, writeFastForwardSpeed } from '../../packages/fast-forward-preference.mjs'
 import { createLocalRuntimeRecoveryStore } from '../../packages/local-runtime-recovery-store.mjs'
+import { createPlayerTriggerActions, playerTriggerActionOptions } from '../../packages/player-trigger-actions.mjs'
 import hubLayout from './hub-layout.json'
 import './styles.css'
 
@@ -37,6 +38,10 @@ const gbaControls = Object.freeze({
   start: { id: '3', label: 'START' },
   b: { id: '0', label: 'B' },
   a: { id: '8', label: 'A' },
+})
+const triggerControls = Object.freeze({
+  l2: { id: 'l2', label: 'L2' },
+  r2: { id: 'r2', label: 'R2' },
 })
 
 const fastForwardSpeeds = Object.freeze([1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5])
@@ -105,6 +110,18 @@ function ControlBinding({ control, profile, captureTarget, onCapture }) {
   </div>
 }
 
+function TriggerBinding({ trigger, profile, captureTarget, onCapture }) {
+  const captureId = `trigger:${trigger.id}`
+  const isCapturing = captureTarget?.id === captureId && captureTarget.kind === 'gamepad'
+
+  return <div className="trigger-binding">
+    <strong>{trigger.label}</strong>
+    <button type="button" className="binding-field" onClick={() => onCapture(captureId, 'gamepad')}>
+      {isCapturing ? 'Pressione no joystick' : formatGamepadBinding(profile.triggerBindings[trigger.id])}
+    </button>
+  </div>
+}
+
 function formatGamepadBinding(value) {
   const labels = {
     SELECT: 'Select',
@@ -136,6 +153,10 @@ function normalizeKeyboardKey(key) {
 }
 
 function setControlBinding(profile, id, kind, value) {
+  if (id.startsWith('trigger:')) {
+    const trigger = id.slice('trigger:'.length)
+    return { ...profile, triggerBindings: { ...profile.triggerBindings, [trigger]: value } }
+  }
   return {
     ...profile,
     bindings: {
@@ -156,11 +177,16 @@ function App() {
   const [controlError, setControlError] = useState('')
   const [controlSaving, setControlSaving] = useState(false)
   const [captureTarget, setCaptureTarget] = useState(null)
-  const [controlRevision, setControlRevision] = useState(0)
   const [pokemonHubOpen, setPokemonHubOpen] = useState(false)
   const [pokemonHubCloseSignal, setPokemonHubCloseSignal] = useState(0)
   const [fastForwardEnabled, setFastForwardEnabled] = useState(false)
   const [fastForwardSpeed, setFastForwardSpeed] = useState(() => readFastForwardSpeed(document.cookie))
+  const [l2TriggerAction, setL2TriggerAction] = useState('none')
+  const [r2TriggerAction, setR2TriggerAction] = useState('none')
+  const [triggerBindings, setTriggerBindings] = useState({
+    l2: 'LEFT_BOTTOM_SHOULDER',
+    r2: 'RIGHT_BOTTOM_SHOULDER',
+  })
   const [profileGame, setProfileGame] = useState(null)
   const [profilePickerPlacement, setProfilePickerPlacement] = useState(null)
   const [profilePurpose, setProfilePurpose] = useState('launch')
@@ -178,6 +204,20 @@ function App() {
   const [viewport, setViewport] = useState(readViewport)
   const playerShellRef = useRef(null)
   const profilePickerRequestRef = useRef(0)
+
+  useEffect(() => {
+    if (activeSessions.length) return
+    setL2TriggerAction('none')
+    setR2TriggerAction('none')
+  }, [activeSessions.length])
+
+  useEffect(() => {
+    let active = true
+    getControlProfile().then(profile => {
+      if (active) setTriggerBindings(profile.triggerBindings)
+    }).catch(() => {})
+    return () => { active = false }
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -330,6 +370,7 @@ function App() {
 
   useEffect(() => {
     if (!activeSessions.length) return
+    const triggerActions = createPlayerTriggerActions({ dispatch: broadcastPlayerMessage })
     const broadcast = bindings => {
       for (const frame of document.querySelectorAll('.player-grid iframe')) {
         frame.contentWindow?.postMessage({ type: 'emulator-hub:gamepad', bindings }, window.location.origin)
@@ -337,9 +378,13 @@ function App() {
     }
     // Poll the parent document so header clicks and focus in another emulator
     // do not silence controllers. A full snapshot also reaches newly loaded frames.
-    const poll = () => broadcast(controlPanelOpen || profileGame || instancePicker || document.hidden
-      ? []
-      : activeGamepadBindings(readGamepadSnapshot()))
+    const poll = () => {
+      const bindings = controlPanelOpen || profileGame || instancePicker || document.hidden
+        ? []
+        : activeGamepadBindings(readGamepadSnapshot())
+      triggerActions.update(bindings, { l2: l2TriggerAction, r2: r2TriggerAction }, triggerBindings)
+      broadcast(bindings)
+    }
     poll()
     const interval = window.setInterval(poll, 16)
     document.addEventListener('visibilitychange', poll)
@@ -348,7 +393,7 @@ function App() {
       document.removeEventListener('visibilitychange', poll)
       broadcast([])
     }
-  }, [activeSessions.length, controlPanelOpen, profileGame, instancePicker])
+  }, [activeSessions.length, controlPanelOpen, profileGame, instancePicker, l2TriggerAction, r2TriggerAction, triggerBindings])
 
   useEffect(() => {
     const message = { type: 'emulator-hub:fast-forward', enabled: fastForwardEnabled, speed: fastForwardSpeed }
@@ -579,6 +624,7 @@ function App() {
     try {
       const profile = await getControlProfile()
       setControlDraft(structuredClone(profile))
+      setTriggerBindings(profile.triggerBindings)
     } catch (cause) {
       setControlError(cause.message)
     }
@@ -595,7 +641,8 @@ function App() {
     try {
       const profile = await updateControlProfile(controlDraft)
       setControlDraft(structuredClone(profile))
-      setControlRevision(current => current + 1)
+      setTriggerBindings(profile.triggerBindings)
+      broadcastPlayerMessage('emulator-hub:control-profile', { bindings: profile.bindings })
       setCaptureTarget(null)
       setControlPanelOpen(false)
     } catch (cause) {
@@ -610,9 +657,9 @@ function App() {
     openProfilePicker(game, 'add-instance')
   }
 
-  function broadcastPlayerMessage(type) {
+  function broadcastPlayerMessage(type, payload = {}) {
     for (const frame of document.querySelectorAll('.player-grid iframe')) {
-      frame.contentWindow?.postMessage({ type }, window.location.origin)
+      frame.contentWindow?.postMessage({ type, ...payload }, window.location.origin)
     }
   }
 
@@ -699,6 +746,10 @@ function App() {
                   <ControlBinding control={gbaControls.a} profile={controlDraft} captureTarget={captureTarget} onCapture={startControlCapture} />
                 </div>
               </div>
+            </div>
+            <div className="trigger-bindings" aria-label="Atalhos de ação">
+              <TriggerBinding trigger={triggerControls.l2} profile={controlDraft} captureTarget={captureTarget} onCapture={startControlCapture} />
+              <TriggerBinding trigger={triggerControls.r2} profile={controlDraft} captureTarget={captureTarget} onCapture={startControlCapture} />
             </div>
             <button className="control-save" type="button" disabled={controlSaving || Boolean(captureTarget)} onClick={saveControlProfile}>{controlSaving ? 'Salvando...' : 'Salvar controles'}</button>
           </>}
@@ -821,6 +872,16 @@ function App() {
               }}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 1-2.3-5.7M20 4v7h-7" /></svg>
               </button>
+              <label className="trigger-action-control">L2
+                <select aria-label="Ação do L2" value={l2TriggerAction} onChange={event => setL2TriggerAction(event.target.value)}>
+                  {playerTriggerActionOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </label>
+              <label className="trigger-action-control">R2
+                <select aria-label="Ação do R2" value={r2TriggerAction} onChange={event => setR2TriggerAction(event.target.value)}>
+                  {playerTriggerActionOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </label>
             </div>
           </div>
           <div className="player-actions">
@@ -840,7 +901,7 @@ function App() {
         <div className={`player-panel player-panel-${activeSessions.length}`}>
           <div className="player-grid">
             {activeSessions.map(session => <iframe
-              key={`${session.gameId}:${session.profileId}:${controlRevision}`}
+              key={`${session.gameId}:${session.profileId}`}
               src={playerFrameUrl(session)}
               title="EmulatorJS"
               allow="fullscreen; gamepad"

@@ -46,7 +46,7 @@ export function createEmulatorGamepadInput(emulator, bindings) {
   // Bypass iframe-local polling and gamepadSelection. Once the core starts,
   // the hub becomes the sole gamepad input producer for every instance.
   emulator.gamepad.terminate()
-  const inputs = Object.entries(bindings).map(([id, binding]) => ({ id: Number(id), label: binding.gamepad, pressed: false }))
+  let inputs = Object.entries(bindings).map(([id, binding]) => ({ id: Number(id), label: binding.gamepad, pressed: false }))
   for (const input of inputs) emulator.gameManager.simulateInput(0, input.id, 0)
   const update = labels => {
     const active = new Set(labels)
@@ -57,5 +57,10 @@ export function createEmulatorGamepadInput(emulator, bindings) {
       input.pressed = pressed
     }
   }
-  return { update, release: () => update([]) }
+  const setBindings = bindings => {
+    update([])
+    inputs = Object.entries(bindings).map(([id, binding]) => ({ id: Number(id), label: binding.gamepad, pressed: false }))
+    for (const input of inputs) emulator.gameManager.simulateInput(0, input.id, 0)
+  }
+  return { update, release: () => update([]), setBindings }
 }

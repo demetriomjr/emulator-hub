@@ -192,6 +192,9 @@ button { font: inherit; }
 .gba-binding-8 { transform: translateY(-10px); }
 .binding-field { min-height: 28px; overflow: hidden; border: 1px solid #397c67; border-radius: 4px; padding: 5px 6px; color: #d8f8e7; background: #071316e8; box-shadow: 0 2px 8px #0005; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .binding-field:hover { background: #1b473d; }
+.trigger-bindings { display: flex; justify-content: center; gap: 18px; margin-top: 12px; }
+.trigger-binding { display: grid; gap: 5px; width: 160px; }
+.trigger-binding strong { color: #e8f5ef; font-size: 13px; text-align: center; }
 .control-save { width: 100%; min-height: 42px; margin-top: 18px; border: 0; border-radius: 0; color: #fff; background: #22b36f; font-weight: 650; cursor: pointer; }
 .control-save:disabled { opacity: .55; cursor: wait; }
 .player-overlay { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 0; background: #02090de6; overflow: hidden; }
@@ -206,14 +209,16 @@ button { font: inherit; }
 .player-grid iframe { display: block; min-width: 0; width: 100%; height: 100%; border: 0; background: #000; }
 .player-actions { display: flex; gap: 7px; }
 .player-global-controls, .fast-forward-control { display: flex; align-items: center; gap: 7px; }
+.trigger-action-control { display: flex; align-items: center; gap: 4px; color: #e8f5ef; font-size: 12px; }
 .player-control-button, .player-actions button { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid #a0dcc4a0; border-radius: 9px; color: white; background: #102b30e8; cursor: pointer; }
 .player-control-button:hover, .player-actions button:hover:not(:disabled) { background: #22624f; }
 .fast-forward-button { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 1px solid #a0dcc4a0; border-radius: 9px; color: #e8f5ef; background: #102b30e8; cursor: pointer; }
 .fast-forward-button:hover, .fast-forward-button.is-active { background: #22624f; }
 .fast-forward-button.is-active { border-color: #77e2af; color: #fff; }
-.fast-forward-button:focus-visible, .fast-forward-control select:focus-visible { outline: 3px solid #ddffe9; outline-offset: 2px; }
+.fast-forward-button:focus-visible, .fast-forward-control select:focus-visible, .trigger-action-control select:focus-visible { outline: 3px solid #ddffe9; outline-offset: 2px; }
 .fast-forward-button svg { width: 20px; height: 20px; fill: currentColor; }
 .fast-forward-control select { width: 58px; height: 36px; border: 1px solid #a0dcc4a0; border-radius: 9px; padding: 0 5px; color: #e8f5ef; background: #102b30e8; font-size: 12px; cursor: pointer; }
+.trigger-action-control select { width: 106px; height: 36px; border: 1px solid #a0dcc4a0; border-radius: 9px; padding: 0 5px; color: #e8f5ef; background: #102b30e8; font-size: 12px; cursor: pointer; }
 .global-reset-button { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 1px solid #a0dcc4a0; border-radius: 9px; color: #e8f5ef; background: #102b30e8; cursor: pointer; }
 .global-reset-button:hover { background: #22624f; }
 .global-reset-button:focus-visible { outline: 3px solid #ddffe9; outline-offset: 2px; }
