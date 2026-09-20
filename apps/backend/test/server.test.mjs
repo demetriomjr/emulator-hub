@@ -434,20 +434,55 @@ describe('hub backend HTTP contract', () => {
     assert.deepEqual(releases, [{ profileId: 'profile-may', sourceKey: 'hub:profile-a', workspaceId: 'session-a', sourceSessionId: 'source-session', leaseToken: 'lease-token' }])
   })
 
-  test('closes a non-empty session by validating the complete final snapshot', async () => {
+  test('flushes a cross-profile game source to its save before closing the session', async () => {
+    const fixture = await createFixture([])
+    const flushes = []
+    const releases = []
+    const source = { sourceKey: 'save:profile-sapphire:sapphire', sourceSessionId: 'source-session', leaseToken: 'lease-token' }
+    const server = createHubServer({
+      ...fixture,
+      pokemonHubSessionService: {
+        async close({ beforeClose }) {
+          await beforeClose([source])
+        },
+      },
+      pokemonHubSnapshotCoordinator: {
+        async release(request) { releases.push(request) },
+      },
+      pokemonHubSaveFlush: {
+        async flushExpiredLeases() {},
+        markDirty() {},
+        async flushSource(request) { flushes.push(request); return { status: 'flushed' } },
+      },
+    })
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+    liveServers.add(server)
+
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/profiles/profile-ruby/pokemon-hub/sessions/session-a`, { method: 'DELETE' })
+
+    assert.equal(response.status, 200)
+    assert.deepEqual(flushes, [{ profileId: 'profile-ruby', sourceKey: source.sourceKey }])
+    assert.deepEqual(releases, [{ profileId: 'profile-ruby', sourceKey: source.sourceKey, workspaceId: 'session-a', sourceSessionId: 'source-session', leaseToken: 'lease-token' }])
+  })
+
+  test('flushes every save source in a three-save session before releasing its leases', async () => {
     const fixture = await createFixture([])
     const closes = []
     const releases = []
     const flushes = []
-    const source = { sourceKey: 'save:profile-may:emerald', sourceSessionId: 'source-session-a', leaseToken: 'lease-a' }
+    const sources = [
+      { sourceKey: 'save:profile-ruby:ruby', sourceSessionId: 'source-session-a', leaseToken: 'lease-a' },
+      { sourceKey: 'save:profile-sapphire:sapphire', sourceSessionId: 'source-session-b', leaseToken: 'lease-b' },
+      { sourceKey: 'save:profile-emerald:emerald', sourceSessionId: 'source-session-c', leaseToken: 'lease-c' },
+    ]
     const snapshot = { revision: 4, panes: [null, null, null] }
     const server = createHubServer({
       ...fixture,
       pokemonHubSessionService: {
         async closeCanonicalSession(request) {
           closes.push(request)
-          await request.flushOutgoingSource(source)
-          await request.releaseSource(source)
+          for (const source of sources) await request.flushOutgoingSource(source)
+          for (const source of sources) await request.releaseSource(source)
           return { status: 'complete' }
         },
       },
@@ -471,8 +506,8 @@ describe('hub backend HTTP contract', () => {
 
     assert.equal(response.status, 200)
     assert.equal(await response.text(), '')
-    assert.deepEqual(flushes, [{ profileId: 'profile-may', sourceKey: source.sourceKey }])
-    assert.equal(releases.length, 1)
+    assert.deepEqual(flushes, sources.map(source => ({ profileId: 'profile-may', sourceKey: source.sourceKey })))
+    assert.deepEqual(releases, sources.map(source => ({ profileId: 'profile-may', sourceKey: source.sourceKey, workspaceId: 'session-a', sourceSessionId: source.sourceSessionId, leaseToken: source.leaseToken })))
     assert.equal(closes.length, 1)
     assert.equal(closes[0].profileId, 'profile-may')
     assert.equal(closes[0].sessionId, 'session-a')

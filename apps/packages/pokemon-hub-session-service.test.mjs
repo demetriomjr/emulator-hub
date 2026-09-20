@@ -309,13 +309,15 @@ test('emits correlated lifecycle logs for a canonical snapshot', async () => {
   assert.equal(events[0].context.sessionId, opened.sessionId)
 })
 
-test('commits a canonical snapshot without exposing lease internals and releases a closed source only after acceptance', async () => {
+test('flushes a cross-profile save before releasing it from a canonical session', async () => {
   const persistence = createMemoryRedisPersistence()
   const coordinator = createPokemonHubSnapshotCoordinator({ persistence, eventStore: createPokemonHubEventStore({ persistence }) })
   const service = createPokemonHubSessionService({ persistence, coordinator, newId: (() => { let value = 0; return () => `canonical-${++value}` })() })
+  const sapphireProfileId = 'profile-sapphire'
+  const sapphireSourceKey = 'save:profile-sapphire:emerald'
   await coordinator.adopt({
     profileId,
-    sourceKey,
+    sourceKey: sapphireSourceKey,
     sourceRevision: 1,
     adapter: 'gen3-gba-v1',
     slots: [
@@ -333,7 +335,7 @@ test('commits a canonical snapshot without exposing lease internals and releases
     snapshot: {
       revision: 0,
       panes: [
-        { pane: 0, profile: { type: 'save', profileId, gameId: 'emerald' }, party: [{ pokemonInstanceId: (await coordinator.getSnapshot({ profileId, sourceKey })).placements[0].pokemonInstanceId, slot: 0 }], boxes: [] },
+        { pane: 0, profile: { type: 'save', profileId: sapphireProfileId, gameId: 'emerald' }, party: [{ pokemonInstanceId: (await coordinator.getSnapshot({ profileId, sourceKey: sapphireSourceKey })).placements[0].pokemonInstanceId, slot: 0 }], boxes: [] },
         null,
         null,
       ],
@@ -350,13 +352,13 @@ test('commits a canonical snapshot without exposing lease internals and releases
   })
 
   assert.deepEqual(result, { status: 'accepted', dirtySourceKeys: [] })
-  assert.deepEqual(acquired, [sourceKey])
+  assert.deepEqual(acquired, [sapphireSourceKey])
   assert.deepEqual(released, [])
   assert.deepEqual(await service.syncCanonicalSnapshot({
     profileId, sessionId: opened.sessionId, idempotencyKey: 'canonical-open-close',
     snapshot: {
       revision: 0,
-      panes: [{ pane: 0, profile: { type: 'save', profileId, gameId: 'emerald' }, party: [{ pokemonInstanceId: (await coordinator.getSnapshot({ profileId, sourceKey })).placements[0].pokemonInstanceId, slot: 0 }], boxes: [] }, null, null],
+      panes: [{ pane: 0, profile: { type: 'save', profileId: sapphireProfileId, gameId: 'emerald' }, party: [{ pokemonInstanceId: (await coordinator.getSnapshot({ profileId, sourceKey: sapphireSourceKey })).placements[0].pokemonInstanceId, slot: 0 }], boxes: [] }, null, null],
     },
     acquireSource: async () => { throw new Error('must not reacquire') },
     flushOutgoingSource: async () => { throw new Error('must not flush') },
@@ -366,9 +368,9 @@ test('commits a canonical snapshot without exposing lease internals and releases
   const originalSync = coordinator.sync
   let heldUntilCommit = false
   coordinator.sync = async request => {
-    if (request.retiredSourceKeys?.includes(sourceKey)) {
+    if (request.retiredSourceKeys?.includes(sapphireSourceKey)) {
       await assert.rejects(
-        () => coordinator.acquire({ profileId, sourceKey, workspaceId: 'other-workspace' }),
+        () => coordinator.acquire({ profileId, sourceKey: sapphireSourceKey, workspaceId: 'other-workspace' }),
         { code: 'SOURCE_RESERVED' },
       )
       heldUntilCommit = true
@@ -390,8 +392,56 @@ test('commits a canonical snapshot without exposing lease internals and releases
 
   assert.deepEqual(closed, { status: 'accepted', dirtySourceKeys: [] })
   assert.equal(heldUntilCommit, true)
-  assert.deepEqual(released, [`flushed:${sourceKey}`, sourceKey])
+  assert.deepEqual(released, [`flushed:${sapphireSourceKey}`, sapphireSourceKey])
   assert.deepEqual(await service.getCanonicalSnapshot({ profileId, sessionId: opened.sessionId }), { revision: 2, panes: [null, null, null] })
+})
+
+test('closes a canonical session by flushing every cross-profile save before any release', async () => {
+  const persistence = createMemoryRedisPersistence()
+  const coordinator = {
+    async getSnapshot() { throw new Error('a closing session does not read source snapshots') },
+    async renew() {},
+    async release() {},
+    async sync() {},
+    async reconcileWorkspaceLeases() {},
+  }
+  const service = createPokemonHubSessionService({ persistence, coordinator })
+  const sessionId = 'close-all-saves'
+  const snapshot = { revision: 1, panes: [null, null, null] }
+  const idempotencyKey = 'close-all-saves-key'
+  const sources = [
+    { sourceId: 'ruby', sourceKey: 'save:profile-ruby:ruby', sourceSessionId: 'lease-ruby', leaseToken: 'token-ruby' },
+    { sourceId: 'sapphire', sourceKey: 'save:profile-sapphire:sapphire', sourceSessionId: 'lease-sapphire', leaseToken: 'token-sapphire' },
+    { sourceId: 'emerald', sourceKey: 'save:profile-emerald:emerald', sourceSessionId: 'lease-emerald', leaseToken: 'token-emerald' },
+  ]
+  await persistence.set(pokemonHubRedisKeys.session(profileId, sessionId), JSON.stringify({
+    schemaVersion: 3,
+    profileId,
+    sessionId,
+    version: 1,
+    canonicalSnapshot: snapshot,
+    expiresAt: Date.now() + 10_000,
+    state: 'closing',
+    sources,
+    close: { idempotencyKey, fingerprint: JSON.stringify(snapshot) },
+  }))
+  const actions = []
+
+  const result = await service.closeCanonicalSession({
+    profileId,
+    sessionId,
+    snapshot,
+    idempotencyKey,
+    acquireSource: async () => { throw new Error('a closing session does not acquire sources') },
+    flushOutgoingSource: async source => { actions.push(`flush:${source.sourceKey}`) },
+    releaseSource: async source => { actions.push(`release:${source.sourceKey}`) },
+  })
+
+  assert.deepEqual(result, { status: 'complete' })
+  assert.deepEqual(actions, [
+    ...sources.map(source => `flush:${source.sourceKey}`),
+    ...sources.map(source => `release:${source.sourceKey}`),
+  ])
 })
 
 test('closes a Hub pane through the canonical snapshot without attempting a save flush', async () => {

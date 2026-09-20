@@ -322,7 +322,7 @@ export function createPokemonHubSessionService({ persistence, coordinator, logge
         // A structural close is deliberately separate from a Pokemon move.  Its
         // flush therefore persists the previous authoritative source state
         // before this candidate changes durable pane membership.
-        for (const source of outgoing.filter(source => source.sourceKey.startsWith(`save:${profileId}:`))) {
+        for (const source of outgoing.filter(source => source.sourceKey.startsWith('save:'))) {
           trace.info('snapshot.canonical.source-flush-started', { profileId, sessionId, idempotencyKey, sourceKey: source.sourceKey })
           try { await flushOutgoingSource(source) } catch (error) {
             trace.error('snapshot.canonical.source-flush-failed', { profileId, sessionId, idempotencyKey, sourceKey: source.sourceKey, error: errorDetails(error) })
@@ -381,7 +381,7 @@ export function createPokemonHubSessionService({ persistence, coordinator, logge
         const dirtySourceKeys = desiredSources
           .filter(source => requested.has(source.sourceKey) && source.placements.some((placement, index) => placement.pokemonInstanceId !== baseSnapshots.get(source.sourceKey).placements[index].pokemonInstanceId))
           .map(source => source.sourceKey)
-          .filter(sourceKey => sourceKey.startsWith(`save:${profileId}:`))
+          .filter(sourceKey => sourceKey.startsWith('save:'))
         const response = { status: 'accepted', dirtySourceKeys: [...new Set(dirtySourceKeys)].sort() }
         await persistence.set(operationKeyValue, JSON.stringify({ fingerprint, response }), { NX: true })
         trace.info('snapshot.canonical.accepted', { profileId, sessionId, idempotencyKey, revision: session.version, dirtySourceKeys: response.dirtySourceKeys })

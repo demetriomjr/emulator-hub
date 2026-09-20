@@ -999,7 +999,7 @@ async function releasePokemonHubSessionSources(config, profileId, sessionId, sou
 }
 
 async function flushPokemonHubSessionSource(config, profileId, source, logger = config.pokemonHubLogger, generation) {
-  if (!source.sourceKey.startsWith(`save:${profileId}:`)) return
+  if (!source.sourceKey.startsWith('save:')) return
   logger.info('snapshot.http.save-flush-started', { profileId, sourceKey: source.sourceKey })
   try {
     const flushed = await config.pokemonHubSaveFlush.flushSource({ profileId, sourceKey: source.sourceKey, ...(generation === undefined ? {} : { generation }) })
