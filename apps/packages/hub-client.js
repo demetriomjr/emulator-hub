@@ -82,6 +82,30 @@ export async function updateControlProfile(profile) {
   return body
 }
 
+export async function listMacros() {
+  const body = await getJson('/api/macros')
+  if (!Array.isArray(body.macros)) throw new Error('Invalid macro response')
+  return body.macros
+}
+
+export async function saveMacro(macro) {
+  const response = await fetch('/api/macros', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(macro),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`)
+  return body.macro
+}
+
+export async function deleteMacro(id) {
+  const response = await fetch(`/api/macros/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`)
+  return body.macro
+}
+
 export async function getLaunch(id, profileId) {
   const parameters = new URLSearchParams({ profileId })
   return getJson(`/api/games/${encodeURIComponent(id)}/launch?${parameters}`)

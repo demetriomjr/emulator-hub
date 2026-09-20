@@ -390,3 +390,23 @@ button { font: inherit; }
   .trigger-action-control { flex-direction: column; gap: 2px; }
   .player-panel { grid-column: 2; grid-row: 1; align-self: stretch; justify-self: stretch; width: 100%; height: 100%; aspect-ratio: auto; border: 0; border-radius: 0; box-shadow: none; }
 }
+.profile-empty { margin: 14px 0; color: #98b9ad; }
+.macro-run-button span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.macro-play-icon, .macro-stop-icon { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.macro-actions-footer { display: flex; flex-direction: column; }
+.macro-actions-footer .profile-add { margin-top: 14px; }
+.macro-name-form { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+.macro-name-form > input { min-height: 42px; padding: 8px 12px; border: 1px solid #397c67; border-radius: 8px; color: #e8f5ef; background: #0d2026; }
+.macro-editor { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 12px; padding-top: 12px; }
+.macro-step-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; max-height: 40vh; overflow-y: auto; }
+.macro-step { display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid #397c67; border-radius: 8px; background: #0d2026; }
+.macro-step.dragging { opacity: .5; }
+.macro-step.drag-over { border-color: #22b36f; }
+.macro-step-drag { display: grid; place-items: center; width: 22px; height: 30px; flex: none; color: #98b9ad; cursor: grab; }
+.macro-step-index { min-width: 18px; color: #98b9ad; font-size: 12px; }
+.macro-step-remove { flex: none; }
+.macro-step-fields { display: flex; min-width: 0; flex: 1; flex-wrap: wrap; align-items: center; gap: 6px; }
+.macro-step-duration, .macro-step-delay { display: flex; align-items: center; gap: 6px; color: #98b9ad; font-size: 12px; }
+.macro-actions { display: flex; gap: 8px; }
+.macro-empty { color: #98b9ad; }
+.macro-error { margin: 0; color: #ffdada !important; }

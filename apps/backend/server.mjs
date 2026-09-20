@@ -12,6 +12,7 @@ import { createGameCatalogResponse } from '../packages/game-catalog-contract.mjs
 import { createRedisProfileStore } from '../packages/profile-store.mjs'
 import { createRedisControlProfileStore } from '../packages/control-profile-store.mjs'
 import { createRedisUserPreferencesStore } from '../packages/user-preferences-store.mjs'
+import { createRedisInputMacroStore } from '../packages/input-macro-store.mjs'
 import { createSaveStore } from '../packages/save-store.mjs'
 import { createSnapshotStore } from '../packages/snapshot-store.mjs'
 import { createContainerPipelineLogger } from '../packages/snapshot-telemetry.mjs'
@@ -98,6 +99,7 @@ export function createHubServer(options = {}) {
     profileStore: options.profileStore ?? createRedisProfileStore({ persistence }),
     controlProfileStore: options.controlProfileStore ?? createRedisControlProfileStore({ persistence }),
     userPreferencesStore: options.userPreferencesStore ?? createRedisUserPreferencesStore({ persistence }),
+    inputMacroStore: options.inputMacroStore ?? createRedisInputMacroStore({ persistence }),
     saveStore: options.saveStore ?? createSaveStore({ dataPath: options.savesPath ?? defaultSavesPath, eventBackupsPath: options.eventBackupsPath ?? join(options.backupsPath ?? join(dirname(options.savesPath ?? defaultSavesPath), 'backups'), 'gen3-events') }),
     snapshotStore: options.snapshotStore ?? createSnapshotStore({ dataPath: options.snapshotsPath ?? defaultSnapshotsPath }),
     pokemonHubStore: options.pokemonHubStore ?? createRedisPokemonHubStore({ persistence }),
@@ -246,6 +248,8 @@ async function handleRequest(request, response, config) {
   const oddsStateRoute = parseOddsStateRoute(route.pathname)
   const isControlProfileRoute = route.pathname === '/api/control-profile'
   const isUserPreferencesRoute = route.pathname === '/api/user-preferences'
+  const isMacrosRoute = route.pathname === '/api/macros'
+  const macroRoute = parseMacroRoute(route.pathname)
   const saveRoute = parseSaveRoute(route.pathname)
   const snapshotRoute = parseSnapshotRoute(route.pathname)
   const playerLeaseRoute = parsePlayerLeaseRoute(route.pathname)
@@ -289,6 +293,8 @@ async function handleRequest(request, response, config) {
     || (request.method === 'POST' && gameProfilesRoute)
     || (request.method === 'POST' && pokemonHubProfilesRoute)
     || ((request.method === 'PATCH' || request.method === 'DELETE') && pokemonHubProfileRoute)
+    || (request.method === 'POST' && isMacrosRoute)
+    || (request.method === 'DELETE' && macroRoute)
     || (request.method === 'PUT' && (isControlProfileRoute || saveRoute || snapshotRoute))
     || (request.method === 'DELETE' && snapshotRoute)
     || (request.method === 'PATCH' && isUserPreferencesRoute)
@@ -301,7 +307,7 @@ async function handleRequest(request, response, config) {
     || (isClientDiagnosticsRoute && request.method === 'POST')
     || ((isBackupRoute || isEventBatchRoute) && request.method === 'POST')
   if (!supportedMethod) {
-    response.setHeader('Allow', isBackupRoute || isEventBatchRoute ? 'POST' : isClientDiagnosticsRoute ? 'GET, POST' : isUserPreferencesRoute ? 'GET, PATCH' : pokemonHubSessionRoute ? pokemonHubSessionRoute.kind === 'detach' || pokemonHubSessionRoute.kind === 'close' ? 'DELETE' : 'POST' : pokemonHubRoute ? ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute.kind) ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'PATCH, DELETE' : pokemonHubProfilesRoute || gameProfilesRoute ? 'GET, POST' : snapshotRoute ? 'GET, PUT, DELETE' : saveRoute || isControlProfileRoute ? 'GET, PUT' : gameProfileRoute ? 'GET, PATCH, DELETE' : patchRoute ? 'GET' : isRomRoute ? 'GET, HEAD' : 'GET')
+    response.setHeader('Allow', isBackupRoute || isEventBatchRoute ? 'POST' : isClientDiagnosticsRoute ? 'GET, POST' : isUserPreferencesRoute ? 'GET, PATCH' : macroRoute ? 'DELETE' : isMacrosRoute ? 'GET, POST' : pokemonHubSessionRoute ? pokemonHubSessionRoute.kind === 'detach' || pokemonHubSessionRoute.kind === 'close' ? 'DELETE' : 'POST' : pokemonHubRoute ? ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute.kind) ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'PATCH, DELETE' : pokemonHubProfilesRoute || gameProfilesRoute ? 'GET, POST' : snapshotRoute ? 'GET, PUT, DELETE' : saveRoute || isControlProfileRoute ? 'GET, PUT' : gameProfileRoute ? 'GET, PATCH, DELETE' : patchRoute ? 'GET' : isRomRoute ? 'GET, HEAD' : 'GET')
     json(response, 405, { error: 'Method is not supported for this route.' })
     return
   }
@@ -349,6 +355,17 @@ async function handleRequest(request, response, config) {
   if (isControlProfileRoute) {
     if (request.method === 'GET') await getControlProfile(response, config)
     else await replaceControlProfile(request, response, config)
+    return
+  }
+
+  if (isMacrosRoute) {
+    if (request.method === 'GET') await listInputMacros(response, config)
+    else await saveInputMacro(request, response, config)
+    return
+  }
+
+  if (macroRoute) {
+    await deleteInputMacro(response, config, macroRoute.id)
     return
   }
 
@@ -503,6 +520,11 @@ function parseOddsStateRoute(pathname) {
   return match ? { gameId: match[1], profileId: match[2] } : null
 }
 
+function parseMacroRoute(pathname) {
+  const match = /^\/api\/macros\/([^/]+)$/.exec(pathname)
+  return match ? { id: match[1] } : null
+}
+
 async function handleGameProfiles(request, response, config, encodedGameId) {
   const entry = await findProfileGame(response, config, encodedGameId)
   if (entry === null) return
@@ -550,6 +572,43 @@ async function listProfiles(response, config, gameId) {
 
 async function getControlProfile(response, config) {
   json(response, 200, await config.controlProfileStore.get())
+}
+
+async function listInputMacros(response, config) {
+  json(response, 200, { macros: await config.inputMacroStore.list() })
+}
+
+async function saveInputMacro(request, response, config) {
+  let body
+  try {
+    body = await readJsonBody(request)
+  } catch (error) {
+    const status = error.code === 'REQUEST_BODY_TOO_LARGE' ? 413 : error.code === 'UNSUPPORTED_CONTENT_TYPE' ? 415 : 400
+    json(response, status, { error: error.message })
+    return
+  }
+
+  try {
+    json(response, 200, { macro: await config.inputMacroStore.save(body) })
+  } catch (error) {
+    if (error.code === 'INPUT_MACRO_INVALID') {
+      json(response, 400, { error: error.message })
+      return
+    }
+    throw error
+  }
+}
+
+async function deleteInputMacro(response, config, id) {
+  try {
+    json(response, 200, { macro: await config.inputMacroStore.delete(id) })
+  } catch (error) {
+    if (error.code === 'INPUT_MACRO_NOT_FOUND') {
+      json(response, 404, { error: error.message })
+      return
+    }
+    throw error
+  }
 }
 
 async function replaceControlProfile(request, response, config) {

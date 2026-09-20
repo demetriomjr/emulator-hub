@@ -25,6 +25,7 @@ import { playerThreadFallbackUrl, selectPlayerThreadMode } from '../../packages/
 import { createPlayerOriginStorageClient } from '../../packages/player-origin-storage-bridge.mjs'
 import { findGen3EncounterLayout } from '../../packages/pokemon-gen3-encounter.mjs'
 import { createShinyHuntPlayer } from '../../packages/shiny-hunt-player.mjs'
+import { buildMacroTimeline } from '../../packages/input-macro-simulator.mjs'
 
 const parameters = new URLSearchParams(location.search)
 const suppliedHubOrigin = parameters.get('hubOrigin')
@@ -152,6 +153,18 @@ const pendingRestoreRequests = new Map()
 const settledRestoreRequests = new Map()
 const oddsClock = createOddsManipulatorClock()
 oddsClock.install()
+let activeMacro = null
+
+const inputCoreIds = Object.freeze({
+  up: 4,
+  down: 5,
+  left: 6,
+  right: 7,
+  a: 8,
+  b: 0,
+  l: 10,
+  r: 11,
+})
 
 function loseLease() {
   if (leaseLost) return
@@ -161,6 +174,7 @@ function loseLease() {
   cloudRecoveryDeleteTimer = null
   if (localRecoveryDeleteTimer) window.clearTimeout(localRecoveryDeleteTimer)
   localRecoveryDeleteTimer = null
+  stopMacro()
   if (leaseHeartbeat) window.clearInterval(leaseHeartbeat)
   if (cloudSaveInterval) window.clearInterval(cloudSaveInterval)
   stopBatterySavePolling?.()
@@ -711,6 +725,33 @@ function loadEmulatorState() {
   return true
 }
 
+function stopMacro() {
+  if (!activeMacro) return
+  for (const timer of activeMacro.timers) window.clearTimeout(timer)
+  for (const input of activeMacro.heldInputs) window.EJS_emulator?.gameManager?.simulateInput(0, inputCoreIds[input], 0)
+  activeMacro = null
+}
+
+function runMacro(steps) {
+  if (shinyHuntPlayer?.isActive() || leaseLost || closeRequested) return
+  if (!Array.isArray(steps) || steps.length === 0) return
+  if (!window.EJS_emulator?.gameManager || !window.EJS_emulator.gameManager.simulateInput) return
+  stopMacro()
+  const timers = []
+  const heldInputs = new Set()
+  activeMacro = { timers, heldInputs }
+  for (const event of buildMacroTimeline({ id: 'run', name: 'run', steps, createdAt: 0, updatedAt: 0 })) {
+    const coreId = inputCoreIds[event.input]
+    if (coreId === undefined) continue
+    timers.push(window.setTimeout(() => {
+      if (!activeMacro) return
+      if (event.value === 1) heldInputs.add(event.input)
+      else heldInputs.delete(event.input)
+      window.EJS_emulator.gameManager.simulateInput(0, coreId, event.value)
+    }, event.at))
+  }
+}
+
 window.addEventListener('message', event => {
   if (event.origin !== hubOrigin) return
   const isClosePlayerMessage = event.data?.type === 'emulator-hub:close-player'
@@ -727,6 +768,7 @@ window.addEventListener('message', event => {
     if (event.data.sessionId !== sessionId || typeof event.data.huntId !== 'string') return
     void (async () => {
       if (huntAction === 'prepare') {
+        stopMacro()
         gamepadInput?.release()
         fastForwardRequest = { enabled: true, speed: 5 }
         applyFastForward()
@@ -816,6 +858,14 @@ window.addEventListener('message', event => {
       clientDiagnostics?.capture({ kind: 'odds-manipulator', message: accepted ? 'odds.soft-reset.clock-applied' : 'odds.soft-reset.clock-rejected', oddsResetCount: event.data.oddsResetCount ?? null, virtualTimestamp: event.data.virtualTimestamp ?? null, dateNow: Date.now(), managerReady: Boolean(window.EJS_emulator?.gameManager) })
     }
     void softResetEmulator(window.EJS_emulator?.gameManager)
+    return
+  }
+  if (event.data?.type === 'emulator-hub:macro-run') {
+    runMacro(event.data.steps)
+    return
+  }
+  if (event.data?.type === 'emulator-hub:macro-stop') {
+    stopMacro()
     return
   }
   if (event.data?.type === 'emulator-hub:save-state') {

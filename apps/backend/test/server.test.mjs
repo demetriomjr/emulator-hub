@@ -1805,6 +1805,48 @@ describe('hub backend HTTP contract', () => {
     assert.equal((await jsonResponse(stored)).preferences.muted, true)
   })
 
+  test('lists, saves and deletes input macros', async () => {
+    const { baseUrl } = await startFixture([])
+
+    const empty = await fetch(`${baseUrl}/api/macros`)
+    assert.equal(empty.status, 200)
+    assert.deepEqual(await jsonResponse(empty), { macros: [] })
+
+    const macro = {
+      id: 'macro-1',
+      name: 'Dash Combo',
+      steps: [{ id: 'step-1', input: 'up', action: 'press', delay: 0 }],
+      createdAt: 1780000000000,
+      updatedAt: 1780000000000,
+    }
+    const created = await fetch(`${baseUrl}/api/macros`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(macro),
+    })
+    assert.equal(created.status, 200)
+    const savedMacro = (await jsonResponse(created)).macro
+    assert.equal(savedMacro.id, 'macro-1')
+    assert.equal(savedMacro.name, 'Dash Combo')
+    assert.equal(savedMacro.createdAt, macro.createdAt)
+
+    const listed = await fetch(`${baseUrl}/api/macros`)
+    assert.deepEqual(await jsonResponse(listed), { macros: [savedMacro] })
+
+    const invalid = await fetch(`${baseUrl}/api/macros`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Broken', steps: [] }),
+    })
+    assert.equal(invalid.status, 400)
+
+    const deleted = await fetch(`${baseUrl}/api/macros/macro-1`, { method: 'DELETE' })
+    assert.equal(deleted.status, 200)
+    assert.deepEqual(await jsonResponse(deleted), { macro: savedMacro })
+
+    const missing = await fetch(`${baseUrl}/api/macros/macro-1`, { method: 'DELETE' })
+    assert.equal(missing.status, 404)
+
+    const after = await fetch(`${baseUrl}/api/macros`)
+    assert.deepEqual(await jsonResponse(after), { macros: [] })
+  })
+
   test('creates profiles and requires one for a launch', async () => {
     const rom = Buffer.from('profiled launch test rom')
     const { baseUrl } = await startFixture([{

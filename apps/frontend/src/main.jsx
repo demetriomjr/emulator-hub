@@ -2,7 +2,8 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { createRoot } from 'react-dom/client'
 import { ConfigProvider, Select } from 'antd'
-import { acquirePlayerLease, createProfile, deleteProfile as deleteProfileRequest, getControlProfile, getGames, getProfiles, getUserPreferences, releasePlayerLease, syncOddsResetCount, updateControlProfile, updateProfile, updateUserPreferences } from '../../packages/hub-client.js'
+import { acquirePlayerLease, createProfile, deleteProfile as deleteProfileRequest, getControlProfile, getGames, getProfiles, getUserPreferences, listMacros, releasePlayerLease, saveMacro as saveMacroRequest, syncOddsResetCount, updateControlProfile, updateProfile, updateUserPreferences } from '../../packages/hub-client.js'
+import { createMacro } from '../../packages/input-macro-simulator.mjs'
 import { activeGamepadBindings, readGamepadBinding, readGamepadSnapshot } from '../../packages/gamepad-input.mjs'
 import { createGamepadInputGate } from '../../packages/gamepad-input-gate.mjs'
 import { deliverPlayerInteractionLock } from '../../packages/player-interaction-lock-delivery.mjs'
@@ -32,6 +33,7 @@ import { ProfileEditor } from './profile-editor.jsx'
 import './styles.css'
 
 const PokemonHub = React.lazy(() => import('../../packages/pokemon-hub-ui.jsx'))
+const MacroEditor = React.lazy(() => import('../../packages/input-macro-simulator-ui.jsx'))
 
 // The Hub document owns the session lifecycle: every full load/F5 gets a new ID.
 // Player iframes receive that ID explicitly through their launch query string.
@@ -240,6 +242,12 @@ function App() {
   const [controlError, setControlError] = useState('')
   const [controlSaving, setControlSaving] = useState(false)
   const [captureTarget, setCaptureTarget] = useState(null)
+  const [macroModalOpen, setMacroModalOpen] = useState(false)
+  const [macros, setMacros] = useState([])
+  const [macroDraft, setMacroDraft] = useState(null)
+  const [macroError, setMacroError] = useState('')
+  const [macroSaving, setMacroSaving] = useState(false)
+  const [runningMacroId, setRunningMacroId] = useState(null)
   const [pokemonHubOpen, setPokemonHubOpen] = useState(false)
   const [pokemonHubCloseSignal, setPokemonHubCloseSignal] = useState(0)
   const [fastForwardEnabled, setFastForwardEnabled] = useState(false)
@@ -842,6 +850,7 @@ function App() {
 
   function startShinyHunt() {
     if (huntActiveRef.current || activeSessionsRef.current.length === 0) return
+    stopMacro()
     const sessions = activeSessionsRef.current.map(session => ({ ...session }))
     const participantKey = sessions.map(session => session.sessionId).join('|')
     const huntId = crypto.randomUUID()
@@ -1363,6 +1372,56 @@ function App() {
     configurePlayerFrame(frame, { type, sessionId })
   }
 
+  async function refreshMacros() {
+    try {
+      setMacros(await listMacros())
+      setMacroError('')
+    } catch (cause) {
+      setMacroError(cause.message)
+    }
+  }
+
+  function openMacroModal() {
+    setMacroModalOpen(true)
+    setMacroDraft(null)
+    void refreshMacros()
+  }
+
+  function closeMacroModal() {
+    setMacroModalOpen(false)
+    setMacroDraft(null)
+    stopMacro()
+  }
+
+  function runMacro(macro) {
+    if (huntActiveRef.current) return
+    for (const frame of document.querySelectorAll('.player-grid iframe')) {
+      configurePlayerFrame(frame, { type: 'emulator-hub:macro-run', steps: macro.steps })
+    }
+    setRunningMacroId(macro.id)
+  }
+
+  function stopMacro() {
+    for (const frame of document.querySelectorAll('.player-grid iframe')) {
+      configurePlayerFrame(frame, { type: 'emulator-hub:macro-stop' })
+    }
+    setRunningMacroId(null)
+  }
+
+  async function saveMacro() {
+    if (macroSaving || !macroDraft) return
+    setMacroSaving(true)
+    try {
+      await saveMacroRequest(macroDraft)
+      setMacroDraft(null)
+      await refreshMacros()
+    } catch (cause) {
+      setMacroError(cause.message)
+    } finally {
+      setMacroSaving(false)
+    }
+  }
+
   const activeProfileIds = new Set(activeSessions.map(session => `${session.gameId}:${session.profileId}`))
   const huntRunning = ['starting', 'resetting', 'pressing', 'inspecting', 'saving'].includes(huntStatus.phase)
   const huntFoundSession = activeSessions.find(session => session.sessionId === huntStatus.foundSessionId)
@@ -1426,6 +1485,44 @@ function App() {
       </section>
     </div>
     {profileEditorOpen && <ProfileEditor games={games} onCatalog={setGames} onSaved={handleGlobalProfileSaved} onClose={() => setProfileEditorOpen(false)} />}
+    {macroModalOpen && renderLayer(<div className="profile-overlay" role="dialog" aria-modal="true" aria-label="Macros">
+      <div className="profile-panel">
+        <header className="profile-header">
+          <h2>Macros</h2>
+          <button className="dialog-close" type="button" aria-label="Fechar macros" onClick={closeMacroModal}>×</button>
+        </header>
+        <div className="profile-body">
+          {macroDraft
+            ? <React.Suspense fallback={<p>Carregando editor...</p>}>
+              <form className="macro-name-form" onSubmit={event => { event.preventDefault(); void saveMacro() }}>
+                <input id="macro-name" aria-label="Nome da macro" placeholder="Nome da macro" value={macroDraft.name} onChange={event => setMacroDraft({ ...macroDraft, name: event.target.value })} maxLength="50" required disabled={macroSaving} />
+                <MacroEditor macro={macroDraft} onChange={setMacroDraft} onSave={() => void saveMacro()} error={macroError} />
+              </form>
+            </React.Suspense>
+            : <>
+              <div className="profile-list">
+                {macros.length === 0 && <p className="profile-empty">Nenhuma macro salva.</p>}
+                {macros.map(macro => {
+                  const isRunning = runningMacroId === macro.id
+                  return <div className="profile-row" key={macro.id}>
+                    <button className="profile-select macro-run-button" type="button" aria-label={isRunning ? `Parar macro ${macro.name}` : `Executar macro ${macro.name}`} onClick={() => { if (isRunning) stopMacro(); else runMacro(macro) }}>
+                      <span>{macro.name}</span>
+                      {isRunning
+                        ? <svg className="macro-stop-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10v10H7z" /></svg>
+                        : <svg className="macro-play-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l11 7-11 7z" /></svg>}
+                    </button>
+                  </div>})}
+              </div>
+              <div className="macro-actions-footer">
+                <button className="profile-add" type="button" aria-label="Adicionar macro" onClick={() => setMacroDraft(createMacro('Nova macro'))}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                </button>
+                {macroError && <p className="profile-error" role="alert">{macroError}</p>}
+              </div>
+            </>}
+        </div>
+      </div>
+    </div>)}
     {controlPanelOpen && renderLayer(<div className="profile-overlay" role="dialog" aria-modal="true" aria-label="Configurar controles">
       <div className="profile-panel control-panel">
         <header className="profile-header">
@@ -1565,6 +1662,9 @@ function App() {
               </button>
               <button className="player-control-button global-reset-button" type="button" aria-label="Hard Reset" title="Hard Reset" disabled={huntRunning} onClick={() => dispatchReset('emulator-hub:reset')}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v8M6.4 6.4a8 8 0 1 0 11.2 0" /></svg>
+              </button>
+              <button className="player-control-button" type="button" aria-label="Macros" title="Macros" onClick={openMacroModal}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5l7 7-7 7V5zm9 0h7v3h-7V5zm0 5h7v3h-7v-3zm0 5h7v3h-7v-3z" /></svg>
               </button>
             </div>
             <span className="player-header-separator" aria-hidden="true" />
