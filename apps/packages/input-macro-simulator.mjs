@@ -48,7 +48,7 @@ export const ACTION_LABELS = Object.freeze({
 export const DEFAULT_STEP = Object.freeze({
   input: InputType.A,
   action: ActionType.PRESS,
-  delay: 0,
+  delay: 1000,
 })
 
 export const INFINITE_DURATION = 0

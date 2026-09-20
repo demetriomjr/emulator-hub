@@ -10,7 +10,7 @@ test('macro editor is a self-contained list editor with the available inputs and
   assert.match(source, /export default function MacroEditor\(/)
   assert.match(source, /AVAILABLE_INPUTS\.map/)
   assert.match(source, /ACTION_TYPES\.map/)
-  assert.match(source, /INPUT_LABELS\[input\]/)
+  assert.match(source, /label: INPUT_ICONS\[input\]/)
   assert.match(source, /ACTION_LABELS\[action\]/)
 })
 
@@ -24,13 +24,16 @@ test('macro editor supports add, remove, and drag reorder of steps', async () =>
   assert.match(source, /onDrop/)
 })
 
-test('press and hold expose a duration field where zero means infinite while repeat shows a count', async () => {
+test('press hides duration while hold and repeat show a summarized placeholder and delay defaults to one second', async () => {
   const source = await readFile(packageFile, 'utf8')
 
-  assert.match(source, /step\.action === 'repeat' \? 'Times' : 'Duration \(ms\)'/)
   assert.match(source, /step\.action !== 'press' &&/)
   assert.match(source, /if \(action === 'press' && step\.duration !== 0\) next\.duration = undefined/)
-  assert.match(source, /0 = infinite/)
+  assert.match(source, /placeholder=\{durationPlaceholder\}/)
+  assert.match(source, /'Count'/)
+  assert.match(source, /'0 = infinite'/)
+  assert.match(source, /placeholder="Delay \(ms\)"/)
+  assert.match(source, /step\.delay \?\? 1000/)
 })
 
 test('save is exposed as a callback the backend persistence layer can receive', async () => {

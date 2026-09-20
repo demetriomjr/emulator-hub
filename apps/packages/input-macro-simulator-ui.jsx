@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { Button, InputNumber, Select } from 'antd'
 import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, DeleteOutlined, HolderOutlined, PlusOutlined } from '@ant-design/icons'
-import { ACTION_LABELS, ACTION_TYPES, AVAILABLE_INPUTS, INPUT_LABELS, InputType, addStep, reorderSteps, removeStep, updateStep } from './input-macro-simulator.mjs'
+import { ACTION_LABELS, ACTION_TYPES, AVAILABLE_INPUTS, InputType, addStep, reorderSteps, removeStep, updateStep } from './input-macro-simulator.mjs'
 
 const INPUT_ICONS = {
   [InputType.UP]: <ArrowUpOutlined />,
@@ -85,19 +85,16 @@ function MacroStepRow({ step, index, dragging, dragOver, onDragStart, onDragEnte
 }
 
 function StepField({ step, onChange }) {
-  const durationLabel = step.action === 'repeat' ? 'Times' : 'Duration (ms)'
-  const placeholder = step.action === 'repeat' ? 'Count' : step.action === 'hold' ? '0 = infinite' : ''
-  const durationMin = step.action === 'repeat' ? 1 : 0
-  const durationMax = step.action === 'repeat' ? 100 : 30000
+  const durationPlaceholder = step.action === 'repeat' ? 'Count' : step.action === 'hold' ? '0 = infinite' : ''
   return <div className="macro-step-fields">
-    <Select className="macro-input-select" aria-label="Input" value={step.input} onChange={input => onChange({ input })} options={AVAILABLE_INPUTS.map(input => ({ value: input, label: <span className="macro-input-option"><span className="macro-input-option-icon">{INPUT_ICONS[input]}</span>{INPUT_LABELS[input]}</span> }))} />
+    <Select className="macro-input-select" aria-label="Input" value={step.input} onChange={input => onChange({ input })} options={AVAILABLE_INPUTS.map(input => ({ value: input, label: INPUT_ICONS[input] }))} />
     <Select className="macro-action-select" aria-label="Action" value={step.action} onChange={action => {
       const next = { action }
       if (action === 'press' && step.duration !== 0) next.duration = undefined
+      if (action === 'hold' && step.duration == null) next.duration = 0
       onChange(next)
     }} options={ACTION_TYPES.map(action => ({ value: action, label: ACTION_LABELS[action] }))} />
-    {step.action !== 'press' && <span className="macro-step-duration"><label>{durationLabel}</label><InputNumber aria-label={durationLabel} min={durationMin} max={durationMax} value={step.duration} placeholder={placeholder} onChange={duration => onChange({ duration })} /></span>}
-    {step.action === 'press' && <span className="macro-step-duration"><label>Hold (ms)</label><InputNumber aria-label="Hold duration" min={0} max={30000} value={step.duration ?? null} placeholder="0 = infinite" onChange={duration => onChange({ duration: duration ?? undefined })} /></span>}
-    <span className="macro-step-delay"><label>Delay (ms)</label><InputNumber aria-label="Delay" min={0} max={10000} value={step.delay ?? 0} onChange={delay => onChange({ delay })} /></span>
+    {step.action !== 'press' && <span className="macro-step-duration"><InputNumber aria-label="Duration" min={step.action === 'repeat' ? 1 : 0} max={step.action === 'repeat' ? 100 : 30000} value={step.duration} placeholder={durationPlaceholder} onChange={duration => onChange({ duration })} /></span>}
+    <span className="macro-step-delay"><InputNumber aria-label="Delay" min={0} max={10000} value={step.delay ?? 1000} placeholder="Delay (ms)" onChange={delay => onChange({ delay })} /></span>
   </div>
 }

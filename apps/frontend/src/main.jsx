@@ -1486,7 +1486,7 @@ function App() {
     </div>
     {profileEditorOpen && <ProfileEditor games={games} onCatalog={setGames} onSaved={handleGlobalProfileSaved} onClose={() => setProfileEditorOpen(false)} />}
     {macroModalOpen && renderLayer(<div className="profile-overlay" role="dialog" aria-modal="true" aria-label="Macros">
-      <div className="profile-panel">
+      <div className="profile-panel macro-panel">
         <header className="profile-header">
           <h2>Macros</h2>
           <button className="dialog-close" type="button" aria-label="Fechar macros" onClick={closeMacroModal}>×</button>

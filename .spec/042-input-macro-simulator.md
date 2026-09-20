@@ -21,7 +21,7 @@ interface MacroStep {
   input: InputType;              // The input to simulate
   action: ActionType;            // How to execute the input
   duration?: number;             // For 'hold': 0 = infinite, otherwise ms (100-30000). For 'repeat': count (1-100). For 'press': 0 = infinite hold, omitted = short tap.
-  delay?: number;                // Delay before next step (ms), default 0
+  delay?: number;                // Delay before next step (ms), default 1000
 }
 ```
 
@@ -185,24 +185,26 @@ Invalid macro bodies return `400`; a missing macro on delete returns `404`.
 
 ### Visual Design
 - Dark green theme consistent with existing hub
-- Minimal list view showing only available options
-- Each step row: input icon + label, action badge, duration/delay, drag handle, remove button
+- Modal scales in width so the whole step row stacks horizontally without wrapping
+- Input selector shows a single compact glyph per button (one arrow or letter, no duplicated text)
+- Each step row: input glyph, action select, duration, delay, drag handle, remove button
+- Press once shows no duration control; hold/repeat duration uses a placeholder summary; delay defaults to 1000ms
 - Inline editing on click
 - Drag handle for reordering (☰ or ⋮⋮)
 
 ### Interactions
-1. **Add Step**: Click "Add Step" → appends new step with defaults (first input, 'press', no duration)
+1. **Add Step**: Click "Add Step" → appends new step with defaults (first input, 'press', no duration, 1000ms delay)
 2. **Edit Step**: Click step row → expands inline editor
 3. **Reorder**: Drag drag-handle to reorder
 4. **Remove**: Click remove button → immediate removal with undo toast
-4. **Save**: Click save → calls backend persistence
+5. **Save**: Click save → calls backend persistence
 
 ### Step Defaults
 ```typescript
 const DEFAULT_STEP: Omit<MacroStep, 'id'> = {
   input: 'a',
   action: 'press',
-  delay: 0
+  delay: 1000
 };
 ```
 

@@ -391,6 +391,13 @@ button { font: inherit; }
   .player-panel { grid-column: 2; grid-row: 1; align-self: stretch; justify-self: stretch; width: 100%; height: 100%; aspect-ratio: auto; border: 0; border-radius: 0; box-shadow: none; }
 }
 .profile-empty { margin: 14px 0; color: #98b9ad; }
+.macro-panel { width: min(760px, 100%); }
+.macro-panel .profile-list { max-height: none; }
+.macro-panel .profile-row { padding: 6px; border-bottom: 1px solid #397c67; background: #0d2026; }
+.macro-panel .profile-row:last-child { border-bottom: 0; }
+.macro-panel .profile-select { min-height: 0; padding: 10px 12px; background: transparent; }
+.macro-panel .profile-select:hover:not(:disabled) { background: #1b473d; }
+.macro-panel .macro-actions-footer { padding: 4px 6px; }
 .macro-run-button span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .macro-play-icon, .macro-stop-icon { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .macro-actions-footer { display: flex; flex-direction: column; }
@@ -405,7 +412,9 @@ button { font: inherit; }
 .macro-step-drag { display: grid; place-items: center; width: 22px; height: 30px; flex: none; color: #98b9ad; cursor: grab; }
 .macro-step-index { min-width: 18px; color: #98b9ad; font-size: 12px; }
 .macro-step-remove { flex: none; }
-.macro-step-fields { display: flex; min-width: 0; flex: 1; flex-wrap: wrap; align-items: center; gap: 6px; }
+.macro-step-fields { display: flex; min-width: 0; flex: 1; flex-wrap: nowrap; align-items: center; gap: 6px; }
+.macro-step-fields .ant-select { flex: none; }
+.macro-step-fields .ant-input-number { min-width: 96px; flex: none; }
 .macro-step-duration, .macro-step-delay { display: flex; align-items: center; gap: 6px; color: #98b9ad; font-size: 12px; }
 .macro-actions { display: flex; gap: 8px; }
 .macro-empty { color: #98b9ad; }
