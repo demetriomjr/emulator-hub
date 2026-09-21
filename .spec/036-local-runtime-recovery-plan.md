@@ -1,5 +1,7 @@
 # Local Runtime Recovery Implementation Plan
 
+> The save-pairing portions are superseded by `.spec/044-save-and-snapshot-revisions.md`.
+
 **Goal:** Preserve a 2.5-second local EmulatorJS recovery candidate and offer it only to the matching profile after interruption.
 
 **Architecture:** A reusable IndexedDB-backed package owns validated local bundle records. The iframe periodically flushes/captures and marks interruption; the React hub checks the candidate before obtaining a new lease and explicitly passes an approved bundle to the new iframe.

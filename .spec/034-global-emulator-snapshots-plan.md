@@ -1,5 +1,8 @@
 # Global emulator snapshots implementation plan
 
+> Superseded by `.spec/044-save-and-snapshot-revisions.md`; retain as historical
+> implementation record only.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Persist and restore one compatible raw EmulatorJS snapshot bundle per Save Profile and game across devices.

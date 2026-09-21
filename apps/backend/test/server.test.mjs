@@ -7,7 +7,9 @@ import { afterEach, describe, test } from 'node:test'
 
 import { bootstrapHubServer, createHubServer, createListenFailureDiagnostic } from '../server.mjs'
 import { createMemoryRedisPersistence } from '../../packages/redis-persistence.mjs'
-import { encodeSnapshotBundle } from '../../packages/emulator-snapshot.mjs'
+import { decodeSnapshotBundle, encodeSnapshotBundle } from '../../packages/emulator-snapshot.mjs'
+import { createCloudSaveSynchronizer } from '../../packages/cloud-save-sync.mjs'
+import { observeEmulatorSaveFiles } from '../../packages/emulator-save-events.mjs'
 import { createSaveStore } from '../../packages/save-store.mjs'
 import { createGamePatchLookup } from '../../packages/game-patches.mjs'
 
@@ -148,7 +150,7 @@ describe('hub backend HTTP contract', () => {
     assert.deepEqual(Buffer.from(await patchResponse.arrayBuffer()), ips)
   })
 
-  test('serves one lease-protected global snapshot slot from the launch descriptor', async () => {
+  test('serves one lease-protected state-only snapshot slot from the launch descriptor', async () => {
     const rom = Buffer.from('snapshot game')
     const { baseUrl } = await startFixture([{ id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom) }], { 'pokemon-red.gb': rom })
     const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Red' }) }))
@@ -161,14 +163,96 @@ describe('hub backend HTTP contract', () => {
     assert.equal((await fetch(`${baseUrl}${lease.body.snapshotUrl}`, { headers })).status, 404)
 
     const body = await encodeSnapshotBundle({
-      metadata: { profileId: profile.id, gameId: 'pokemon-red', core: 'gambatte', romSha256: sha256(rom), runtimeId: lease.body.runtimeId },
-      state: new Uint8Array([1]), save: new Uint8Array([2]),
+      metadata: { profileId: profile.id, gameId: 'pokemon-red', core: 'gambatte', romSha256: sha256(rom), runtimeId: lease.body.runtimeId, saveRevision: 0 },
+      state: new Uint8Array([1]),
     })
     const written = await fetch(`${baseUrl}${lease.body.snapshotUrl}`, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/vnd.emulator-hub.snapshot', 'If-Match': '*' }, body })
     assert.equal(written.status, 201)
     const read = await fetch(`${baseUrl}${lease.body.snapshotUrl}`, { headers })
     assert.equal(read.status, 200)
     assert.equal(read.headers.get('etag'), '"1"')
+    const decoded = await decodeSnapshotBundle(new Uint8Array(await read.arrayBuffer()))
+    assert.deepEqual([...decoded.state], [1])
+    assert.equal('save' in decoded, false)
+  })
+
+  test('simulates save events, snapshot upload, and close-time revision reconciliation across HTTP endpoints', async () => {
+    const rom = Buffer.from('save and snapshot flow fixture')
+    const { baseUrl } = await startFixture([{ id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom) }], { 'pokemon-red.gb': rom })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Red' }) }))
+    const firstLease = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'save-flow-one')
+
+    const leaseHeaders = lease => ({ Cookie: lease.cookie, 'X-Player-Session-Id': lease.sessionId, 'X-Player-Lease-Generation': String(lease.body.leaseGeneration) })
+    firstLease.sessionId = 'save-flow-one'
+    let headers = leaseHeaders(firstLease)
+    const saveUrl = `${baseUrl}${firstLease.body.saveUrl}`
+    const snapshotUrl = `${baseUrl}${firstLease.body.snapshotUrl}`
+    const cloudSave = createCloudSaveSynchronizer({
+      load: async () => {
+        const response = await fetch(saveUrl, { headers })
+        if (response.status === 404) return null
+        assert.equal(response.status, 200)
+        return { bytes: new Uint8Array(await response.arrayBuffer()), revision: Number(response.headers.get('etag').replaceAll('"', '')) }
+      },
+      upload: async (bytes, revision) => {
+        const response = await fetch(saveUrl, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/octet-stream', 'If-Match': revision === null ? '*' : `"${revision}"` }, body: bytes })
+        assert.equal(response.ok, true)
+        return response.json()
+      },
+      hash: async bytes => sha256(bytes),
+    })
+    await cloudSave.load()
+    let saveEvent
+    assert.equal(observeEmulatorSaveFiles({ on(name, handler) { assert.equal(name, 'saveSaveFiles'); saveEvent = handler } }, bytes => cloudSave.syncBytes(bytes)), true)
+
+    const firstSave = new Uint8Array([11, 22, 33])
+    await saveEvent(firstSave)
+    await saveEvent(firstSave)
+    const saveAfterEvent = await fetch(saveUrl, { headers })
+    assert.equal(saveAfterEvent.headers.get('etag'), '"1"')
+    assert.deepEqual([...new Uint8Array(await saveAfterEvent.arrayBuffer())], [...firstSave])
+
+    async function putSnapshot(state, expectedSnapshotRevision, saveRevision) {
+      const body = await encodeSnapshotBundle({
+        metadata: { profileId: profile.id, gameId: 'pokemon-red', core: 'gambatte', romSha256: sha256(rom), runtimeId: firstLease.body.runtimeId, saveRevision },
+        state: new Uint8Array(state),
+      })
+      return fetch(snapshotUrl, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/vnd.emulator-hub.snapshot', 'If-Match': expectedSnapshotRevision === null ? '*' : `"${expectedSnapshotRevision}"` }, body })
+    }
+    const firstSnapshotWrite = await putSnapshot([91, 92], null, cloudSave.getRevision())
+    assert.equal(firstSnapshotWrite.status, 201)
+    const saveAfterSnapshot = await fetch(saveUrl, { headers })
+    assert.deepEqual([...new Uint8Array(await saveAfterSnapshot.arrayBuffer())], [...firstSave], 'snapshot upload must not alter canonical .sav bytes')
+
+    await saveEvent(new Uint8Array([44, 55, 66]))
+    assert.equal(cloudSave.getRevision(), 2)
+    const release = async lease => fetch(`${baseUrl}/api/player-leases/${lease.sessionId}`, {
+      method: 'DELETE', headers: { Cookie: lease.cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profileId: profile.id, gameId: 'pokemon-red', generation: lease.body.leaseGeneration }),
+    })
+    assert.equal((await release(firstLease)).status, 200)
+
+    const secondLease = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'save-flow-two', firstLease.cookie)
+    secondLease.sessionId = 'save-flow-two'
+    secondLease.cookie = firstLease.cookie
+    headers = leaseHeaders(secondLease)
+    const discardedSnapshot = await fetch(`${baseUrl}${secondLease.body.snapshotUrl}`, { headers })
+    assert.equal(discardedSnapshot.status, 404, 'close must discard a snapshot older than the canonical save')
+
+    const secondSnapshotWrite = await putSnapshot([71, 72, 73], null, cloudSave.getRevision())
+    assert.equal(secondSnapshotWrite.status, 201)
+    assert.equal((await release(secondLease)).status, 200)
+
+    const thirdLease = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'save-flow-three', firstLease.cookie)
+    thirdLease.sessionId = 'save-flow-three'
+    thirdLease.cookie = firstLease.cookie
+    headers = leaseHeaders(thirdLease)
+    const retainedSnapshotResponse = await fetch(`${baseUrl}${thirdLease.body.snapshotUrl}`, { headers })
+    assert.equal(retainedSnapshotResponse.status, 200, 'close must retain a snapshot at the current save revision')
+    const retainedSnapshot = await decodeSnapshotBundle(new Uint8Array(await retainedSnapshotResponse.arrayBuffer()))
+    assert.deepEqual([...retainedSnapshot.state], [71, 72, 73])
+    assert.equal(retainedSnapshot.metadata.saveRevision, 2)
+    assert.equal('save' in retainedSnapshot, false)
   })
 
   test('fences a stale player session and rejects a foreign device while the lease is alive', async () => {

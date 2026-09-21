@@ -113,6 +113,7 @@ test('player boot keeps backend controls authoritative and applies pre-start par
     putEmulatorSnapshot: async () => ({ revision: 1 }),
     heartbeatPlayerLease: async () => {},
     createCloudSaveSynchronizer: () => ({ load: async () => null, restore: () => false, sync: async () => false }),
+    restoreSnapshotState: () => false,
     getClientDiagnosticsOptions: () => ({ enabled: false, sessionId: null }),
     createLocalRuntimeRecoveryStore: () => ({ markRuntimeBreak() {}, get: async () => null, put: async () => {}, clear() {} }),
     getEmulatorAudioContext: () => null,

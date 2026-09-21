@@ -3,8 +3,6 @@ import { mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promis
 import { dirname, join } from 'node:path'
 
 const maximumStateBytes = 32 * 1024 * 1024
-const maximumSaveBytes = 2 * 1024 * 1024
-
 export function createSnapshotStore({ dataPath, lockTimeoutMs = 5_000, lockRetryMs = 5, now = () => Date.now(), wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)) }) {
   const pending = new Map()
   const lockOptions = { lockTimeoutMs, lockRetryMs, now, wait }
@@ -14,10 +12,11 @@ export function createSnapshotStore({ dataPath, lockTimeoutMs = 5_000, lockRetry
     const paths = snapshotPaths(dataPath, profileId, gameId)
     let metadata
     try { metadata = JSON.parse(await readFile(paths.metadata, 'utf8')) } catch (error) { if (error.code === 'ENOENT') return null; throw error }
+    if (!Number.isInteger(metadata.saveRevision)) metadata.saveRevision = 0
     try {
-      const [state, save] = await Promise.all([readFile(join(paths.directory, metadata.stateFile)), readFile(join(paths.directory, metadata.saveFile))])
-      if (!validMetadata(metadata, state, save)) throw snapshotError('SNAPSHOT_PERSISTED_INVALID', 'Persisted snapshot is invalid.')
-      return { metadata, state: new Uint8Array(state), save: new Uint8Array(save) }
+      const state = await readFile(join(paths.directory, metadata.stateFile))
+      if (!validMetadata(metadata, state)) throw snapshotError('SNAPSHOT_PERSISTED_INVALID', 'Persisted snapshot is invalid.')
+      return { metadata, state: new Uint8Array(state) }
     } catch (error) {
       if (error.code === 'ENOENT') throw snapshotError('SNAPSHOT_PERSISTED_INVALID', 'Persisted snapshot is incomplete.')
       throw error
@@ -28,7 +27,7 @@ export function createSnapshotStore({ dataPath, lockTimeoutMs = 5_000, lockRetry
     return serialize(snapshotKey(profileId, gameId), async () => {
       const paths = snapshotPaths(dataPath, profileId, gameId)
       return withLock(paths.lock, async () => {
-        const { metadata: supplied, state, save } = validateBundle(bundle)
+        const { metadata: supplied, state } = validateBundle(bundle)
         const current = await get(profileId, gameId)
         if ((current === null && expectedRevision !== null) || (current !== null && expectedRevision !== current.metadata.revision)) throw snapshotError('SNAPSHOT_REVISION_CONFLICT', 'Snapshot revision does not match the current snapshot.')
         if (!Number.isInteger(fenceGeneration) || fenceGeneration < 0) throw snapshotError('SNAPSHOT_FENCE_INVALID', 'Snapshot fence generation is invalid.')
@@ -38,20 +37,17 @@ export function createSnapshotStore({ dataPath, lockTimeoutMs = 5_000, lockRetry
           ...supplied,
           revision,
           fenceGeneration,
+          saveRevision: supplied.saveRevision,
           byteLength: state.byteLength,
-          saveByteLength: save.byteLength,
           sha256: hash(state),
-          saveSha256: hash(save),
           createdAt: new Date().toISOString(),
           stateFile: `${gameId}.${revision}.state`,
-          saveFile: `${gameId}.${revision}.sav`,
         }
         await mkdir(paths.directory, { recursive: true })
         await writeAtomically(join(paths.directory, next.stateFile), state)
-        await writeAtomically(join(paths.directory, next.saveFile), save)
         await writeAtomically(paths.metadata, JSON.stringify(next))
         await removeOldFiles(paths.directory, current?.metadata, next)
-        return { revision, sha256: next.sha256, saveSha256: next.saveSha256, fenceGeneration }
+        return { revision, sha256: next.sha256, saveRevision: next.saveRevision, fenceGeneration }
       }, lockOptions)
     })
   }
@@ -79,7 +75,7 @@ export function createSnapshotStore({ dataPath, lockTimeoutMs = 5_000, lockRetry
         const current = await get(profileId, gameId)
         if (!current) return false
         await unlink(paths.metadata).catch(error => { if (error.code !== 'ENOENT') throw error })
-        await Promise.all([current.metadata.stateFile, current.metadata.saveFile].map(name => unlink(join(paths.directory, name)).catch(error => { if (error.code !== 'ENOENT') throw error })))
+        await Promise.all([current.metadata.stateFile, current.metadata.saveFile].filter(Boolean).map(name => unlink(join(paths.directory, name)).catch(error => { if (error.code !== 'ENOENT') throw error })))
         return true
       }, lockOptions)
     })
@@ -95,25 +91,25 @@ export function createSnapshotStore({ dataPath, lockTimeoutMs = 5_000, lockRetry
 }
 
 function validateBundle(bundle) {
-  if (!bundle || typeof bundle !== 'object' || !(bundle.state instanceof Uint8Array) || !(bundle.save instanceof Uint8Array)) throw snapshotError('SNAPSHOT_INVALID', 'Snapshot bundle is invalid.')
+  if (!bundle || typeof bundle !== 'object' || !(bundle.state instanceof Uint8Array)) throw snapshotError('SNAPSHOT_INVALID', 'Snapshot bundle is invalid.')
   if (bundle.state.byteLength === 0 || bundle.state.byteLength > maximumStateBytes) throw snapshotError('SNAPSHOT_INVALID', 'Snapshot state bytes are invalid.')
-  if (bundle.save.byteLength === 0 || bundle.save.byteLength > maximumSaveBytes) throw snapshotError('SNAPSHOT_INVALID', 'Snapshot save bytes are invalid.')
   const metadata = bundle.metadata
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) throw snapshotError('SNAPSHOT_INVALID', 'Snapshot metadata is invalid.')
   for (const key of ['core', 'romSha256', 'runtimeId']) if (typeof metadata[key] !== 'string' || metadata[key].length === 0) throw snapshotError('SNAPSHOT_INVALID', `Snapshot metadata ${key} is invalid.`)
   if (!/^[a-f0-9]{64}$/.test(metadata.romSha256)) throw snapshotError('SNAPSHOT_INVALID', 'Snapshot ROM hash is invalid.')
-  return { metadata: { core: metadata.core, romSha256: metadata.romSha256, runtimeId: metadata.runtimeId }, state: bundle.state, save: bundle.save }
+  if (!Number.isInteger(metadata.saveRevision) || metadata.saveRevision < 0) throw snapshotError('SNAPSHOT_INVALID', 'Snapshot save revision is invalid.')
+  return { metadata: { core: metadata.core, romSha256: metadata.romSha256, runtimeId: metadata.runtimeId, saveRevision: metadata.saveRevision }, state: bundle.state }
 }
 
-function validMetadata(metadata, state, save) {
+function validMetadata(metadata, state) {
   return metadata && Number.isInteger(metadata.revision) && metadata.revision > 0
     && Number.isInteger(metadata.fenceGeneration) && metadata.fenceGeneration >= 0
     && Number.isInteger(metadata.byteLength) && metadata.byteLength === state.byteLength
-    && Number.isInteger(metadata.saveByteLength) && metadata.saveByteLength === save.byteLength
-    && typeof metadata.stateFile === 'string' && typeof metadata.saveFile === 'string'
+    && Number.isInteger(metadata.saveRevision) && metadata.saveRevision >= 0
+    && typeof metadata.stateFile === 'string'
     && typeof metadata.core === 'string' && typeof metadata.runtimeId === 'string'
     && /^[a-f0-9]{64}$/.test(metadata.romSha256 ?? '')
-    && metadata.sha256 === hash(state) && metadata.saveSha256 === hash(save)
+    && metadata.sha256 === hash(state)
 }
 
 function snapshotPaths(dataPath, profileId, gameId) {

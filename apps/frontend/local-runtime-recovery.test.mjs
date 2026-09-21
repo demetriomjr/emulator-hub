@@ -2,9 +2,10 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 
-test('captures a local complete recovery bundle every 2.5 seconds and preserves it on lease loss', async () => {
+test('captures local recovery state only every 2.5 seconds and preserves it on lease loss', async () => {
   const player = await readFile(new URL('./src/player.js', import.meta.url), 'utf8')
-  assert.match(player, /manager\.saveSaveFiles\?\.\(\)[\s\S]*manager\.getSaveFile\?\.\(\)[\s\S]*manager\.getState\?\.\(\)/)
+  assert.match(player, /async function captureLocalRecovery\(\)[\s\S]*?manager\.getState\?\.\(\)[\s\S]*?localRecoveryStore\.put\([\s\S]*?state: new Uint8Array\(state\)\s*\}\)/)
+  assert.doesNotMatch(player, /manager\.saveSaveFiles\?\.\(\)|manager\.getSaveFile\?\.\(\)|localRecovery\.save/)
   assert.match(player, /window\.setInterval\(\(\) => void captureLocalRecovery\(\), 2_500\)/)
   assert.match(player, /markRuntimeBreak\(profileId, id\)/)
   assert.match(player, /addEventListener\('pagehide'/)
@@ -19,8 +20,8 @@ test('offers a matching recovery candidate before acquiring a new lease and supp
   assert.match(hub, /recoveryCandidate && <div className="profile-overlay"/)
 })
 
-test('clears local recovery on every normal close path, even when cloud synchronization fails', async () => {
+test('clears local recovery after successful close synchronization and preserves it on failure', async () => {
   const hub = await readFile(new URL('./src/main.jsx', import.meta.url), 'utf8')
-  assert.match(hub, /flushPlayerSave\(frame\)\.finally\(\(\) => clearPlayerRecovery\(frame\)\)/)
+  assert.match(hub, /flushPlayerSave\(frame\)\.then\(\(\) => clearPlayerRecovery\(frame\)\)/)
   assert.match(hub, /else void closePlayer\(\)/)
 })

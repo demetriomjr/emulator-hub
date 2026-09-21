@@ -4,24 +4,24 @@ const maximumSaveBytes = 2 * 1024 * 1024
 const encoder = new TextEncoder()
 const decoder = new TextDecoder('utf-8', { fatal: true })
 
-export async function encodeSnapshotBundle({ metadata, state, save }) {
+export async function encodeSnapshotBundle({ metadata, state }) {
   const stateBytes = requireBytes(state, 'Snapshot state')
-  const saveBytes = requireBytes(save, 'Snapshot save')
-  validateLengths(stateBytes, saveBytes)
+  validateStateLength(stateBytes)
+  const snapshotMetadata = { ...validateMetadata(metadata) }
+  delete snapshotMetadata.saveByteLength
+  delete snapshotMetadata.saveSha256
+  delete snapshotMetadata.saveFile
   const header = {
-    ...validateMetadata(metadata),
+    ...snapshotMetadata,
     stateByteLength: stateBytes.byteLength,
-    saveByteLength: saveBytes.byteLength,
     sha256: await sha256(stateBytes),
-    saveSha256: await sha256(saveBytes),
   }
   const headerBytes = encoder.encode(JSON.stringify(header))
   if (headerBytes.byteLength === 0 || headerBytes.byteLength > maximumHeaderBytes) throw snapshotError('SNAPSHOT_HEADER_INVALID', 'Snapshot metadata is too large.')
-  const result = new Uint8Array(4 + headerBytes.byteLength + stateBytes.byteLength + saveBytes.byteLength)
+  const result = new Uint8Array(4 + headerBytes.byteLength + stateBytes.byteLength)
   new DataView(result.buffer, result.byteOffset, 4).setUint32(0, headerBytes.byteLength)
   result.set(headerBytes, 4)
   result.set(stateBytes, 4 + headerBytes.byteLength)
-  result.set(saveBytes, 4 + headerBytes.byteLength + stateBytes.byteLength)
   return result
 }
 
@@ -33,16 +33,19 @@ export async function decodeSnapshotBundle(bundle) {
   let metadata
   try { metadata = JSON.parse(decoder.decode(bytes.subarray(4, 4 + headerLength))) } catch { throw snapshotError('SNAPSHOT_ENVELOPE_INVALID', 'Snapshot envelope metadata is invalid.') }
   validateMetadata(metadata)
-  if (!Number.isInteger(metadata.stateByteLength) || !Number.isInteger(metadata.saveByteLength)) throw snapshotError('SNAPSHOT_ENVELOPE_INVALID', 'Snapshot envelope lengths are invalid.')
+  if (!Number.isInteger(metadata.stateByteLength)) throw snapshotError('SNAPSHOT_ENVELOPE_INVALID', 'Snapshot envelope lengths are invalid.')
+  const legacySaveLength = Number.isInteger(metadata.saveByteLength) ? metadata.saveByteLength : 0
   const payloadStart = 4 + headerLength
-  const expectedLength = payloadStart + metadata.stateByteLength + metadata.saveByteLength
+  const expectedLength = payloadStart + metadata.stateByteLength + legacySaveLength
   if (expectedLength !== bytes.byteLength) throw snapshotError('SNAPSHOT_ENVELOPE_INVALID', 'Snapshot envelope length does not match its metadata.')
   const state = bytes.slice(payloadStart, payloadStart + metadata.stateByteLength)
-  const save = bytes.slice(payloadStart + metadata.stateByteLength)
-  validateLengths(state, save)
-  if (!isHash(metadata.sha256) || !isHash(metadata.saveSha256)) throw snapshotError('SNAPSHOT_ENVELOPE_INVALID', 'Snapshot envelope hashes are invalid.')
-  if (await sha256(state) !== metadata.sha256 || await sha256(save) !== metadata.saveSha256) throw snapshotError('SNAPSHOT_HASH_INVALID', 'Snapshot bundle hash does not match its bytes.')
-  return { metadata, state, save }
+  validateStateLength(state)
+  if (legacySaveLength > maximumSaveBytes) throw snapshotError('SNAPSHOT_ENVELOPE_INVALID', 'Legacy snapshot save length is invalid.')
+  if (legacySaveLength > 0 && (!isHash(metadata.saveSha256) || await sha256(bytes.subarray(payloadStart + metadata.stateByteLength)) !== metadata.saveSha256)) throw snapshotError('SNAPSHOT_HASH_INVALID', 'Legacy snapshot bundle hash does not match its bytes.')
+  metadata = { ...metadata, saveRevision: Number.isInteger(metadata.saveRevision) ? metadata.saveRevision : 0 }
+  if (!isHash(metadata.sha256)) throw snapshotError('SNAPSHOT_ENVELOPE_INVALID', 'Snapshot envelope hashes are invalid.')
+  if (await sha256(state) !== metadata.sha256) throw snapshotError('SNAPSHOT_HASH_INVALID', 'Snapshot state hash does not match its bytes.')
+  return { metadata, state }
 }
 
 function validateMetadata(metadata) {
@@ -52,6 +55,7 @@ function validateMetadata(metadata) {
   }
   if (!isHash(metadata.romSha256)) throw snapshotError('SNAPSHOT_METADATA_INVALID', 'Snapshot metadata ROM hash is invalid.')
   if (metadata.patchSha256 !== undefined && !isHash(metadata.patchSha256)) throw snapshotError('SNAPSHOT_METADATA_INVALID', 'Snapshot metadata patch hash is invalid.')
+  if (metadata.saveRevision !== undefined && (!Number.isInteger(metadata.saveRevision) || metadata.saveRevision < 0)) throw snapshotError('SNAPSHOT_METADATA_INVALID', 'Snapshot metadata save revision is invalid.')
   return metadata
 }
 
@@ -60,10 +64,7 @@ function requireBytes(value, label) {
   return value
 }
 
-function validateLengths(state, save) {
-  if (state.byteLength === 0 || state.byteLength > maximumStateBytes) throw snapshotError('SNAPSHOT_STATE_INVALID', 'Snapshot state bytes are outside the allowed size.')
-  if (save.byteLength === 0 || save.byteLength > maximumSaveBytes) throw snapshotError('SNAPSHOT_SAVE_INVALID', 'Snapshot save bytes are outside the allowed size.')
-}
+function validateStateLength(state) { if (state.byteLength === 0 || state.byteLength > maximumStateBytes) throw snapshotError('SNAPSHOT_STATE_INVALID', 'Snapshot state bytes are outside the allowed size.') }
 
 function isHash(value) { return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value) }
 

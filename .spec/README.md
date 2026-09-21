@@ -1,5 +1,7 @@
 # Specifications
 
+- [Spec 044 — Battery saves and independent emulator snapshots](044-save-and-snapshot-revisions.md): event-driven canonical `.sav` uploads, state-only snapshots, explicit restore choice, and close-time revision reconciliation.
+
 - [Spec 035 — Generation III regional transfer gates](035-generation-iii-regional-transfer-gates.md): save-level National Dex, regional-membership, and FireRed/LeafGreen Network Machine gates for Ruby, Sapphire, Emerald, FireRed, and LeafGreen Hub transfers.
 
 - [Spec 034 — Global emulator snapshots](034-global-emulator-snapshots.md): one authoritative cross-device EmulatorJS state per profile/game, atomic state-plus-save bundles, and preflight before engine startup.

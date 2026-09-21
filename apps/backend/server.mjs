@@ -103,7 +103,6 @@ export function createHubServer(options = {}) {
     gameSaveLeases,
     playerLeases: options.playerLeases ?? createPlayerLeaseCoordinator({ persistence, gameSaveLeases }),
   }
-  config.saveStore = invalidateSnapshotAfterSave(config.saveStore, config.snapshotStore)
   config.pokemonHubSnapshotCoordinator = options.pokemonHubSnapshotCoordinator ?? createPokemonHubSnapshotCoordinator({ persistence, eventStore: config.pokemonHubEventStore, logger: config.pokemonHubLogger, validatePlacementChange: createPokemonHubTransferPlacementPolicy(), gameSaveLeases: config.gameSaveLeases })
   const canCreatePokemonHubSessionService = ['getSnapshot', 'renew', 'release', 'sync', 'reconcileWorkspaceLeases'].every(method => typeof config.pokemonHubSnapshotCoordinator[method] === 'function')
   config.pokemonHubSessionService = options.pokemonHubSessionService ?? (canCreatePokemonHubSessionService
@@ -1098,7 +1097,7 @@ async function handleSnapshot(request, response, config, { profileId, gameId }) 
   if (request.method === 'GET') {
     const snapshot = await config.snapshotStore.get(profileId, gameId)
     if (!snapshot) return json(response, 404, { error: 'Snapshot was not found.' })
-    const bytes = await encodeSnapshotBundle({ metadata: { ...snapshot.metadata, profileId, gameId }, state: snapshot.state, save: snapshot.save })
+    const bytes = await encodeSnapshotBundle({ metadata: { ...snapshot.metadata, profileId, gameId }, state: snapshot.state })
     response.writeHead(200, { 'Cache-Control': 'no-store', 'Content-Length': bytes.length, 'Content-Type': 'application/vnd.emulator-hub.snapshot', ETag: `"${snapshot.metadata.revision}"`, 'X-Snapshot-Sha256': snapshot.metadata.sha256, 'X-Content-Type-Options': 'nosniff' })
     response.end(bytes)
     return
@@ -1446,17 +1445,6 @@ async function readJsonBody(request, maximumBytes = defaultJsonBodyMaximumBytes)
   }
 }
 
-function invalidateSnapshotAfterSave(saveStore, snapshotStore) {
-  return {
-    ...saveStore,
-    async put(profileId, gameId, bytes, expectedRevision, options) {
-      const saved = await saveStore.put(profileId, gameId, bytes, expectedRevision, options)
-      await snapshotStore.delete(profileId, gameId)
-      return saved
-    },
-  }
-}
-
 function parseSnapshotRoute(pathname) {
   const match = /^\/api\/profiles\/([^/]+)\/games\/([^/]+)\/snapshot$/.exec(pathname)
   return match ? { profileId: match[1], gameId: match[2] } : null
@@ -1500,7 +1488,15 @@ async function handlePlayerLease(request, response, config, route, searchParams)
   try {
     const input = { profileId: body.profileId, gameId: body.gameId, deviceId, sessionId: route.sessionId, generation: body.generation }
     if (route.kind === 'heartbeat') return json(response, 200, await config.playerLeases.renew(input))
-    if (route.kind === 'release') return json(response, 200, await config.playerLeases.release(input))
+    if (route.kind === 'release') {
+      await config.playerLeases.assertWrite(input)
+      const [save, snapshot] = await Promise.all([
+        config.saveStore.get(input.profileId, input.gameId),
+        config.snapshotStore.get(input.profileId, input.gameId),
+      ])
+      if (snapshot && snapshot.metadata.saveRevision < (save?.revision ?? 0)) await config.snapshotStore.delete(input.profileId, input.gameId)
+      return json(response, 200, await config.playerLeases.release(input))
+    }
     const entry = await findEntry(config, input.gameId)
     if (!entry) return json(response, 404, { error: 'Game was not found.' })
     if (await config.profileStore.get(entry.id, input.profileId) === null) return json(response, 404, { error: 'Profile was not found.' })

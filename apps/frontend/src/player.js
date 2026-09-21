@@ -1,5 +1,7 @@
 import { getCloudSave, getControlProfile, getEmulatorSnapshot, getPlayerLeaseLaunch, heartbeatPlayerLease, putCloudSave, putEmulatorSnapshot } from '../../packages/hub-client.js'
 import { createCloudSaveSynchronizer } from '../../packages/cloud-save-sync.mjs'
+import { observeEmulatorSaveFiles } from '../../packages/emulator-save-events.mjs'
+import { restoreSnapshotState } from '../../packages/emulator-snapshot-restore.mjs'
 import { createEmulatorGamepadInput } from '../../packages/gamepad-input.mjs'
 import { createClientDiagnostics, getClientDiagnosticsOptions } from '../../packages/client-diagnostics.mjs'
 import { getEmulatorAudioContext, installAudioResumeOnUserGesture } from '../../packages/mobile-audio-resume.mjs'
@@ -49,6 +51,9 @@ let gamepadInput = null
 let gamepadBindings = []
 let cloudSaveSynchronizer = null
 let cloudSaveInterval = null
+let pendingSaveSync = Promise.resolve()
+let snapshotCapture = null
+let latestSaveBytes = null
 let localRecoveryInterval = null
 let localRecoveryCapture = null
 let preserveLocalRecovery = false
@@ -84,10 +89,20 @@ async function hashSave(bytes) {
   return [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, '0')).join('')
 }
 
-async function synchronizeCloudSave() {
-  if (leaseLost || !cloudSaveSynchronizer || !window.EJS_emulator?.gameManager) return false
-  window.EJS_emulator.gameManager.saveSaveFiles?.()
-  return cloudSaveSynchronizer.sync(window.EJS_emulator.gameManager)
+function queueCloudSave(bytes) {
+  if (leaseLost || !cloudSaveSynchronizer || !(bytes instanceof Uint8Array) || bytes.byteLength === 0) return Promise.resolve(false)
+  const copy = new Uint8Array(bytes)
+  latestSaveBytes = copy
+  const upload = pendingSaveSync.then(() => cloudSaveSynchronizer.syncBytes(copy))
+  pendingSaveSync = upload.catch(() => {})
+  return upload
+}
+
+function watchBatterySaveChanges() {
+  const emulator = window.EJS_emulator
+  if (!emulator?.on || emulator.__hubSaveWatcher) return
+  emulator.__hubSaveWatcher = true
+  observeEmulatorSaveFiles(emulator, queueCloudSave)
 }
 
 async function captureLocalRecovery() {
@@ -95,12 +110,10 @@ async function captureLocalRecovery() {
   const manager = window.EJS_emulator?.gameManager
   if (!manager) return false
   localRecoveryCapture = (async () => {
-    manager.saveSaveFiles?.()
-    const save = manager.getSaveFile?.()
     const state = manager.getState?.()
-    if (!save || !state) return false
+    if (!state) return false
     if (leaseLost) return false
-    await localRecoveryStore.put({ profileId, gameId: id, core: launchDescriptor.core, romSha256: launchDescriptor.romSha256, runtimeId: launchDescriptor.runtimeId, ...(launchDescriptor.patchSha256 ? { patchSha256: launchDescriptor.patchSha256 } : {}), state: new Uint8Array(state), save: new Uint8Array(save) })
+    await localRecoveryStore.put({ profileId, gameId: id, core: launchDescriptor.core, romSha256: launchDescriptor.romSha256, runtimeId: launchDescriptor.runtimeId, ...(launchDescriptor.patchSha256 ? { patchSha256: launchDescriptor.patchSha256 } : {}), state: new Uint8Array(state) })
     return true
   })().finally(() => { localRecoveryCapture = null })
   return localRecoveryCapture
@@ -114,8 +127,6 @@ async function clearLocalRecovery() {
 
 window.emulatorHubClearLocalRecovery = clearLocalRecovery
 window.addEventListener('pagehide', () => { if (!preserveLocalRecovery) void clearLocalRecovery().catch(() => {}) })
-
-window.emulatorHubSyncSave = synchronizeCloudSave
 
 function hideContextMenuButton() {
   for (const button of game.querySelectorAll('button')) {
@@ -261,35 +272,50 @@ function applyFastForward() {
 }
 
 async function saveEmulatorState() {
+  if (snapshotCapture) return snapshotCapture
+  snapshotCapture = persistEmulatorState().finally(() => { snapshotCapture = null })
+  return snapshotCapture
+}
+
+async function persistEmulatorState() {
   const manager = window.EJS_emulator?.gameManager
   if (leaseLost || !manager || !launchDescriptor) return false
-  manager.saveSaveFiles?.()
-  await synchronizeCloudSave()
-  const save = manager.getSaveFile?.()
   const state = manager.getState?.()
-  if (!state || !save) throw new Error('Emulator snapshot bytes are unavailable.')
+  if (!state) throw new Error('Emulator snapshot bytes are unavailable.')
   const accepted = await putEmulatorSnapshot(launchDescriptor.snapshotUrl, {
-    metadata: { profileId, gameId: id, core: launchDescriptor.core, romSha256: launchDescriptor.romSha256, runtimeId: launchDescriptor.runtimeId, ...(launchDescriptor.patchSha256 ? { patchSha256: launchDescriptor.patchSha256 } : {}) },
-    state: new Uint8Array(state), save: new Uint8Array(save),
+    metadata: { profileId, gameId: id, core: launchDescriptor.core, romSha256: launchDescriptor.romSha256, runtimeId: launchDescriptor.runtimeId, saveRevision: cloudSaveSynchronizer.getRevision(), ...(launchDescriptor.patchSha256 ? { patchSha256: launchDescriptor.patchSha256 } : {}) },
+    state: new Uint8Array(state),
   }, snapshotRevision, { sessionId, generation: leaseGeneration })
   snapshotRevision = accepted.revision
-  savedSnapshot = { state: new Uint8Array(state), save: new Uint8Array(save) }
+  savedSnapshot = { state: new Uint8Array(state), saveRevision: cloudSaveSynchronizer.getRevision() }
   return true
 }
+
+async function closeEmulator() {
+  if (cloudSaveInterval) window.clearInterval(cloudSaveInterval)
+  if (localRecoveryInterval) window.clearInterval(localRecoveryInterval)
+  if (localRecoveryCapture) await localRecoveryCapture
+  await pendingSaveSync
+  if (latestSaveBytes) await queueCloudSave(latestSaveBytes)
+  await pendingSaveSync
+  if (snapshotCapture) await snapshotCapture.catch(() => {})
+  await saveEmulatorState()
+}
+
+window.emulatorHubClose = closeEmulator
 
 function loadEmulatorState() {
   if (!savedSnapshot) return false
   const manager = window.EJS_emulator?.gameManager
   if (!manager) return false
-  manager.FS.writeFile(manager.getSaveFilePath(), savedSnapshot.save)
-  manager.loadSaveFiles()
   manager.loadState(new Uint8Array(savedSnapshot.state))
   return true
 }
 
 window.addEventListener('message', event => {
   if (event.origin !== location.origin) return
-  if (event.source !== window.parent) return
+  const isClosePlayerMessage = event.data?.type === 'emulator-hub:close-player'
+  if (!isClosePlayerMessage && event.source !== window.parent) return
   if (event.data?.type === 'emulator-hub:gamepad') {
     if (!Array.isArray(event.data.bindings) || !event.data.bindings.every(value => typeof value === 'string')) return
     gamepadBindings = event.data.bindings
@@ -321,8 +347,8 @@ window.addEventListener('message', event => {
     applyFastForward()
     return
   }
-  if (event.data?.type === 'emulator-hub:sync-save') {
-    synchronizeCloudSave().then(
+  if (event.data?.type === 'emulator-hub:close-player') {
+    closeEmulator().then(
       () => window.parent.postMessage({ type: 'emulator-hub:save-synced', requestId: event.data.requestId, ok: true }, location.origin),
       error => window.parent.postMessage({ type: 'emulator-hub:save-synced', requestId: event.data.requestId, ok: false, error: error.message }, location.origin),
     )
@@ -365,7 +391,7 @@ async function start() {
     if (await hashSave(patchBytes) !== launch.patchSha256) throw new Error('Patch bytes did not match the launch descriptor.')
   }
   if (snapshot && (snapshot.metadata.profileId !== profileId || snapshot.metadata.gameId !== id || snapshot.metadata.core !== launch.core || snapshot.metadata.romSha256 !== launch.romSha256 || snapshot.metadata.runtimeId !== launch.runtimeId || snapshot.metadata.patchSha256 !== launch.patchSha256)) throw new Error('Snapshot is incompatible with this launch.')
-  savedSnapshot = snapshot ? { state: snapshot.state, save: snapshot.save } : null
+  savedSnapshot = snapshot ? { state: snapshot.state, saveRevision: snapshot.metadata.saveRevision } : null
   snapshotRevision = snapshot?.revision ?? null
   window.EJS_player = '#game'
   window.EJS_core = launch.core
@@ -437,11 +463,12 @@ async function start() {
     gamepadInput = createEmulatorGamepadInput(window.EJS_emulator, controlProfile.bindings)
     gamepadInput.update(gamepadBindings)
     if (localRecovery) {
-      window.EJS_emulator.gameManager.FS.writeFile(window.EJS_emulator.gameManager.getSaveFilePath(), localRecovery.save)
-      window.EJS_emulator.gameManager.loadSaveFiles()
       window.EJS_emulator.gameManager.loadState(new Uint8Array(localRecovery.state))
-    } else if (!loadEmulatorState()) cloudSaveSynchronizer.restore(window.EJS_emulator.gameManager)
-    cloudSaveInterval = window.setInterval(() => synchronizeCloudSave().catch(() => {}), 15000)
+    } else if (!restoreSnapshotState(savedSnapshot, window.EJS_emulator.gameManager, () => window.confirm('Há um snapshot deste perfil. Deseja restaurá-lo?'))) {
+      cloudSaveSynchronizer.restore(window.EJS_emulator.gameManager)
+    }
+    watchBatterySaveChanges()
+    cloudSaveInterval = window.setInterval(() => saveEmulatorState().catch(() => {}), 15000)
     localRecoveryInterval = window.setInterval(() => void captureLocalRecovery(), 2_500)
     void captureLocalRecovery()
     stopFrameProgressMonitor?.()

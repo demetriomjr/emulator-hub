@@ -2,10 +2,14 @@
 title: Global emulator snapshots
 date: 2026-09-18
 tags: [spec, emulator, snapshots, cross-device, save-state]
-status: proposed
+status: superseded
 ---
 
 # Spec 034 — Global emulator snapshots
+
+> Superseded for snapshot/save coupling and restore behavior by
+> [Spec 044](044-save-and-snapshot-revisions.md). The state-only snapshot and
+> explicit restore-choice contract in Spec 044 is authoritative.
 
 ## Goal
 

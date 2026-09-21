@@ -2,10 +2,14 @@
 title: Local runtime recovery snapshots
 date: 2026-09-19
 tags: [spec, emulator, recovery, indexeddb, saves]
-status: active
+status: amended
 ---
 
 # Spec 036 — Local runtime recovery snapshots
+
+> Amended by [Spec 044](044-save-and-snapshot-revisions.md): local recovery
+> records preserve emulator state only and never carry or restore `.sav` bytes.
+> Canonical battery saves follow the event-driven save revision contract.
 
 ## Goal
 
@@ -14,9 +18,8 @@ backend path or the browser is terminated unexpectedly. This is a local,
 per-browser recovery mechanism; it is separate from Spec 034's explicit,
 backend-authoritative cross-device snapshots.
 
-Every active player records a complete local recovery bundle every 2,500 ms.
-The bundle contains the current raw emulator state, the paired `.sav` bytes,
-and immutable launch compatibility metadata. It is never restored
+Every active player records local recovery state every 2,500 ms. The record
+contains raw emulator state and immutable launch compatibility metadata. It is never restored
 automatically. After a confirmed runtime break, or an unclean previous session,
 the next selection of the same game profile offers one recovery choice before
 acquiring a player lease.
@@ -38,7 +41,6 @@ fields:
   "romSha256": "verified ROM hash",
   "runtimeId": "emulatorjs-4.2.3",
   "state": "raw bytes",
-  "save": "raw bytes",
   "reason": "active | runtime-break | possible-recovery"
 }
 ```
@@ -52,17 +54,15 @@ replace the prior record.
 ## Capture lifecycle
 
 After `EJS_onGameStart`, the player starts a 2,500 ms capture timer. Each run
-serializes behind an in-flight capture, asks `gameManager.saveSaveFiles()` to
-flush the core, then reads `getSaveFile()` and `getState()`. It stores a copied
-complete local bundle only when both byte sources exist. Capture failures leave
+serializes behind an in-flight capture and reads `getState()` only. It stores a
+copied state record when state bytes exist. Capture failures leave
 the last valid bundle in place and do not close the player.
 
-The normal 15-second server save synchronization also flushes the core before
-it reads bytes. Its backend acknowledgement remains the only proof that a
-normal cloud save is synchronized.
+Canonical `.sav` uploads are driven by EmulatorJS `saveSaveFiles` events and
+are independent from this local state capture.
 
-An explicit normal close first attempts the existing server synchronization,
-then tells every iframe to delete its local recovery bundle before its lease is
+An explicit normal close drains canonical save and server snapshot writes,
+then tells every iframe to delete its local recovery state before its lease is
 released and the iframe is removed. Reload/pagehide also sends a best-effort
 delete. Browser lifecycle callbacks are not reliable: if deletion cannot finish
 before termination, a surviving `active` record is reclassified as
@@ -90,8 +90,8 @@ game, it displays a minimal modal:
 
 The actions are **Restore** and **Discard**. Restore passes the bundle only to
 the newly-created same-origin iframe through its launch URL/session context;
-the iframe validates identity/core/ROM/runtime metadata, writes the saved `.sav`,
-then loads the raw state after EmulatorJS starts. It cannot restore until the
+the iframe validates identity/core/ROM/runtime metadata and loads the raw state
+after EmulatorJS starts. It cannot restore until the
 new fenced lease has been acquired. Discard deletes the record and starts a
 normal session. A failed restore leaves the candidate available, reports the
 failure, and does not silently start a new game over it.
@@ -109,18 +109,16 @@ failure, and does not silently start a new game over it.
 
 ## Acceptance
 
-1. A running emulator persists a complete local state-plus-save bundle every
-   2,500 ms after the core starts.
+1. A running emulator persists local state only every 2,500 ms after the core starts.
 2. A forced lease/runtime failure preserves and marks the newest bundle without
    trying to upload or release through the unavailable backend.
 3. Normal close and page reload issue local deletion; a record left by an
    interrupted lifecycle is presented only as a possible recovery.
 4. Selecting the matching profile shows Restore/Discard before lease acquisition;
    another profile/game never sees the record.
-5. Restore requires a fresh lease, validates compatibility, applies its paired
-   `.sav` before raw state, and does not write the bundle to the backend.
+5. Restore requires a fresh lease, validates compatibility, loads state only,
+   and does not write any `.sav` bytes.
 6. Discard permanently removes only that profile/game record.
-7. A periodic cloud sync flushes the core before hashing/uploading its `.sav`.
-8. Focused package and frontend contract tests cover timer cadence, copying,
+7. Focused package and frontend contract tests cover timer cadence, copying,
    clean deletion, break classification, profile scoping, restore/discard, and
    no automatic restoration. No project build is run.

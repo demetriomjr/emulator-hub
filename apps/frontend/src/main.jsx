@@ -420,7 +420,7 @@ function App() {
     const result = await closePlayerAfterSaveAttempts({
       saveAttempts: activeSessions.map((session, index) => {
         const frame = document.querySelectorAll('.player-grid iframe')[index]
-        return Promise.resolve(frame ? flushPlayerSave(frame).finally(() => clearPlayerRecovery(frame)) : undefined).finally(() => releasePlayerLease(session.sessionId, { profileId: session.profileId, gameId: session.gameId, generation: session.leaseGeneration }).catch(() => {}))
+        return Promise.resolve(frame ? flushPlayerSave(frame).then(() => clearPlayerRecovery(frame)) : undefined).finally(() => releasePlayerLease(session.sessionId, { profileId: session.profileId, gameId: session.gameId, generation: session.leaseGeneration }).catch(() => {}))
       }),
       close: async () => {
         try {
@@ -438,19 +438,19 @@ function App() {
   function flushPlayerSave(frame) {
     return new Promise((resolve, reject) => {
       const requestId = `${Date.now()}-${Math.random()}`
-      const timeout = window.setTimeout(() => finish(new Error('tempo esgotado')), 5000)
+      let timeout = null
       const receive = event => {
         if (event.origin !== window.location.origin || event.source !== frame.contentWindow || event.data?.type !== 'emulator-hub:save-synced' || event.data.requestId !== requestId) return
         finish(event.data.ok ? null : new Error(event.data.error || 'upload falhou'))
       }
       const finish = error => {
-        window.clearTimeout(timeout)
+        if (timeout) window.clearTimeout(timeout)
         window.removeEventListener('message', receive)
         if (error) reject(error)
         else resolve()
       }
       try {
-        const directSync = frame.contentWindow?.emulatorHubSyncSave
+        const directSync = frame.contentWindow?.emulatorHubClose
         if (typeof directSync === 'function') {
           Promise.resolve(directSync()).then(() => finish(), finish)
           return
@@ -459,8 +459,9 @@ function App() {
         // The message fallback supports an iframe which has not exposed its
         // same-origin synchronizer yet.
       }
+      timeout = window.setTimeout(() => finish(new Error('tempo esgotado')), 30000)
       window.addEventListener('message', receive)
-      frame.contentWindow?.postMessage({ type: 'emulator-hub:sync-save', requestId }, window.location.origin)
+      frame.contentWindow?.postMessage({ type: 'emulator-hub:close-player', requestId }, window.location.origin)
     })
   }
 

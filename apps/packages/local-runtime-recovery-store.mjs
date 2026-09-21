@@ -1,5 +1,4 @@
 const maximumStateBytes = 32 * 1024 * 1024
-const maximumSaveBytes = 2 * 1024 * 1024
 
 export function createLocalRuntimeRecoveryStore({ storage = createIndexedDbRecoveryStorage() } = {}) {
   return {
@@ -58,10 +57,9 @@ function normalize(bundle) {
   const { profileId, gameId, core, romSha256, runtimeId, patchSha256 } = bundle
   if (![profileId, gameId, core, romSha256, runtimeId].every(value => typeof value === 'string' && value.length > 0) || !/^[a-f0-9]{64}$/.test(romSha256)) throw new TypeError('Recovery bundle identity is invalid.')
   if (!(bundle.state instanceof Uint8Array) || bundle.state.byteLength === 0 || bundle.state.byteLength > maximumStateBytes) throw new TypeError('Recovery state is invalid.')
-  if (!(bundle.save instanceof Uint8Array) || bundle.save.byteLength === 0 || bundle.save.byteLength > maximumSaveBytes) throw new TypeError('Recovery save is invalid.')
   if (bundle.reason !== undefined && bundle.reason !== 'active' && bundle.reason !== 'runtime-break' && bundle.reason !== 'possible-recovery') throw new TypeError('Recovery reason is invalid.')
   if (patchSha256 !== undefined && (typeof patchSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(patchSha256))) throw new TypeError('Recovery patch hash is invalid.')
-  return { profileId, gameId, core, romSha256, runtimeId, ...(patchSha256 ? { patchSha256 } : {}), state: new Uint8Array(bundle.state), save: new Uint8Array(bundle.save), reason: bundle.reason ?? 'active' }
+  return { profileId, gameId, core, romSha256, runtimeId, ...(patchSha256 ? { patchSha256 } : {}), state: new Uint8Array(bundle.state), reason: bundle.reason ?? 'active' }
 }
 
 function key(profileId, gameId) { return `${profileId}\u0000${gameId}` }

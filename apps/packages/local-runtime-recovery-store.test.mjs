@@ -7,15 +7,15 @@ const bundle = () => ({
   state: new Uint8Array([1, 2, 3]), save: new Uint8Array([4, 5]),
 })
 
-test('persists a copied recovery bundle per profile and game', async () => {
+test('persists copied recovery state per profile and game, ignoring legacy paired save bytes', async () => {
   const store = createLocalRuntimeRecoveryStore({ storage: createMemoryRecoveryStorage() })
   const source = bundle()
   await store.put(source)
   source.state[0] = 9
   const loaded = await store.get('may', 'emerald')
-  loaded.save[0] = 8
   assert.deepEqual([...loaded.state], [1, 2, 3])
-  assert.deepEqual([...(await store.get('may', 'emerald')).save], [4, 5])
+  assert.equal('save' in loaded, false)
+  assert.equal('save' in (await store.get('may', 'emerald')), false)
   assert.equal(await store.get('leaf', 'emerald'), null)
 })
 

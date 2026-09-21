@@ -2,19 +2,32 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 
-test('accepts same-origin close-save messages without relying on the parent WindowProxy identity', async () => {
+test('accepts same-origin close-player messages without relying on the parent WindowProxy identity', async () => {
   const player = await readFile(new URL('./src/player.js', import.meta.url), 'utf8')
 
   assert.match(player, /if \(event\.origin !== location\.origin\) return/)
-  assert.doesNotMatch(player, /event\.source !== window\.parent/)
-  assert.match(player, /window\.emulatorHubSyncSave = synchronizeCloudSave/)
+  assert.match(player, /isClosePlayerMessage = event\.data\?\.type === 'emulator-hub:close-player'[\s\S]*?!isClosePlayerMessage && event\.source !== window\.parent/)
+  assert.match(player, /window\.emulatorHubClose = closeEmulator/)
+  assert.match(player, /event\.data\?\.type === 'emulator-hub:close-player'/)
 })
 
 test('uses the iframe same-origin save synchronizer before falling back to postMessage', async () => {
   const hub = await readFile(new URL('./src/main.jsx', import.meta.url), 'utf8')
 
-  assert.match(hub, /const directSync = frame\.contentWindow\?\.emulatorHubSyncSave/)
+  assert.match(hub, /const directSync = frame\.contentWindow\?\.emulatorHubClose/)
   assert.match(hub, /if \(typeof directSync === 'function'\) \{\s*Promise\.resolve\(directSync\(\)\)\.then\(\(\) => finish\(\), finish\)\s*return/s)
+  assert.match(hub, /type: 'emulator-hub:close-player'/)
+})
+
+test('uploads battery saves from EmulatorJS save events and keeps periodic snapshots state-only', async () => {
+  const player = await readFile(new URL('./src/player.js', import.meta.url), 'utf8')
+  assert.match(player, /observeEmulatorSaveFiles\(emulator, queueCloudSave\)/)
+  assert.match(player, /cloudSaveSynchronizer\.syncBytes\(copy\)/)
+  assert.match(player, /saveRevision: cloudSaveSynchronizer\.getRevision\(\)/)
+  const snapshotCapture = player.slice(player.indexOf('async function persistEmulatorState()'), player.indexOf('async function closeEmulator()'))
+  assert.match(snapshotCapture, /manager\.getState\?\.\(\)/)
+  assert.doesNotMatch(snapshotCapture, /saveSaveFiles|getSaveFile|syncBytes|\.sav/)
+  assert.match(player, /restoreSnapshotState\(savedSnapshot,[\s\S]*?window\.confirm\(/)
 })
 
 test('refreshes lease availability every three seconds only while the profile picker is open', async () => {

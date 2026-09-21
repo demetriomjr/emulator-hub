@@ -2,18 +2,25 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createCloudSaveSynchronizer } from './cloud-save-sync.mjs'
 
-test('uploads only when flushed local save bytes change', async () => {
+test('uploads only when observed battery-save bytes change and exposes the acknowledged revision', async () => {
   const uploads = []
+  let revision = 0
   const synchronizer = createCloudSaveSynchronizer({
     load: async () => null,
-    upload: async (bytes, revision) => { uploads.push({ bytes: [...bytes], revision }); return { revision: 1 } },
+    upload: async (bytes, expectedRevision) => { uploads.push({ bytes: [...bytes], revision: expectedRevision }); return { revision: ++revision } },
     hash: async bytes => [...bytes].join(','),
   })
   await synchronizer.load()
-  const manager = { getSaveFile: () => new Uint8Array([1, 2, 3]) }
-  assert.equal(await synchronizer.sync(manager), true)
-  assert.equal(await synchronizer.sync(manager), false)
-  assert.deepEqual(uploads, [{ bytes: [1, 2, 3], revision: null }])
+  const bytes = new Uint8Array([1, 2, 3])
+  assert.equal(await synchronizer.syncBytes(bytes), true)
+  assert.equal(synchronizer.getRevision(), 1)
+  assert.equal(await synchronizer.syncBytes(new Uint8Array([1, 2, 3])), false)
+  assert.equal(await synchronizer.syncBytes(new Uint8Array([3, 2, 1])), true)
+  assert.equal(synchronizer.getRevision(), 2)
+  assert.deepEqual(uploads, [
+    { bytes: [1, 2, 3], revision: null },
+    { bytes: [3, 2, 1], revision: 1 },
+  ])
 })
 
 test('restores cloud bytes into the core save path before sync', async () => {
