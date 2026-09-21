@@ -100,7 +100,7 @@ async function captureLocalRecovery() {
     const state = manager.getState?.()
     if (!save || !state) return false
     if (leaseLost) return false
-    await localRecoveryStore.put({ profileId, gameId: id, core: launchDescriptor.core, romSha256: launchDescriptor.romSha256, runtimeId: launchDescriptor.runtimeId, state: new Uint8Array(state), save: new Uint8Array(save) })
+    await localRecoveryStore.put({ profileId, gameId: id, core: launchDescriptor.core, romSha256: launchDescriptor.romSha256, runtimeId: launchDescriptor.runtimeId, ...(launchDescriptor.patchSha256 ? { patchSha256: launchDescriptor.patchSha256 } : {}), state: new Uint8Array(state), save: new Uint8Array(save) })
     return true
   })().finally(() => { localRecoveryCapture = null })
   return localRecoveryCapture
@@ -269,7 +269,7 @@ async function saveEmulatorState() {
   const state = manager.getState?.()
   if (!state || !save) throw new Error('Emulator snapshot bytes are unavailable.')
   const accepted = await putEmulatorSnapshot(launchDescriptor.snapshotUrl, {
-    metadata: { profileId, gameId: id, core: launchDescriptor.core, romSha256: launchDescriptor.romSha256, runtimeId: launchDescriptor.runtimeId },
+    metadata: { profileId, gameId: id, core: launchDescriptor.core, romSha256: launchDescriptor.romSha256, runtimeId: launchDescriptor.runtimeId, ...(launchDescriptor.patchSha256 ? { patchSha256: launchDescriptor.patchSha256 } : {}) },
     state: new Uint8Array(state), save: new Uint8Array(save),
   }, snapshotRevision, { sessionId, generation: leaseGeneration })
   snapshotRevision = accepted.revision
@@ -340,7 +340,7 @@ async function start() {
   if (restoreLocalRecovery) {
     const candidate = await localRecoveryStore.get(profileId, id)
     if (!candidate) throw new Error('Local recovery is no longer available.')
-    if (candidate.core !== launch.core || candidate.romSha256 !== launch.romSha256 || candidate.runtimeId !== launch.runtimeId) throw new Error('Local recovery is incompatible with this launch.')
+    if (candidate.core !== launch.core || candidate.romSha256 !== launch.romSha256 || candidate.runtimeId !== launch.runtimeId || candidate.patchSha256 !== launch.patchSha256) throw new Error('Local recovery is incompatible with this launch.')
     localRecovery = candidate
   }
   cloudSaveSynchronizer = createCloudSaveSynchronizer({
@@ -348,20 +348,29 @@ async function start() {
     upload: (bytes, revision) => putCloudSave(launch.saveUrl, bytes, revision, { sessionId, generation: leaseGeneration }),
     hash: hashSave,
   })
-  const [_, snapshot, romResponse] = await Promise.all([
+  if (Boolean(launch.patchUrl) !== Boolean(launch.patchSha256)) throw new Error('Incomplete patch configuration.')
+  const [_, snapshot, romResponse, patchResponse] = await Promise.all([
     cloudSaveSynchronizer.load(),
     getEmulatorSnapshot(launch.snapshotUrl, { sessionId, generation: leaseGeneration }),
     fetch(launch.romUrl, { cache: 'no-store' }),
+    launch.patchUrl ? fetch(launch.patchUrl, { cache: 'no-store' }) : Promise.resolve(null),
   ])
   if (!romResponse.ok) throw new Error(`ROM request failed (${romResponse.status})`)
   const romBytes = new Uint8Array(await romResponse.arrayBuffer())
   if (await hashSave(romBytes) !== launch.romSha256) throw new Error('ROM bytes did not match the launch descriptor.')
-  if (snapshot && (snapshot.metadata.profileId !== profileId || snapshot.metadata.gameId !== id || snapshot.metadata.core !== launch.core || snapshot.metadata.romSha256 !== launch.romSha256 || snapshot.metadata.runtimeId !== launch.runtimeId)) throw new Error('Snapshot is incompatible with this launch.')
+  let patchBytes = null
+  if (patchResponse) {
+    if (!patchResponse.ok) throw new Error(`Patch request failed (${patchResponse.status})`)
+    patchBytes = new Uint8Array(await patchResponse.arrayBuffer())
+    if (await hashSave(patchBytes) !== launch.patchSha256) throw new Error('Patch bytes did not match the launch descriptor.')
+  }
+  if (snapshot && (snapshot.metadata.profileId !== profileId || snapshot.metadata.gameId !== id || snapshot.metadata.core !== launch.core || snapshot.metadata.romSha256 !== launch.romSha256 || snapshot.metadata.runtimeId !== launch.runtimeId || snapshot.metadata.patchSha256 !== launch.patchSha256)) throw new Error('Snapshot is incompatible with this launch.')
   savedSnapshot = snapshot ? { state: snapshot.state, save: snapshot.save } : null
   snapshotRevision = snapshot?.revision ?? null
   window.EJS_player = '#game'
   window.EJS_core = launch.core
   window.EJS_gameUrl = URL.createObjectURL(new Blob([romBytes]))
+  if (patchBytes) window.EJS_gamePatchUrl = URL.createObjectURL(new Blob([patchBytes]))
   window.EJS_gameName = launch.title
   window.EJS_gameID = launch.gameId
   window.EJS_defaultControls = { 0: controlProfile.bindings, 1: {}, 2: {}, 3: {} }

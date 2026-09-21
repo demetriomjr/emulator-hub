@@ -36,10 +36,12 @@ import { migrateLegacyJsonData } from '../packages/redis-legacy-migration.mjs'
 import { createClientDiagnosticStore } from '../packages/client-diagnostic-store.mjs'
 import { createPlayerLeaseCoordinator } from '../packages/player-lease-coordinator.mjs'
 import { createGameSaveLeaseCoordinator } from '../packages/game-save-lease-coordinator.mjs'
+import { gamePatchForRom } from '../packages/game-patches.mjs'
 
 const backendDirectory = dirname(fileURLToPath(import.meta.url))
 const defaultCatalogPath = join(backendDirectory, 'catalog.json')
 const defaultRomsDirectory = join(backendDirectory, 'roms')
+const defaultPatchesDirectory = join(backendDirectory, 'patches')
 const defaultProfilesPath = join(backendDirectory, 'data', 'profiles')
 const defaultControlProfilePath = join(backendDirectory, 'data', 'control-profile.json')
 const defaultSavesPath = join(backendDirectory, 'data', 'saves')
@@ -79,6 +81,8 @@ export function createHubServer(options = {}) {
     persistence,
     catalogPath: options.catalogPath ?? defaultCatalogPath,
     romsDirectory: options.romsDirectory ?? options.romsDir ?? defaultRomsDirectory,
+    patchesDirectory: options.patchesDirectory ?? options.patchesDir ?? defaultPatchesDirectory,
+    gamePatchForRom: options.gamePatchForRom ?? gamePatchForRom,
     persistence,
     romRegistry: options.romRegistry ?? createRedisRomRegistry({ persistence }),
     romDiscovery: options.romDiscovery ?? createRomDiscovery({ lookupBatch: options.romLookupBatch ?? lookupRomBatch, refreshLegacyMetadata: options.refreshLegacyMetadata ?? !options.catalogPath }),
@@ -198,6 +202,7 @@ async function handleRequest(request, response, config) {
     return
   }
 
+  const patchRoute = parsePatchRoute(route.pathname)
   const isRomRoute = route.pathname.startsWith('/roms/')
   const gameProfilesRoute = parseGameProfilesRoute(route.pathname)
   const gameProfileRoute = parseGameProfileRoute(route.pathname)
@@ -239,7 +244,7 @@ async function handleRequest(request, response, config) {
   const pokemonHubProfileRoute = parsePokemonHubProfileRoute(route.pathname)
   const isClientDiagnosticsRoute = route.pathname === '/api/debug/client-events'
   const supportedMethod = request.method === 'GET'
-    || (request.method === 'HEAD' && isRomRoute)
+    || (request.method === 'HEAD' && isRomRoute && !patchRoute)
     || (request.method === 'POST' && gameProfilesRoute)
     || (request.method === 'POST' && pokemonHubProfilesRoute)
     || ((request.method === 'PATCH' || request.method === 'DELETE') && pokemonHubProfileRoute)
@@ -251,7 +256,7 @@ async function handleRequest(request, response, config) {
     || (request.method === 'DELETE' && gameProfileRoute)
     || (isClientDiagnosticsRoute && request.method === 'POST')
   if (!supportedMethod) {
-    response.setHeader('Allow', isClientDiagnosticsRoute ? 'GET, POST' : pokemonHubSessionRoute ? pokemonHubSessionRoute.kind === 'detach' || pokemonHubSessionRoute.kind === 'close' ? 'DELETE' : 'POST' : pokemonHubRoute ? ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute.kind) ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'PATCH, DELETE' : pokemonHubProfilesRoute || gameProfilesRoute ? 'GET, POST' : snapshotRoute || saveRoute || isControlProfileRoute ? 'GET, PUT' : gameProfileRoute ? 'PATCH, DELETE' : isRomRoute ? 'GET, HEAD' : 'GET')
+    response.setHeader('Allow', isClientDiagnosticsRoute ? 'GET, POST' : pokemonHubSessionRoute ? pokemonHubSessionRoute.kind === 'detach' || pokemonHubSessionRoute.kind === 'close' ? 'DELETE' : 'POST' : pokemonHubRoute ? ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute.kind) ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'PATCH, DELETE' : pokemonHubProfilesRoute || gameProfilesRoute ? 'GET, POST' : snapshotRoute || saveRoute || isControlProfileRoute ? 'GET, PUT' : gameProfileRoute ? 'PATCH, DELETE' : patchRoute ? 'GET' : isRomRoute ? 'GET, HEAD' : 'GET')
     json(response, 405, { error: 'Method is not supported for this route.' })
     return
   }
@@ -330,6 +335,11 @@ async function handleRequest(request, response, config) {
   if (route.pathname.startsWith('/api/games/') && route.pathname.endsWith('/launch')) {
     const id = route.pathname.slice('/api/games/'.length, -'/launch'.length)
     await launchGame(response, config, id, route.searchParams.get('profileId'))
+    return
+  }
+
+  if (patchRoute) {
+    await streamGamePatch(response, config, patchRoute.id)
     return
   }
 
@@ -556,7 +566,9 @@ async function listGames(response, config) {
   const games = []
   for (let index = 0; index < entries.length; index += 1) {
     const entry = normalizeEntry(entries[index], index)
-    const verification = await verifyRom(entry, config.romsDirectory)
+    const romVerification = await verifyRom(entry, config.romsDirectory)
+    const patchVerification = romVerification.ok ? await verifyGamePatch(entry, config) : null
+    const verification = patchVerification?.ok === false ? patchVerification : romVerification
     const game = {
       id: entry.id,
       title: entry.title,
@@ -714,18 +726,13 @@ async function launchGame(response, config, encodedId, profileId) {
     return
   }
 
-  json(response, 200, {
-    id: entry.id,
-    title: entry.title,
-    core: entry.core,
-    profileId: profile.id,
-    gameId: stableGameId(`${profile.id}:${entry.id}`),
-    romUrl: `/roms/${encodeURIComponent(entry.id)}`,
-    saveUrl: `/api/profiles/${encodeURIComponent(profile.id)}/games/${encodeURIComponent(entry.id)}/save`,
-    snapshotUrl: `/api/profiles/${encodeURIComponent(profile.id)}/games/${encodeURIComponent(entry.id)}/snapshot`,
-    romSha256: entry.sha256,
-    runtimeId: 'emulatorjs-4.2.3',
-  })
+  const patchVerification = await verifyGamePatch(entry, config)
+  if (!patchVerification.ok) {
+    json(response, 409, { error: patchVerification.reason })
+    return
+  }
+
+  json(response, 200, launchDescriptor(entry, profile.id, patchVerification.patch))
 }
 
 function parseSaveRoute(pathname) {
@@ -1100,8 +1107,10 @@ async function handleSnapshot(request, response, config, { profileId, gameId }) 
   try { decoded = await decodeSnapshotBundle(await readBinaryBody(request, 'application/vnd.emulator-hub.snapshot', 35 * 1024 * 1024)) } catch (error) { return json(response, error.code === 'REQUEST_BODY_TOO_LARGE' ? 413 : 400, { error: error.message, ...(error.code ? { code: error.code } : {}) }) }
   const expectedRevision = parseExpectedRevision(request.headers['if-match'])
   if (expectedRevision === undefined) return json(response, 428, { error: 'If-Match is required.' })
+  const patchVerification = await verifyGamePatch(entry, config)
+  if (!patchVerification.ok) return json(response, 409, { error: patchVerification.reason })
   const runtimeId = 'emulatorjs-4.2.3'
-  if (decoded.metadata.profileId !== profileId || decoded.metadata.gameId !== gameId || decoded.metadata.core !== entry.core || decoded.metadata.romSha256 !== entry.sha256 || decoded.metadata.runtimeId !== runtimeId) return json(response, 400, { error: 'Snapshot metadata is incompatible with this launch.' })
+  if (decoded.metadata.profileId !== profileId || decoded.metadata.gameId !== gameId || decoded.metadata.core !== entry.core || decoded.metadata.romSha256 !== entry.sha256 || decoded.metadata.runtimeId !== runtimeId || decoded.metadata.patchSha256 !== patchVerification.patch?.sha256) return json(response, 400, { error: 'Snapshot metadata is incompatible with this launch.' })
   try {
     const saved = await config.snapshotStore.put(profileId, gameId, decoded, expectedRevision, { fenceGeneration: lease.generation })
     json(response, expectedRevision === null ? 201 : 200, saved)
@@ -1207,6 +1216,25 @@ async function streamRom(response, config, encodedId, headersOnly = false) {
   response.end(headersOnly ? undefined : verification.bytes)
 }
 
+async function streamGamePatch(response, config, encodedId) {
+  const id = decodeId(encodedId)
+  if (id === null) return json(response, 400, { error: 'Malformed game ID.' })
+  const entry = await findEntry(config, id)
+  if (entry === null) return json(response, 404, { error: 'Game was not found.' })
+  const romVerification = await verifyRom(entry, config.romsDirectory)
+  if (!romVerification.ok) return json(response, 409, { error: romVerification.reason })
+  const patchVerification = await verifyGamePatch(entry, config)
+  if (!patchVerification.ok) return json(response, patchVerification.status ?? 409, { error: patchVerification.reason })
+  if (patchVerification.patch === null) return json(response, 404, { error: 'Game has no associated patch.' })
+  response.writeHead(200, {
+    'Cache-Control': 'no-store',
+    'Content-Length': patchVerification.bytes.length,
+    'Content-Type': 'application/octet-stream',
+    'X-Content-Type-Options': 'nosniff',
+  })
+  response.end(patchVerification.bytes)
+}
+
 async function findEntry(config, id) {
   const entries = await loadAvailableCatalog(config)
   const entry = entries.find((candidate) => normalizeEntry(candidate).id === id)
@@ -1267,6 +1295,22 @@ async function verifyRom(entry, romsDirectory) {
   }
 
   return { ok: true, bytes }
+}
+
+async function verifyGamePatch(entry, config) {
+  const patch = config.gamePatchForRom(entry.sha256)
+  if (patch === null) return { ok: true, patch: null }
+  const safePath = resolveSafeRomPath(config.patchesDirectory, patch.file)
+  if (safePath === null) return { ok: false, reason: 'Patch path must stay inside the patch directory.' }
+  const fileCheck = await inspectRomPath(config.patchesDirectory, safePath)
+  if (!fileCheck.ok) return { ok: false, reason: fileCheck.reason.replace('ROM', 'Patch') }
+  let bytes
+  try { bytes = await readFile(safePath) } catch (error) {
+    if (error.code === 'ENOENT') return { ok: false, reason: 'Patch file was not found.' }
+    throw error
+  }
+  if (createHash('sha256').update(bytes).digest('hex') !== patch.sha256) return { ok: false, reason: 'Patch hash does not match the trusted patch hash.' }
+  return { ok: true, patch, bytes }
 }
 
 function validateCatalogEntry(entry) {
@@ -1426,6 +1470,11 @@ function parsePlayerLeaseRoute(pathname) {
   return { kind: session[2] ?? 'release', sessionId: session[1] }
 }
 
+function parsePatchRoute(pathname) {
+  const match = /^\/roms\/([^/]+)\/patch$/.exec(pathname)
+  return match ? { id: match[1] } : null
+}
+
 async function handlePlayerLease(request, response, config, route, searchParams) {
   const deviceId = playerDeviceId(request, response)
   if (route.kind === 'acquire') {
@@ -1436,12 +1485,14 @@ async function handlePlayerLease(request, response, config, route, searchParams)
     if (await config.profileStore.get(entry.id, body.profileId) === null) return json(response, 404, { error: 'Profile was not found.' })
     const verification = await verifyRom(entry, config.romsDirectory)
     if (!verification.ok) return json(response, 409, { error: verification.reason })
+    const patchVerification = await verifyGamePatch(entry, config)
+    if (!patchVerification.ok) return json(response, 409, { error: patchVerification.reason })
     try {
       const minimumGeneration = await nextPlayerLeaseGeneration(config, body.profileId, entry.id)
       const lease = await config.playerLeases.acquire({ profileId: body.profileId, gameId: entry.id, deviceId, sessionId: body.sessionId, minimumGeneration })
       try { await config.saveStore.advanceFence(body.profileId, entry.id, lease.generation) } catch (error) { if (error.code !== 'SAVE_MISSING') throw error }
       try { await config.snapshotStore.advanceFence(body.profileId, entry.id, lease.generation) } catch (error) { if (error.code !== 'SNAPSHOT_MISSING') throw error }
-      return json(response, 200, { ...(await launchDescriptor(config, entry, body.profileId)), leaseGeneration: lease.generation })
+      return json(response, 200, { ...launchDescriptor(entry, body.profileId, patchVerification.patch), leaseGeneration: lease.generation })
     } catch (error) { return json(response, error.code === 'PLAYER_LEASE_HELD' ? 409 : 400, { error: error.message, code: error.code }) }
   }
   let body
@@ -1455,7 +1506,9 @@ async function handlePlayerLease(request, response, config, route, searchParams)
     if (await config.profileStore.get(entry.id, input.profileId) === null) return json(response, 404, { error: 'Profile was not found.' })
     const verification = await verifyRom(entry, config.romsDirectory)
     if (!verification.ok) return json(response, 409, { error: verification.reason })
-    return json(response, 200, { ...(await launchDescriptor(config, entry, input.profileId)), leaseGeneration: input.generation })
+    const patchVerification = await verifyGamePatch(entry, config)
+    if (!patchVerification.ok) return json(response, 409, { error: patchVerification.reason })
+    return json(response, 200, { ...launchDescriptor(entry, input.profileId, patchVerification.patch), leaseGeneration: input.generation })
   } catch (error) { return json(response, error.code === 'PLAYER_LEASE_INVALID' ? 410 : error.code === 'PLAYER_LEASE_HELD' ? 409 : 400, { error: error.message, code: error.code }) }
 }
 
@@ -1490,8 +1543,13 @@ function playerLeaseHeaders(request) {
   return { deviceId: playerDeviceId(request, { setHeader() {} }), sessionId, generation }
 }
 
-async function launchDescriptor(config, entry, profileId) {
-  return { id: entry.id, title: entry.title, core: entry.core, profileId, gameId: stableGameId(`${profileId}:${entry.id}`), romUrl: `/roms/${encodeURIComponent(entry.id)}`, saveUrl: `/api/profiles/${encodeURIComponent(profileId)}/games/${encodeURIComponent(entry.id)}/save`, snapshotUrl: `/api/profiles/${encodeURIComponent(profileId)}/games/${encodeURIComponent(entry.id)}/snapshot`, romSha256: entry.sha256, runtimeId: 'emulatorjs-4.2.3' }
+function launchDescriptor(entry, profileId, patch) {
+  return {
+    id: entry.id, title: entry.title, core: entry.core, profileId, gameId: stableGameId(`${profileId}:${entry.id}`), romUrl: `/roms/${encodeURIComponent(entry.id)}`,
+    saveUrl: `/api/profiles/${encodeURIComponent(profileId)}/games/${encodeURIComponent(entry.id)}/save`, snapshotUrl: `/api/profiles/${encodeURIComponent(profileId)}/games/${encodeURIComponent(entry.id)}/snapshot`,
+    romSha256: entry.sha256, runtimeId: 'emulatorjs-4.2.3',
+    ...(patch ? { patchUrl: `/roms/${encodeURIComponent(entry.id)}/patch`, patchSha256: patch.sha256 } : {}),
+  }
 }
 
 async function handleClientDiagnostics(request, response, config, searchParams) {

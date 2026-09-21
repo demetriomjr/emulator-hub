@@ -9,6 +9,7 @@ import { bootstrapHubServer, createHubServer, createListenFailureDiagnostic } fr
 import { createMemoryRedisPersistence } from '../../packages/redis-persistence.mjs'
 import { encodeSnapshotBundle } from '../../packages/emulator-snapshot.mjs'
 import { createSaveStore } from '../../packages/save-store.mjs'
+import { createGamePatchLookup } from '../../packages/game-patches.mjs'
 
 const liveServers = new Set()
 const liveFixtures = new Set()
@@ -67,16 +68,19 @@ function sha256(value) {
   return createHash('sha256').update(value).digest('hex')
 }
 
-async function createFixture(entries, files = {}) {
+async function createFixture(entries, files = {}, patches = {}) {
   const root = await mkdtemp(join(tmpdir(), 'emulator-hub-backend-'))
   const romsDir = join(root, 'roms')
+  const patchesDir = join(root, 'patches')
   await mkdir(romsDir, { recursive: true })
+  await mkdir(patchesDir, { recursive: true })
 
   for (const [file, content] of Object.entries(files)) {
     const destination = join(romsDir, file)
     await mkdir(join(destination, '..'), { recursive: true })
     await writeFile(destination, content)
   }
+  for (const [file, content] of Object.entries(patches)) await writeFile(join(patchesDir, file), content)
 
   const catalogPath = join(root, 'catalog.json')
   await writeFile(catalogPath, JSON.stringify(entries, null, 2))
@@ -84,6 +88,7 @@ async function createFixture(entries, files = {}) {
   return {
     root,
     romsDir,
+    patchesDir,
     catalogPath,
     profilesPath: join(root, 'data', 'profiles'),
     controlProfilePath: join(root, 'data', 'control-profile.json'),
@@ -94,9 +99,9 @@ async function createFixture(entries, files = {}) {
   }
 }
 
-async function startFixture(entries, files = {}) {
-  const fixture = await createFixture(entries, files)
-  const server = createHubServer(fixture)
+async function startFixture(entries, files = {}, patches = {}, options = {}) {
+  const fixture = await createFixture(entries, files, patches)
+  const server = createHubServer({ ...fixture, ...options })
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
   liveServers.add(server)
   const { port } = server.address()
@@ -121,6 +126,28 @@ async function acquirePlayerLease(baseUrl, gameId, profileId, sessionId = 'playe
 }
 
 describe('hub backend HTTP contract', () => {
+  test('serves an IPS only with the matching verified ROM launch descriptor', async () => {
+    const rom = Buffer.from('emerald fixture ROM')
+    const ips = Buffer.from('PATCH\x00\x00\x00EOF')
+    const { baseUrl } = await startFixture([
+      { id: 'pokemon-emerald', title: 'Pokémon Emerald', system: 'gba', core: 'gba', file: 'emerald.gba', sha256: sha256(rom) },
+    ], { 'emerald.gba': rom }, { 'emerald-rng.ips': ips }, {
+      gamePatchForRom: createGamePatchLookup([{ romSha256: sha256(rom), file: 'emerald-rng.ips', sha256: sha256(ips) }]),
+    })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-emerald/profiles`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'May' }),
+    }))
+
+    const launch = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-emerald/launch?profileId=${profile.id}`))
+    assert.equal(launch.patchUrl, '/roms/pokemon-emerald/patch')
+    assert.equal(launch.patchSha256, sha256(ips))
+    const patchResponse = await fetch(`${baseUrl}${launch.patchUrl}`)
+    assert.equal(patchResponse.status, 200)
+    assert.equal(patchResponse.headers.get('cache-control'), 'no-store')
+    assert.equal(patchResponse.headers.get('content-length'), String(ips.length))
+    assert.deepEqual(Buffer.from(await patchResponse.arrayBuffer()), ips)
+  })
+
   test('serves one lease-protected global snapshot slot from the launch descriptor', async () => {
     const rom = Buffer.from('snapshot game')
     const { baseUrl } = await startFixture([{ id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom) }], { 'pokemon-red.gb': rom })

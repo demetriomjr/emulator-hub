@@ -51,6 +51,7 @@ function validateMetadata(metadata) {
     if (typeof metadata[key] !== 'string' || metadata[key].length === 0) throw snapshotError('SNAPSHOT_METADATA_INVALID', `Snapshot metadata ${key} is invalid.`)
   }
   if (!isHash(metadata.romSha256)) throw snapshotError('SNAPSHOT_METADATA_INVALID', 'Snapshot metadata ROM hash is invalid.')
+  if (metadata.patchSha256 !== undefined && !isHash(metadata.patchSha256)) throw snapshotError('SNAPSHOT_METADATA_INVALID', 'Snapshot metadata patch hash is invalid.')
   return metadata
 }
 

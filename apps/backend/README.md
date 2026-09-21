@@ -21,6 +21,14 @@ The first start imports absent application records from the previous local JSON 
 
 Place supported ROM files in `roms/`; `GET /api/games` automatically scans them and registers only files whose SHA-1/MD5/size exactly match a `no-intro` record returned by the public hash lookup. The scan sends fingerprints and size, never ROM bytes. Unknown, modified, hacked, symlinked, and unsupported files are not listed or launchable. The local Git-ignored registration cache is `data/rom-registry.json`.
 
+The bundled Emerald RNG fix is an IPS asset, not a modified ROM. It attaches only
+to the original 16 MiB Pokémon Emerald USA/Europe dump with SHA-256
+`a9dec84dfe7f62ab2220bafaef7479da0929d066ece16a6885f6226db19085af`.
+Its filename does not matter: a matching original dump discovered under any
+safe filename receives the verified patch at launch; another Emerald revision
+does not. If the required `patches/Pokemon Emerald.ips` asset is missing or
+changed, that matching game is unavailable rather than launching unpatched.
+
 `catalog.json` is now a compatibility overlay for legacy IDs and optional game-specific metadata such as Pokémon save adapters; new recognized ROMs do not need a manual entry. A hash match establishes identity with a public preservation dump, not legal ownership or physical-cartridge provenance.
 
 Optional card metadata uses `pokeapiVersion` for the PokéAPI game version and `wikipediaPage` for its box-art thumbnail. `region` and `language` identify the verified ROM dump; PokéAPI name translations do not establish the ROM's language. API data is cached in memory and unavailable metadata does not block play. See [Spec 004](../../.spec/004-rom-card-metadata.md).
@@ -44,11 +52,12 @@ The supported system/extension pairs are `gb`/`.gb`, `gbc`/`.gbc`, and `gba`/`.g
 
 - `GET /api/games` returns `{ "games": [...] }`, including unavailable configured entries and their reason.
 - `GET /api/profiles` returns `{ "profiles": [...] }`. `POST /api/profiles` accepts `{ "name": string }` and creates a profile. Profiles persist in Git-ignored `data/profiles.json`.
-- `GET /api/games/:id/launch?profileId=:profileId` requires an existing profile and returns the verified launch descriptor `{ id, title, core, profileId, gameId, romUrl, saveUrl }`. `gameId` is stable per profile/title pair so EmulatorJS separates its browser-managed saves.
+- `GET /api/games/:id/launch?profileId=:profileId` requires an existing profile and returns the verified launch descriptor `{ id, title, core, profileId, gameId, romUrl, saveUrl }`. A compatible Emerald descriptor additionally returns `patchUrl` and `patchSha256`; `gameId` is stable per profile/title pair so EmulatorJS separates its browser-managed saves.
 - `GET`/`PUT /api/profiles/:profileId/games/:gameId/save` restores and accepts the selected profile's binary in-game save. Uploads require a revision precondition and return the accepted revision and SHA-256.
 - `GET`/`PUT /api/profiles/:profileId/games/:gameId/snapshot` stores one lease-protected global EmulatorJS state per profile/game. The binary envelope contains raw state plus the capture-time `.sav`; a newer snapshot replaces the only slot.
 - `GET /roms/:id` returns the verified ROM bytes with `Cache-Control: no-store`.
 - `HEAD /roms/:id` returns the same verified ROM metadata without a body; EmulatorJS uses this when checking a previously loaded game.
+- `GET /roms/:id/patch` returns the verified IPS bytes for a compatible launch; games without an associated patch return `404`.
 
 Start the service with `npm start` from this directory. Its local address is configured in `.env`; the provided default is `http://127.0.0.1:3001`. Copy `.env.example` when setting up another checkout.
 

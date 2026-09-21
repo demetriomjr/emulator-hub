@@ -43,3 +43,10 @@ test('rejects a bundle whose state bytes no longer match its hash', async () => 
 
   await assert.rejects(decodeSnapshotBundle(bundle), /hash/i)
 })
+
+test('rejects a snapshot with a malformed optional patch hash', async () => {
+  await assert.rejects(
+    encodeSnapshotBundle({ metadata: { ...metadata, patchSha256: 'not-a-hash' }, state: new Uint8Array([1]), save: new Uint8Array([2]) }),
+    /patch hash/i,
+  )
+})

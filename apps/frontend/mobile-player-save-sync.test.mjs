@@ -21,3 +21,11 @@ test('refreshes lease availability every three seconds only while the profile pi
   const source = await readFile(new URL('./src/main.jsx', import.meta.url), 'utf8')
   assert.match(source, /if \(!profileGame\) return undefined[\s\S]*getProfiles\(profileGame\.id\)[\s\S]*window\.setInterval\(refreshProfiles, 3_000\)[\s\S]*window\.clearInterval\(interval\)/)
 })
+
+test('verifies an optional launch IPS and provides it to EmulatorJS as a Blob URL', async () => {
+  const player = await readFile(new URL('./src/player.js', import.meta.url), 'utf8')
+
+  assert.match(player, /launch\.patchUrl[\s\S]*fetch\(launch\.patchUrl, \{ cache: 'no-store' \}\)/)
+  assert.match(player, /patch bytes did not match the launch descriptor/i)
+  assert.match(player, /window\.EJS_gamePatchUrl = URL\.createObjectURL\(new Blob\(\[patchBytes\]\)\)/)
+})

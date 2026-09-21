@@ -23,3 +23,10 @@ test('production frontend image does not synchronize Pokemon sprites during depl
   assert.doesNotMatch(dockerfile, /RUN npm run sync:pokemon-resources/)
   assert.match(dockerfile, /RUN npm run build/)
 })
+
+test('production backend image copies IPS assets into the backend patch directory', async () => {
+  const backendDockerfile = new URL('./backend.Dockerfile', import.meta.url)
+  const dockerfile = await readFile(backendDockerfile, 'utf8')
+
+  assert.match(dockerfile, /COPY assets\/ips\/ \.\/backend\/patches\//)
+})
