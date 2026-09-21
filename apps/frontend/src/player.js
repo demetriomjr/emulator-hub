@@ -1,6 +1,7 @@
 import { getCloudSave, getControlProfile, getEmulatorSnapshot, getPlayerLeaseLaunch, heartbeatPlayerLease, putCloudSave, putEmulatorSnapshot } from '../../packages/hub-client.js'
 import { createCloudSaveSynchronizer } from '../../packages/cloud-save-sync.mjs'
 import { observeEmulatorSaveFiles } from '../../packages/emulator-save-events.mjs'
+import { startEmulatorSavePolling } from '../../packages/emulator-save-poller.mjs'
 import { restoreSnapshotState } from '../../packages/emulator-snapshot-restore.mjs'
 import { createEmulatorGamepadInput } from '../../packages/gamepad-input.mjs'
 import { createClientDiagnostics, getClientDiagnosticsOptions } from '../../packages/client-diagnostics.mjs'
@@ -51,6 +52,7 @@ let gamepadInput = null
 let gamepadBindings = []
 let cloudSaveSynchronizer = null
 let cloudSaveInterval = null
+let stopBatterySavePolling = null
 let pendingSaveSync = Promise.resolve()
 let snapshotCapture = null
 let latestSaveBytes = null
@@ -71,6 +73,8 @@ function loseLease() {
   preserveLocalRecovery = true
   if (leaseHeartbeat) window.clearInterval(leaseHeartbeat)
   if (cloudSaveInterval) window.clearInterval(cloudSaveInterval)
+  stopBatterySavePolling?.()
+  stopBatterySavePolling = null
   if (localRecoveryInterval) window.clearInterval(localRecoveryInterval)
   void Promise.resolve(localRecoveryCapture).catch(() => {}).finally(() => localRecoveryStore.markRuntimeBreak(profileId, id)).finally(() => window.parent.postMessage({ type: 'emulator-hub:lease-lost', unavailable: true, sessionId, profileId, gameId: id, generation: leaseGeneration }, location.origin))
 }
@@ -89,11 +93,22 @@ async function hashSave(bytes) {
   return [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, '0')).join('')
 }
 
+function logSavePipeline(event, context = {}) {
+  const record = { timestamp: new Date().toISOString(), event, gameId: id, profileId, ...context }
+  const output = event.endsWith('failed') ? console.error : context.ok === false || event.includes('rejected') ? console.warn : console.info
+  output.call(console, '[save-pipeline]', record)
+}
+
 function queueCloudSave(bytes) {
-  if (leaseLost || !cloudSaveSynchronizer || !(bytes instanceof Uint8Array) || bytes.byteLength === 0) return Promise.resolve(false)
+  if (leaseLost || !cloudSaveSynchronizer || !(bytes instanceof Uint8Array) || bytes.byteLength === 0) {
+    logSavePipeline('save.front.bytes-ignored', { reason: leaseLost ? 'lease-lost' : !cloudSaveSynchronizer ? 'synchronizer-unavailable' : 'invalid-or-empty-payload', sizeBytes: bytes?.byteLength ?? 0 })
+    return Promise.resolve(false)
+  }
+  const traceId = crypto.randomUUID()
   const copy = new Uint8Array(bytes)
   latestSaveBytes = copy
-  const upload = pendingSaveSync.then(() => cloudSaveSynchronizer.syncBytes(copy))
+  logSavePipeline('save.front.bytes-observed', { traceId, sizeBytes: copy.byteLength })
+  const upload = pendingSaveSync.then(() => cloudSaveSynchronizer.syncBytes(copy, traceId))
   pendingSaveSync = upload.catch(() => {})
   return upload
 }
@@ -103,6 +118,7 @@ function watchBatterySaveChanges() {
   if (!emulator?.on || emulator.__hubSaveWatcher) return
   emulator.__hubSaveWatcher = true
   observeEmulatorSaveFiles(emulator, queueCloudSave)
+  stopBatterySavePolling = startEmulatorSavePolling(emulator)
 }
 
 async function captureLocalRecovery() {
@@ -294,9 +310,13 @@ async function persistEmulatorState() {
 async function closeEmulator() {
   if (cloudSaveInterval) window.clearInterval(cloudSaveInterval)
   if (localRecoveryInterval) window.clearInterval(localRecoveryInterval)
+  stopBatterySavePolling?.()
+  stopBatterySavePolling = null
   if (localRecoveryCapture) await localRecoveryCapture
   await pendingSaveSync
-  if (latestSaveBytes) await queueCloudSave(latestSaveBytes)
+  const finalSaveBytes = window.EJS_emulator?.gameManager?.getSaveFile?.()
+  if (finalSaveBytes instanceof Uint8Array && finalSaveBytes.byteLength > 0) await queueCloudSave(finalSaveBytes)
+  else if (latestSaveBytes) await queueCloudSave(latestSaveBytes)
   await pendingSaveSync
   if (snapshotCapture) await snapshotCapture.catch(() => {})
   await saveEmulatorState()
@@ -370,28 +390,45 @@ async function start() {
     localRecovery = candidate
   }
   cloudSaveSynchronizer = createCloudSaveSynchronizer({
-    load: () => getCloudSave(launch.saveUrl, { sessionId, generation: leaseGeneration }),
-    upload: (bytes, revision) => putCloudSave(launch.saveUrl, bytes, revision, { sessionId, generation: leaseGeneration }),
+    load: () => {
+      const traceId = crypto.randomUUID()
+      logSavePipeline('save.front.get-started', { traceId, profileId, gameId: id })
+      return getCloudSave(launch.saveUrl, { sessionId, generation: leaseGeneration }, traceId, logSavePipeline)
+    },
+    upload: (bytes, revision, traceId) => putCloudSave(launch.saveUrl, bytes, revision, { sessionId, generation: leaseGeneration }, traceId, logSavePipeline),
     hash: hashSave,
+    logger: logSavePipeline,
   })
   if (Boolean(launch.patchUrl) !== Boolean(launch.patchSha256)) throw new Error('Incomplete patch configuration.')
-  const [_, snapshot, romResponse, patchResponse] = await Promise.all([
+  const [_, snapshot, romResponse, initialPatchResponse] = await Promise.all([
     cloudSaveSynchronizer.load(),
     getEmulatorSnapshot(launch.snapshotUrl, { sessionId, generation: leaseGeneration }),
     fetch(launch.romUrl, { cache: 'no-store' }),
-    launch.patchUrl ? fetch(launch.patchUrl, { cache: 'no-store' }) : Promise.resolve(null),
+    launch.patchUrl ? fetch(launch.patchUrl, { cache: 'no-store' }).catch(error => ({ ok: false, status: 0, error })) : Promise.resolve(null),
   ])
   if (!romResponse.ok) throw new Error(`ROM request failed (${romResponse.status})`)
   const romBytes = new Uint8Array(await romResponse.arrayBuffer())
   if (await hashSave(romBytes) !== launch.romSha256) throw new Error('ROM bytes did not match the launch descriptor.')
   let patchBytes = null
+  const patchResponse = initialPatchResponse
   if (patchResponse) {
-    if (!patchResponse.ok) throw new Error(`Patch request failed (${patchResponse.status})`)
-    patchBytes = new Uint8Array(await patchResponse.arrayBuffer())
-    if (await hashSave(patchBytes) !== launch.patchSha256) throw new Error('Patch bytes did not match the launch descriptor.')
+    if (patchResponse.ok) {
+      try {
+        const candidatePatchBytes = new Uint8Array(await patchResponse.arrayBuffer())
+        if (await hashSave(candidatePatchBytes) === launch.patchSha256) patchBytes = candidatePatchBytes
+        else console.warn('[game-patch] patch bytes did not match launch descriptor; starting without patch')
+      } catch (error) {
+        console.warn('[game-patch]', { event: 'patch-read-failed', gameId: id, error: error.message })
+      }
+    } else console.warn('[game-patch]', { event: 'patch-fetch-failed', status: patchResponse.status, gameId: id, error: patchResponse.error?.message })
+    if (!patchBytes) {
+      launch.patchUrl = undefined
+      launch.patchSha256 = undefined
+    }
   }
-  if (snapshot && (snapshot.metadata.profileId !== profileId || snapshot.metadata.gameId !== id || snapshot.metadata.core !== launch.core || snapshot.metadata.romSha256 !== launch.romSha256 || snapshot.metadata.runtimeId !== launch.runtimeId || snapshot.metadata.patchSha256 !== launch.patchSha256)) throw new Error('Snapshot is incompatible with this launch.')
-  savedSnapshot = snapshot ? { state: snapshot.state, saveRevision: snapshot.metadata.saveRevision } : null
+  const snapshotCompatible = snapshot && snapshot.metadata.profileId === profileId && snapshot.metadata.gameId === id && snapshot.metadata.core === launch.core && snapshot.metadata.romSha256 === launch.romSha256 && snapshot.metadata.runtimeId === launch.runtimeId && snapshot.metadata.patchSha256 === launch.patchSha256
+  if (snapshot && !snapshotCompatible) console.warn('[emulator-snapshot] stored snapshot is incompatible with this launch; starting without it')
+  savedSnapshot = snapshotCompatible ? { state: snapshot.state, saveRevision: snapshot.metadata.saveRevision } : null
   snapshotRevision = snapshot?.revision ?? null
   window.EJS_player = '#game'
   window.EJS_core = launch.core
@@ -454,6 +491,9 @@ async function start() {
     applyFastForward()
   }
   window.EJS_onGameStart = () => {
+    // EJS_ready fires before EmulatorJS creates its gameManager. Reapply here
+    // because earlier setting changes can be ignored during loader startup.
+    applyFastForward()
     clientDiagnostics?.capture({ kind: 'emulator-lifecycle', message: 'EmulatorJS game start callback' })
     removeAudioResumeGesture?.()
     removeAudioResumeGesture = installAudioResumeOnUserGesture({
@@ -465,7 +505,7 @@ async function start() {
     if (localRecovery) {
       window.EJS_emulator.gameManager.loadState(new Uint8Array(localRecovery.state))
     } else if (!restoreSnapshotState(savedSnapshot, window.EJS_emulator.gameManager, () => window.confirm('Há um snapshot deste perfil. Deseja restaurá-lo?'))) {
-      cloudSaveSynchronizer.restore(window.EJS_emulator.gameManager)
+      void Promise.resolve(cloudSaveSynchronizer.restore(window.EJS_emulator.gameManager)).catch(() => {})
     }
     watchBatterySaveChanges()
     cloudSaveInterval = window.setInterval(() => saveEmulatorState().catch(() => {}), 15000)

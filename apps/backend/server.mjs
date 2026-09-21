@@ -36,7 +36,7 @@ import { migrateLegacyJsonData } from '../packages/redis-legacy-migration.mjs'
 import { createClientDiagnosticStore } from '../packages/client-diagnostic-store.mjs'
 import { createPlayerLeaseCoordinator } from '../packages/player-lease-coordinator.mjs'
 import { createGameSaveLeaseCoordinator } from '../packages/game-save-lease-coordinator.mjs'
-import { gamePatchForRom } from '../packages/game-patches.mjs'
+import { createIpsPatchRegistry } from '../packages/game-patches.mjs'
 
 const backendDirectory = dirname(fileURLToPath(import.meta.url))
 const defaultCatalogPath = join(backendDirectory, 'catalog.json')
@@ -53,6 +53,7 @@ const loadGameMetadata = createGameMetadataLoader()
 const execFileAsync = promisify(execFile)
 const defaultJsonBodyMaximumBytes = 4 * 1024
 const pokemonHubSnapshotMaximumBytes = 128 * 1024
+const reportedOptionalPatchWarnings = new Set()
 
 const systemExtensions = new Map([
   ['gb', ['.gb']],
@@ -82,7 +83,7 @@ export function createHubServer(options = {}) {
     catalogPath: options.catalogPath ?? defaultCatalogPath,
     romsDirectory: options.romsDirectory ?? options.romsDir ?? defaultRomsDirectory,
     patchesDirectory: options.patchesDirectory ?? options.patchesDir ?? defaultPatchesDirectory,
-    gamePatchForRom: options.gamePatchForRom ?? gamePatchForRom,
+    ipsPatchRegistry: options.ipsPatchRegistry ?? createIpsPatchRegistry({ patchesDirectory: options.patchesDirectory ?? options.patchesDir ?? defaultPatchesDirectory }),
     persistence,
     romRegistry: options.romRegistry ?? createRedisRomRegistry({ persistence }),
     romDiscovery: options.romDiscovery ?? createRomDiscovery({ lookupBatch: options.romLookupBatch ?? lookupRomBatch, refreshLegacyMetadata: options.refreshLegacyMetadata ?? !options.catalogPath }),
@@ -98,6 +99,7 @@ export function createHubServer(options = {}) {
     pokemonSaveAdapters: options.pokemonSaveAdapters ?? createPokemonSaveAdapterRegistry([pokemonGen3Adapter]),
     pokemonHubEventStore: options.pokemonHubEventStore ?? createPokemonHubEventStore({ persistence }),
     pokemonHubLogger: normalizePokemonHubLogger(options.pokemonHubLogger),
+    savePipelineLogger: normalizeSavePipelineLogger(options.savePipelineLogger),
     clientDiagnosticStore: options.clientDiagnosticStore ?? createClientDiagnosticStore(),
     clientDiagnosticLogger: normalizeClientDiagnosticLogger(options.clientDiagnosticLogger),
     gameSaveLeases,
@@ -566,8 +568,7 @@ async function listGames(response, config) {
   for (let index = 0; index < entries.length; index += 1) {
     const entry = normalizeEntry(entries[index], index)
     const romVerification = await verifyRom(entry, config.romsDirectory)
-    const patchVerification = romVerification.ok ? await verifyGamePatch(entry, config) : null
-    const verification = patchVerification?.ok === false ? patchVerification : romVerification
+    const verification = romVerification
     const game = {
       id: entry.id,
       title: entry.title,
@@ -1120,13 +1121,65 @@ async function handleSnapshot(request, response, config, { profileId, gameId }) 
 }
 
 async function handleSave(request, response, config, { profileId, gameId }) {
-  const entry = await findEntry(config, gameId)
-  if (entry === null) return json(response, 404, { error: 'Game was not found.' })
-  const profile = await config.profileStore.get(entry.id, profileId)
-  if (profile === null) return json(response, 404, { error: 'Profile was not found.' })
+  const tracingPut = request.method === 'PUT'
+  const tracingGet = request.method === 'GET'
+  const tracingRequest = tracingPut || tracingGet
+  const traceId = tracingRequest ? getSaveTraceId(request) : null
+  const startedAt = performance.now()
+  const log = (event, details = {}, level = 'info') => {
+    if (!tracingRequest) return
+    config.savePipelineLogger[level](`save.backend.${event}`, { traceId, profileId, gameId, ...details })
+  }
+  if (tracingRequest) {
+    response.setHeader('X-Save-Trace-Id', traceId)
+    log(tracingPut ? 'put-received' : 'get-received', {
+      contentType: request.headers['content-type'] ?? null,
+      contentLength: parseContentLength(request.headers['content-length']),
+      ifMatch: request.headers['if-match'] ?? null,
+    })
+    request.once('aborted', () => log('request-aborted', { elapsedMs: elapsedMilliseconds(startedAt) }, 'error'))
+    request.once('error', error => log('request-error', { elapsedMs: elapsedMilliseconds(startedAt), error: error.message }, 'error'))
+    response.once('finish', () => log('response', { status: response.statusCode, elapsedMs: elapsedMilliseconds(startedAt) }))
+    response.once('close', () => {
+      if (!response.writableFinished) log('response-closed', { status: response.statusCode, elapsedMs: elapsedMilliseconds(startedAt) }, 'error')
+    })
+  }
+  let entry
+  try {
+    entry = await findEntry(config, gameId)
+  } catch (error) {
+    log('failed', { stage: 'catalog-lookup', code: error.code ?? null, error: error.message }, 'error')
+    throw error
+  }
+  if (entry === null) {
+    log('rejected', { stage: 'catalog-lookup', reason: 'game-not-found' }, 'warn')
+    return json(response, 404, { error: 'Game was not found.' })
+  }
+  let profile
+  try {
+    profile = await config.profileStore.get(entry.id, profileId)
+  } catch (error) {
+    log('failed', { stage: 'profile-lookup', code: error.code ?? null, error: error.message }, 'error')
+    throw error
+  }
+  if (profile === null) {
+    log('rejected', { stage: 'profile-lookup', reason: 'profile-not-found' }, 'warn')
+    return json(response, 404, { error: 'Profile was not found.' })
+  }
   if (request.method === 'GET') {
-    const save = await config.saveStore.get(profileId, gameId)
-    if (save === null) return json(response, 404, { error: 'Save was not found.' })
+    log('read-started')
+    let save
+    try {
+      save = await config.saveStore.get(profileId, gameId)
+    } catch (error) {
+      log('failed', { stage: 'read', code: error.code ?? null, error: error.message }, 'error')
+      throw error
+    }
+    if (save === null) {
+      log('read-missing', {}, 'warn')
+      return json(response, 404, { error: 'Save was not found.' })
+    }
+    log('read-completed', { sizeBytes: save.bytes.length, revision: save.revision, sha256: save.sha256 ?? null })
     response.writeHead(200, { 'Cache-Control': 'no-store', 'Content-Length': save.bytes.length, 'Content-Type': 'application/octet-stream', ETag: `"${save.revision}"`, 'X-Save-Sha256': save.sha256, 'X-Content-Type-Options': 'nosniff' })
     response.end(save.bytes)
     return
@@ -1135,20 +1188,42 @@ async function handleSave(request, response, config, { profileId, gameId }) {
   try {
     bytes = await readBinaryBody(request)
   } catch (error) {
+    log('body-rejected', { code: error.code ?? null, error: error.message }, 'warn')
     return json(response, error.code === 'REQUEST_BODY_TOO_LARGE' ? 413 : 415, { error: error.message })
   }
+  const payloadHash = createHash('sha256').update(bytes).digest('hex')
+  log('body-received', { sizeBytes: bytes.length, sha256: payloadHash })
   const expectedRevision = parseExpectedRevision(request.headers['if-match'])
-  if (expectedRevision === undefined) return json(response, 428, { error: 'If-Match is required.' })
+  if (expectedRevision === undefined) {
+    log('precondition-rejected', { reason: 'invalid-if-match' }, 'warn')
+    return json(response, 428, { error: 'If-Match is required.' })
+  }
+  let pipelineStage = 'lease-validation'
+  let persistedRevision = null
   try {
     const lease = playerLeaseHeaders(request)
     await config.playerLeases.assertWrite({ profileId, gameId, ...lease })
+    log('lease-validated', { leaseGeneration: lease.generation })
+    pipelineStage = 'persistence'
+    log('persist-started', { sizeBytes: bytes.length, sha256: payloadHash, expectedRevision, fenceGeneration: lease.generation })
     const saved = await config.saveStore.put(profileId, gameId, bytes, expectedRevision, { fenceGeneration: lease.generation })
-    await adoptSaveIfSupported(config, profileId, entry, { bytes, revision: saved.revision })
+    persistedRevision = saved.revision
+    log('persisted', { sizeBytes: bytes.length, sha256: saved.sha256 ?? payloadHash, revision: saved.revision })
+    pipelineStage = 'adoption'
+    log('adoption-started', { revision: saved.revision })
+    const adopted = await adoptSaveIfSupported(config, profileId, entry, { bytes, revision: saved.revision })
+    log(adopted ? 'adopted' : 'adoption-skipped', { revision: saved.revision, reason: adopted ? undefined : 'unsupported-save-adapter' })
     json(response, expectedRevision === null ? 201 : 200, { revision: saved.revision, sha256: saved.sha256 })
   } catch (error) {
     const status = error.code === 'SAVE_REVISION_CONFLICT' ? 412 : error.code === 'PLAYER_LEASE_INVALID' ? 410 : error.code === 'SAVE_FENCE_CONFLICT' ? 409 : 400
+    log('failed', { stage: pipelineStage, persistedRevision, code: error.code ?? null, error: error.message }, 'error')
     json(response, status, { error: error.message, ...(error.code ? { code: error.code } : {}) })
   }
+}
+
+function getSaveTraceId(request) {
+  const candidate = request.headers['x-save-trace-id']
+  return typeof candidate === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(candidate) ? candidate : randomUUID()
 }
 
 async function readBinaryBody(request, expectedContentType = 'application/octet-stream', maximumBytes = 2 * 1024 * 1024) {
@@ -1227,11 +1302,11 @@ async function streamGamePatch(response, config, encodedId) {
   if (patchVerification.patch === null) return json(response, 404, { error: 'Game has no associated patch.' })
   response.writeHead(200, {
     'Cache-Control': 'no-store',
-    'Content-Length': patchVerification.bytes.length,
+    'Content-Length': patchVerification.patch.bytes.length,
     'Content-Type': 'application/octet-stream',
     'X-Content-Type-Options': 'nosniff',
   })
-  response.end(patchVerification.bytes)
+  response.end(patchVerification.patch.bytes)
 }
 
 async function findEntry(config, id) {
@@ -1297,19 +1372,18 @@ async function verifyRom(entry, romsDirectory) {
 }
 
 async function verifyGamePatch(entry, config) {
-  const patch = config.gamePatchForRom(entry.sha256)
-  if (patch === null) return { ok: true, patch: null }
-  const safePath = resolveSafeRomPath(config.patchesDirectory, patch.file)
-  if (safePath === null) return { ok: false, reason: 'Patch path must stay inside the patch directory.' }
-  const fileCheck = await inspectRomPath(config.patchesDirectory, safePath)
-  if (!fileCheck.ok) return { ok: false, reason: fileCheck.reason.replace('ROM', 'Patch') }
-  let bytes
-  try { bytes = await readFile(safePath) } catch (error) {
-    if (error.code === 'ENOENT') return { ok: false, reason: 'Patch file was not found.' }
-    throw error
+  const { patch, warning } = await config.ipsPatchRegistry.findForRomSha256(entry.sha256)
+  if (warning) return optionalPatchUnavailable(entry, warning)
+  return { ok: true, patch }
+}
+
+function optionalPatchUnavailable(entry, reason) {
+  const warningKey = `${entry.sha256}:${reason}`
+  if (!reportedOptionalPatchWarnings.has(warningKey)) {
+    reportedOptionalPatchWarnings.add(warningKey)
+    console.warn('[game-patch]', { event: 'optional-patch-skipped', gameId: entry.id, reason })
   }
-  if (createHash('sha256').update(bytes).digest('hex') !== patch.sha256) return { ok: false, reason: 'Patch hash does not match the trusted patch hash.' }
-  return { ok: true, patch, bytes }
+  return { ok: true, patch: null, warning: reason }
 }
 
 function validateCatalogEntry(entry) {
@@ -1618,8 +1692,9 @@ async function readProjectedPokemonHubProfiles(config) {
 async function adoptSaveIfSupported(config, profileId, entry, saved) {
   const layout = getPokemonSaveLayout(entry.pokemonSave?.layoutProfile, entry.pokemonSave?.adapter, entry.pokemonSave?.title)
   const adapter = layout && config.pokemonSaveAdapters.get(entry.pokemonSave.adapter)
-  if (!adapter) return
+  if (!adapter) return false
   await adoptPokemonHubSave({ coordinator: config.pokemonHubSnapshotCoordinator, profileId, gameId: entry.id, saved, adapter, layout })
+  return true
 }
 
 async function resolvePokemonHubSaveSource(config, { profileId, sourceKey }) {
@@ -1716,6 +1791,21 @@ function normalizePokemonHubLogger(logger) {
     warn() {},
     error(event, context = {}) { console.error(pokemonHubLogLabel(context), { timestamp: new Date().toISOString(), level: 'error', event, ...context }) },
   }
+}
+
+function normalizeSavePipelineLogger(logger) {
+  if (logger && ['info', 'warn', 'error'].every(level => typeof logger[level] === 'function')) return logger
+  return {
+    info(event, context = {}) { console.info('[save-pipeline]', { timestamp: new Date().toISOString(), level: 'info', event, ...context }) },
+    warn(event, context = {}) { console.warn('[save-pipeline]', { timestamp: new Date().toISOString(), level: 'warn', event, ...context }) },
+    error(event, context = {}) { console.error('[save-pipeline]', { timestamp: new Date().toISOString(), level: 'error', event, ...context }) },
+  }
+}
+
+function parseContentLength(value) {
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) return null
+  const length = Number(value)
+  return Number.isSafeInteger(length) ? length : null
 }
 
 function normalizeClientDiagnosticLogger(logger) {

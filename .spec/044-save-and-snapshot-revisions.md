@@ -58,15 +58,19 @@ bytes to the `.sav` path.
 
 ## Synchronization behavior
 
-- Remove periodic `.sav` uploads. The player observes EmulatorJS's
-  `saveSaveFiles` event and uploads only when the current save bytes hash
-  differs from the last acknowledged hash. Serialize uploads per player and
-  coalesce repeated events while one upload is in flight.
+- Remove periodic `.sav` uploads. While the game is running, the player polls
+  `gameManager.saveSaveFiles()` to flush SRAM through EmulatorJS's
+  `saveSaveFiles` event; this poll is save-only and does not upload snapshots.
+  Upload only when the save bytes hash differs from the last acknowledged
+  hash. The poll interval is at least one second and scales with SRAM size.
+  Serialize uploads per player and coalesce repeated events while one upload
+  is in flight.
 - Periodic recovery synchronization captures and uploads `getState()` only.
   It must not call `saveSaveFiles()`, read `getSaveFile()`, or write a save.
 - Manual Save state follows the same snapshot-only contract.
-- On close, stop new periodic captures, await outstanding capture/upload
-  work, then reconcile the snapshot before releasing the player lease.
+- On close, stop save polling and periodic snapshots, read and queue the final
+  battery-save bytes, await outstanding capture/upload work, then reconcile
+  the snapshot before releasing the player lease.
 - A failed write is surfaced by the existing close error behavior; the server
   must not delete a prior snapshot unless the comparison has completed.
 

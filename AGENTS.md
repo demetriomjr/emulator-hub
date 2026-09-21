@@ -9,6 +9,14 @@
 - The application projects live in `apps/frontend`, `apps/backend`, and `apps/electron`, alongside `apps/packages/`.
 - Keep application boundaries and package contracts explicit in `.spec/` before implementation. Follow spec-driven development for new features and architectural changes.
 
+## Core behavior and optional integrations
+
+- Preserve the application's core objective: launch a supported game and correctly load and persist its in-game save. Treat required launch and save integrity checks as hard requirements; do not turn optional enhancements into launch prerequisites.
+- Features that augment game content or runtime behavior are optional integrations. IPS patches are one example; future patch formats, compatibility layers, and similar enhancements follow the same rule.
+- Resolve optional integrations through generic, reusable mechanisms and data/metadata, not title-specific branches in application flow. Apply one only when it is registered for the verified ROM and its asset is available and valid.
+- If an optional integration is absent, unavailable, ambiguous, or invalid, log the issue, skip that integration, and continue the core game and save flow. It must not make an otherwise valid ROM unavailable, block profile or lease acquisition, prevent launch, or interfere with save/load.
+- Keep optional-feature failure handling separate from core ROM, profile, lease, and save validation. A failure in an enhancement must not weaken those required checks or data-integrity guarantees.
+
 ## Working rules
 
 - Do not run project builds unless the user explicitly asks.

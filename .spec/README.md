@@ -1,5 +1,7 @@
 # Specifications
 
+- [Spec 043 — Generic IPS patch discovery](043-ips-patch-discovery.md): ROM-hash registry, IPS validation, optional patch application, and game-agnostic launch behavior.
+
 - [Spec 044 — Battery saves and independent emulator snapshots](044-save-and-snapshot-revisions.md): event-driven canonical `.sav` uploads, state-only snapshots, explicit restore choice, and close-time revision reconciliation.
 
 - [Spec 035 — Generation III regional transfer gates](035-generation-iii-regional-transfer-gates.md): save-level National Dex, regional-membership, and FireRed/LeafGreen Network Machine gates for Ruby, Sapphire, Emerald, FireRed, and LeafGreen Hub transfers.

@@ -292,23 +292,51 @@ async function readPokemonHubResponse(response) {
   return body
 }
 
-export async function getCloudSave(url, lease) {
-  const response = await fetch(url, { cache: 'no-store', headers: leaseHeaders(lease) })
-  if (response.status === 404) return null
-  if (!response.ok) throw new Error(`Save request failed (${response.status})`)
+export async function getCloudSave(url, lease, traceId = null, logger = () => {}) {
+  const headers = leaseHeaders(lease)
+  if (traceId) headers['X-Save-Trace-Id'] = traceId
+  let response
+  try {
+    response = await fetch(url, { cache: 'no-store', headers })
+  } catch (error) {
+    logger('save.front.get-failed', { traceId, stage: 'request', error: error?.message ?? String(error) })
+    throw error
+  }
+  if (response.status === 404) {
+    logger('save.front.get-response', { traceId, status: response.status, ok: true, found: false })
+    return null
+  }
+  if (!response.ok) {
+    logger('save.front.get-response', { traceId, status: response.status, ok: false, found: null })
+    throw new Error(`Save request failed (${response.status})`)
+  }
   const revision = /^"(\d+)"$/.exec(response.headers.get('etag') ?? '')?.[1]
-  if (!revision) throw new Error('Save response is missing a revision.')
-  return { bytes: new Uint8Array(await response.arrayBuffer()), revision: Number(revision) }
+  if (!revision) {
+    logger('save.front.get-failed', { traceId, stage: 'response-validation', status: response.status, error: 'Save response is missing a revision.' })
+    throw new Error('Save response is missing a revision.')
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer())
+  logger('save.front.get-response', { traceId, status: response.status, ok: true, found: true, sizeBytes: bytes.byteLength, revision: Number(revision) })
+  return { bytes, revision: Number(revision), traceId }
 }
 
-export async function putCloudSave(url, bytes, revision, lease) {
+export async function putCloudSave(url, bytes, revision, lease, traceId = null, logger = () => {}) {
+  const headers = { 'Content-Type': 'application/octet-stream', 'If-Match': revision === null ? '*' : `"${revision}"`, ...leaseHeaders(lease) }
+  if (traceId) headers['X-Save-Trace-Id'] = traceId
   const response = await fetch(url, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/octet-stream', 'If-Match': revision === null ? '*' : `"${revision}"`, ...leaseHeaders(lease) },
+    headers,
     body: bytes,
   })
   const body = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(body.error || `Save upload failed (${response.status})`)
+  if (!response.ok) {
+    logger('save.front.put-response', { traceId, status: response.status, ok: false, code: body.code ?? null })
+    const error = new Error(body.error || `Save upload failed (${response.status})`)
+    error.code = body.code
+    error.status = response.status
+    throw error
+  }
+  logger('save.front.put-response', { traceId, status: response.status, ok: true, revision: body.revision ?? null })
   return body
 }
 

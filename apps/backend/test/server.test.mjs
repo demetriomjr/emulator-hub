@@ -11,7 +11,6 @@ import { decodeSnapshotBundle, encodeSnapshotBundle } from '../../packages/emula
 import { createCloudSaveSynchronizer } from '../../packages/cloud-save-sync.mjs'
 import { observeEmulatorSaveFiles } from '../../packages/emulator-save-events.mjs'
 import { createSaveStore } from '../../packages/save-store.mjs'
-import { createGamePatchLookup } from '../../packages/game-patches.mjs'
 
 const liveServers = new Set()
 const liveFixtures = new Set()
@@ -68,6 +67,14 @@ afterEach(async () => {
 
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex')
+}
+
+function validIps(value = 1) {
+  return Buffer.from([...Buffer.from('PATCH'), 0, 0, 1, 0, 1, value, ...Buffer.from('EOF')])
+}
+
+function ipsManifestEntry(rom, patch, file, patchSha256 = sha256(patch)) {
+  return Buffer.from(JSON.stringify({ version: 1, patches: [{ romSha256: sha256(rom), file, patchSha256 }] }))
 }
 
 async function createFixture(entries, files = {}, patches = {}) {
@@ -128,26 +135,84 @@ async function acquirePlayerLease(baseUrl, gameId, profileId, sessionId = 'playe
 }
 
 describe('hub backend HTTP contract', () => {
-  test('serves an IPS only with the matching verified ROM launch descriptor', async () => {
-    const rom = Buffer.from('emerald fixture ROM')
-    const ips = Buffer.from('PATCH\x00\x00\x00EOF')
+  test('discovers and serves an IPS for an arbitrary game identity using the verified ROM hash', async () => {
+    const rom = Buffer.from('arbitrary fixture ROM')
+    const ips = validIps(42)
     const { baseUrl } = await startFixture([
-      { id: 'pokemon-emerald', title: 'Pokémon Emerald', system: 'gba', core: 'gba', file: 'emerald.gba', sha256: sha256(rom) },
-    ], { 'emerald.gba': rom }, { 'emerald-rng.ips': ips }, {
-      gamePatchForRom: createGamePatchLookup([{ romSha256: sha256(rom), file: 'emerald-rng.ips', sha256: sha256(ips) }]),
-    })
-    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-emerald/profiles`, {
+      { id: 'custom-adventure', title: 'Unrelated Adventure', system: 'gba', core: 'gba', file: 'adventure.gba', sha256: sha256(rom) },
+    ], { 'adventure.gba': rom }, { 'adventure-fix.ips': ips, 'manifest.json': ipsManifestEntry(rom, ips, 'adventure-fix.ips') })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/custom-adventure/profiles`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'May' }),
     }))
 
-    const launch = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-emerald/launch?profileId=${profile.id}`))
-    assert.equal(launch.patchUrl, '/roms/pokemon-emerald/patch')
+    const launch = await jsonResponse(await fetch(`${baseUrl}/api/games/custom-adventure/launch?profileId=${profile.id}`))
+    assert.equal(launch.patchUrl, '/roms/custom-adventure/patch')
     assert.equal(launch.patchSha256, sha256(ips))
     const patchResponse = await fetch(`${baseUrl}${launch.patchUrl}`)
     assert.equal(patchResponse.status, 200)
     assert.equal(patchResponse.headers.get('cache-control'), 'no-store')
     assert.equal(patchResponse.headers.get('content-length'), String(ips.length))
     assert.deepEqual(Buffer.from(await patchResponse.arrayBuffer()), ips)
+  })
+
+  test('launches a compatible game without an optional IPS when the patch file is missing', async () => {
+    const rom = Buffer.from('emerald fixture ROM without its optional patch')
+    const { baseUrl } = await startFixture([
+      { id: 'pokemon-emerald', title: 'Pokémon Emerald', system: 'gba', core: 'gba', file: 'emerald.gba', sha256: sha256(rom) },
+    ], { 'emerald.gba': rom }, { 'manifest.json': ipsManifestEntry(rom, validIps(), 'emerald-rng.ips') })
+    const games = await jsonResponse(await fetch(`${baseUrl}/api/games`))
+    assert.equal(games.games[0].status, 'ready')
+
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-emerald/profiles`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'May' }),
+    }))
+    const launch = await fetch(`${baseUrl}/api/games/pokemon-emerald/launch?profileId=${profile.id}`)
+    assert.equal(launch.status, 200)
+    const descriptor = await launch.json()
+    assert.equal('patchUrl' in descriptor, false)
+    assert.equal('patchSha256' in descriptor, false)
+    const lease = await acquirePlayerLease(baseUrl, 'pokemon-emerald', profile.id)
+    assert.equal(lease.response.status, 200)
+    assert.equal('patchUrl' in lease.body, false)
+    assert.equal('patchSha256' in lease.body, false)
+  })
+
+  test('launches a compatible game without an optional IPS when its hash is invalid', async () => {
+    const rom = Buffer.from('emerald fixture ROM with an invalid optional patch')
+    const ips = validIps(2)
+    const { baseUrl } = await startFixture([
+      { id: 'pokemon-emerald', title: 'Pokémon Emerald', system: 'gba', core: 'gba', file: 'emerald.gba', sha256: sha256(rom) },
+    ], { 'emerald.gba': rom }, { 'emerald-rng.ips': ips, 'manifest.json': ipsManifestEntry(rom, ips, 'emerald-rng.ips', sha256(validIps(3))) })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-emerald/profiles`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'May' }),
+    }))
+
+    const lease = await acquirePlayerLease(baseUrl, 'pokemon-emerald', profile.id)
+    assert.equal(lease.response.status, 200)
+    assert.equal('patchUrl' in lease.body, false)
+    assert.equal('patchSha256' in lease.body, false)
+  })
+
+  test('keeps a game launchable when its IPS manifest has ambiguous entries', async () => {
+    const rom = Buffer.from('ambiguous IPS registry ROM')
+    const ips = validIps(8)
+    const manifest = Buffer.from(JSON.stringify({ version: 1, patches: [
+      { romSha256: sha256(rom), file: 'fix.ips', patchSha256: sha256(ips) },
+      { romSha256: sha256(rom), file: 'fix.ips', patchSha256: sha256(ips) },
+    ] }))
+    const { baseUrl } = await startFixture([
+      { id: 'custom-game', title: 'Custom Game', system: 'gb', core: 'gambatte', file: 'custom.gb', sha256: sha256(rom) },
+    ], { 'custom.gb': rom }, { 'fix.ips': ips, 'manifest.json': manifest })
+    const gameList = await jsonResponse(await fetch(`${baseUrl}/api/games`))
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/custom-game/profiles`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Player' }),
+    }))
+
+    assert.equal(gameList.games[0].status, 'ready')
+    const lease = await acquirePlayerLease(baseUrl, 'custom-game', profile.id)
+    assert.equal(lease.response.status, 200)
+    assert.equal('patchUrl' in lease.body, false)
+    assert.equal('patchSha256' in lease.body, false)
   })
 
   test('serves one lease-protected state-only snapshot slot from the launch descriptor', async () => {
@@ -178,7 +243,15 @@ describe('hub backend HTTP contract', () => {
 
   test('simulates save events, snapshot upload, and close-time revision reconciliation across HTTP endpoints', async () => {
     const rom = Buffer.from('save and snapshot flow fixture')
-    const { baseUrl } = await startFixture([{ id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom) }], { 'pokemon-red.gb': rom })
+    const backendEvents = []
+    const frontendEvents = []
+    const { baseUrl } = await startFixture([{ id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom) }], { 'pokemon-red.gb': rom }, {}, {
+      savePipelineLogger: {
+        info: (event, context) => backendEvents.push({ level: 'info', event, context }),
+        warn: (event, context) => backendEvents.push({ level: 'warn', event, context }),
+        error: (event, context) => backendEvents.push({ level: 'error', event, context }),
+      },
+    })
     const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Red' }) }))
     const firstLease = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'save-flow-one')
 
@@ -194,20 +267,29 @@ describe('hub backend HTTP contract', () => {
         assert.equal(response.status, 200)
         return { bytes: new Uint8Array(await response.arrayBuffer()), revision: Number(response.headers.get('etag').replaceAll('"', '')) }
       },
-      upload: async (bytes, revision) => {
-        const response = await fetch(saveUrl, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/octet-stream', 'If-Match': revision === null ? '*' : `"${revision}"` }, body: bytes })
+      upload: async (bytes, revision, traceId) => {
+        const response = await fetch(saveUrl, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/octet-stream', 'If-Match': revision === null ? '*' : `"${revision}"`, 'X-Save-Trace-Id': traceId }, body: bytes })
         assert.equal(response.ok, true)
         return response.json()
       },
       hash: async bytes => sha256(bytes),
+      logger: (event, context) => frontendEvents.push({ event, context }),
     })
     await cloudSave.load()
     let saveEvent
-    assert.equal(observeEmulatorSaveFiles({ on(name, handler) { assert.equal(name, 'saveSaveFiles'); saveEvent = handler } }, bytes => cloudSave.syncBytes(bytes)), true)
+    let eventSequence = 0
+    assert.equal(observeEmulatorSaveFiles({ on(name, handler) { assert.equal(name, 'saveSaveFiles'); saveEvent = handler } }, bytes => cloudSave.syncBytes(bytes, `save-flow-${++eventSequence}`)), true)
 
     const firstSave = new Uint8Array([11, 22, 33])
     await saveEvent(firstSave)
     await saveEvent(firstSave)
+    assert.ok(frontendEvents.some(({ event, context }) => event === 'save.front.upload-accepted' && context.traceId === 'save-flow-1' && context.revision === 1))
+    assert.ok(frontendEvents.some(({ event, context }) => event === 'save.front.deduplicated' && context.traceId === 'save-flow-2'))
+    const firstTraceEvents = backendEvents.filter(({ context }) => context.traceId === 'save-flow-1')
+    assert.ok(firstTraceEvents.some(({ event }) => event === 'save.backend.put-received'))
+    assert.ok(firstTraceEvents.some(({ event, context }) => event === 'save.backend.persisted' && context.revision === 1))
+    assert.ok(firstTraceEvents.some(({ event, context }) => event === 'save.backend.response' && context.status === 201))
+    assert.equal(backendEvents.some(({ context }) => context.traceId === 'save-flow-2'), false, 'a deduplicated save must not issue an HTTP PUT')
     const saveAfterEvent = await fetch(saveUrl, { headers })
     assert.equal(saveAfterEvent.headers.get('etag'), '"1"')
     assert.deepEqual([...new Uint8Array(await saveAfterEvent.arrayBuffer())], [...firstSave])
@@ -1019,6 +1101,128 @@ describe('hub backend HTTP contract', () => {
     })
     assert.equal(updated.status, 200)
     assert.deepEqual(await jsonResponse(updated), { revision: 2, sha256: sha256(changedSave) })
+  })
+
+  test('traces a binary save PUT from ingress through persistence and response without logging save bytes', async () => {
+    const rom = Buffer.from('save trace integration rom')
+    const events = []
+    const { baseUrl } = await startFixture([{
+      id: 'pokemon-emerald', title: 'Pokémon Emerald', system: 'gba', core: 'mgba', file: 'pokemon-emerald.gba', sha256: sha256(rom),
+    }], { 'pokemon-emerald.gba': rom }, {}, {
+      savePipelineLogger: {
+        info: (event, context) => events.push({ level: 'info', event, context }),
+        warn: (event, context) => events.push({ level: 'warn', event, context }),
+        error: (event, context) => events.push({ level: 'error', event, context }),
+      },
+    })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-emerald/profiles`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'May' }),
+    }))
+    const lease = await acquirePlayerLease(baseUrl, 'pokemon-emerald', profile.id)
+    const traceId = 'save-trace-integration-1'
+    const bytes = Buffer.from([0, 1, 2, 255])
+    const response = await fetch(`${baseUrl}/api/profiles/${profile.id}/games/pokemon-emerald/save`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/octet-stream', 'If-Match': '*', 'X-Save-Trace-Id': traceId,
+        Cookie: lease.cookie, 'X-Player-Session-Id': 'player-session-a', 'X-Player-Lease-Generation': String(lease.body.leaseGeneration),
+      },
+      body: bytes,
+    })
+
+    assert.equal(response.status, 201)
+    assert.equal(response.headers.get('x-save-trace-id'), traceId)
+    const traceEvents = events.filter(({ context }) => context.traceId === traceId)
+    assert.deepEqual(traceEvents.map(({ event }) => event), [
+      'save.backend.put-received',
+      'save.backend.body-received',
+      'save.backend.lease-validated',
+      'save.backend.persist-started',
+      'save.backend.persisted',
+      'save.backend.adoption-started',
+      'save.backend.adoption-skipped',
+      'save.backend.response',
+    ])
+    assert.equal(traceEvents.find(({ event }) => event === 'save.backend.body-received').context.sizeBytes, bytes.length)
+    assert.equal(traceEvents.find(({ event }) => event === 'save.backend.persisted').context.revision, 1)
+    assert.ok(traceEvents.every(({ context }) => !('bytes' in context) && !('body' in context)))
+    assert.ok(!JSON.stringify(traceEvents).includes(bytes.toString('hex')))
+  })
+
+  test('traces battery-save GET from backend lookup through returned bytes', async () => {
+    const rom = Buffer.from('save read trace integration rom')
+    const events = []
+    const { baseUrl } = await startFixture([{
+      id: 'pokemon-emerald', title: 'Pokémon Emerald', system: 'gba', core: 'mgba', file: 'pokemon-emerald.gba', sha256: sha256(rom),
+    }], { 'pokemon-emerald.gba': rom }, {}, {
+      savePipelineLogger: {
+        info: (event, context) => events.push({ level: 'info', event, context }),
+        warn: (event, context) => events.push({ level: 'warn', event, context }),
+        error: (event, context) => events.push({ level: 'error', event, context }),
+      },
+    })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-emerald/profiles`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'May' }),
+    }))
+    const lease = await acquirePlayerLease(baseUrl, 'pokemon-emerald', profile.id)
+    const leaseHeaders = { Cookie: lease.cookie, 'X-Player-Session-Id': 'player-session-a', 'X-Player-Lease-Generation': String(lease.body.leaseGeneration) }
+    const bytes = Buffer.from([0, 4, 8, 255])
+    const put = await fetch(`${baseUrl}/api/profiles/${profile.id}/games/pokemon-emerald/save`, {
+      method: 'PUT', headers: { ...leaseHeaders, 'Content-Type': 'application/octet-stream', 'If-Match': '*' }, body: bytes,
+    })
+    assert.equal(put.status, 201)
+
+    const traceId = 'save-read-trace-integration-1'
+    const response = await fetch(`${baseUrl}/api/profiles/${profile.id}/games/pokemon-emerald/save`, {
+      headers: { ...leaseHeaders, 'X-Save-Trace-Id': traceId },
+    })
+
+    assert.equal(response.status, 200)
+    assert.equal(response.headers.get('x-save-trace-id'), traceId)
+    assert.deepEqual([...new Uint8Array(await response.arrayBuffer())], [...bytes])
+    const traceEvents = events.filter(({ context }) => context.traceId === traceId)
+    assert.deepEqual(traceEvents.map(({ event }) => event), [
+      'save.backend.get-received',
+      'save.backend.read-started',
+      'save.backend.read-completed',
+      'save.backend.response',
+    ])
+    assert.equal(traceEvents.find(({ event }) => event === 'save.backend.read-completed').context.sizeBytes, bytes.length)
+    assert.equal(traceEvents.find(({ event }) => event === 'save.backend.read-completed').context.revision, 1)
+    assert.ok(traceEvents.every(({ context }) => !('bytes' in context) && !('body' in context)))
+  })
+
+  test('records a correlated reason when the save PUT lease is rejected', async () => {
+    const rom = Buffer.from('save lease trace integration rom')
+    const events = []
+    const { baseUrl } = await startFixture([{
+      id: 'pokemon-emerald', title: 'Pokémon Emerald', system: 'gba', core: 'mgba', file: 'pokemon-emerald.gba', sha256: sha256(rom),
+    }], { 'pokemon-emerald.gba': rom }, {}, {
+      savePipelineLogger: {
+        info: (event, context) => events.push({ level: 'info', event, context }),
+        warn: (event, context) => events.push({ level: 'warn', event, context }),
+        error: (event, context) => events.push({ level: 'error', event, context }),
+      },
+    })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-emerald/profiles`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'May' }),
+    }))
+    const lease = await acquirePlayerLease(baseUrl, 'pokemon-emerald', profile.id)
+    const traceId = 'save-trace-invalid-lease'
+    const response = await fetch(`${baseUrl}/api/profiles/${profile.id}/games/pokemon-emerald/save`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/octet-stream', 'If-Match': '*', 'X-Save-Trace-Id': traceId,
+        Cookie: lease.cookie, 'X-Player-Session-Id': 'player-session-a', 'X-Player-Lease-Generation': String(lease.body.leaseGeneration + 1),
+      },
+      body: Buffer.from([8, 7, 6]),
+    })
+
+    assert.equal(response.status, 410)
+    const failed = events.find(({ event, context }) => event === 'save.backend.failed' && context.traceId === traceId)
+    assert.equal(failed.context.stage, 'lease-validation')
+    assert.equal(failed.context.code, 'PLAYER_LEASE_INVALID')
+    assert.equal(events.some(({ event, context }) => event === 'save.backend.persisted' && context.traceId === traceId), false)
   })
 
   test('retrieves and replaces the global control profile', async () => {
