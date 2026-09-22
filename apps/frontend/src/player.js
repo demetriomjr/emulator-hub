@@ -586,11 +586,9 @@ async function start() {
       }
     }
     const restoreCloudSnapshot = savedSnapshot ? await requestRestoreDecision('cloud-snapshot') : false
-    if (selectedLocalRecovery) {
-      window.EJS_emulator.gameManager.loadState(new Uint8Array(selectedLocalRecovery.state))
-    } else if (!restoreSnapshotState(savedSnapshot, window.EJS_emulator.gameManager, () => restoreCloudSnapshot)) {
-      await cloudSaveSynchronizer.restore(window.EJS_emulator.gameManager)
-    }
+    if (selectedLocalRecovery) window.EJS_emulator.gameManager.loadState(new Uint8Array(selectedLocalRecovery.state))
+    else restoreSnapshotState(savedSnapshot, window.EJS_emulator.gameManager, () => restoreCloudSnapshot)
+    await cloudSaveSynchronizer.restore(window.EJS_emulator.gameManager)
     watchBatterySaveChanges()
     cloudSaveInterval = window.setInterval(() => saveEmulatorState().catch(() => {}), 15000)
     localRecoveryInterval = window.setInterval(() => void captureLocalRecovery(), 2_500)

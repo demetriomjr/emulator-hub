@@ -34,6 +34,7 @@ test('uploads battery saves from EmulatorJS save events and keeps periodic snaps
   assert.match(player, /restoreSnapshotState\(savedSnapshot/)
   assert.match(player, /await cloudSaveSynchronizer\.restore\(window\.EJS_emulator\.gameManager\)/)
   assert.match(player, /await cloudSaveSynchronizer\.restore\([\s\S]*?setPlayerReady\(\)/)
+  assert.match(player, /else restoreSnapshotState\(savedSnapshot,[\s\S]*?await cloudSaveSynchronizer\.restore\(window\.EJS_emulator\.gameManager\)/)
   assert.match(player, /function createEmulatorGameId\(gameId, profileId\)/)
   assert.match(player, /window\.EJS_gameID = emulatorGameId/)
   assert.match(player, /emulatorGameId, \.\.\.context/)
