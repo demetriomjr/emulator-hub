@@ -1,5 +1,9 @@
 # Specifications
 
+- [Spec 048 — Backend state backup endpoint and startup barrier](048-backend-state-backup.md): authenticated full-state archives for profiles, saves, Pokémon Hub state, and a pre-listen production backup.
+
+- [Spec 047 — Multi-player save integrity and close barrier](047-multi-save-integrity-close.md): parallel per-game save close, bounded retries, lease-safe completion, and an opaque status barrier.
+
 - [Spec 046 — Global player-header preferences and L2/R2 Fast Forward](046-trigger-fast-forward-toggle.md): persist Fast Forward speed and L2/R2 actions in one backend-global preference document, and toggle session Fast Forward using the first active emulator as the state reference.
 
 - [Spec 045 — Six-instance player surface](045-six-instance-player.md): increase the session cap to six while preserving all existing global player controls and per-instance isolation.

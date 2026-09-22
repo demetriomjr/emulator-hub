@@ -61,6 +61,24 @@ test('serializes concurrent writers from separate save-store instances', async (
   }
 })
 
+test('allows independent game save keys to complete concurrently', async () => {
+  const dataPath = await mkdtemp(join(tmpdir(), 'emulator-hub-save-store-'))
+  try {
+    const store = createSaveStore({ dataPath })
+    const results = await Promise.all([
+      store.put('profile-may', 'pokemon-red', Buffer.from([1]), null, { fenceGeneration: 1 }),
+      store.put('profile-may', 'pokemon-blue', Buffer.from([2]), null, { fenceGeneration: 1 }),
+      store.put('profile-june', 'pokemon-red', Buffer.from([3]), null, { fenceGeneration: 1 }),
+    ])
+    assert.deepEqual(results.map(result => result.revision), [1, 1, 1])
+    assert.equal((await store.get('profile-may', 'pokemon-red')).bytes[0], 1)
+    assert.equal((await store.get('profile-may', 'pokemon-blue')).bytes[0], 2)
+    assert.equal((await store.get('profile-june', 'pokemon-red')).bytes[0], 3)
+  } finally {
+    await rm(dataPath, { recursive: true, force: true })
+  }
+})
+
 test('fails within a bounded deadline when an orphan save lock cannot be acquired', async () => {
   const dataPath = await mkdtemp(join(tmpdir(), 'emulator-hub-save-store-'))
   let instant = 100

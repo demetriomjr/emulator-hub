@@ -39,6 +39,18 @@ test('backend bootstrap runs only the legacy JSON import before listening', asyn
   assert.deepEqual(events, ['connect', 'legacy', 'create', 'once:error', 'listen:127.0.0.1:0', 'listening'])
 })
 
+test('backend bootstrap completes the startup backup before listening', async () => {
+  const events = []
+  const persistence = { async connect() { events.push('connect') }, async close() { events.push('close') } }
+  const server = {
+    backendStateBackup: { async create(reason) { events.push(`backup:${reason}`) } },
+    once(event) { events.push(`once:${event}`) },
+    listen(port, host, callback) { events.push(`listen:${host}:${port}`); callback() },
+  }
+  await bootstrapHubServer({ persistence, host: '127.0.0.1', port: 0, migrateLegacy: async () => { events.push('legacy') }, makeServer: () => server })
+  assert.deepEqual(events, ['connect', 'legacy', 'backup:startup', 'once:error', 'listen:127.0.0.1:0'])
+})
+
 test('backend bootstrap closes persistence and never listens when the legacy import fails', async () => {
   const events = []
   const failure = Object.assign(new Error('marker missing'), { code: 'REDIS_MIGRATION_MARKER_MISSING' })
@@ -56,6 +68,24 @@ test('backend bootstrap closes persistence and never listens when the legacy imp
   }), failure)
 
   assert.deepEqual(events, ['connect', 'legacy', 'close'])
+})
+
+test('creates an authenticated backend state backup without exposing its contents', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'emulator-hub-backup-endpoint-'))
+  liveFixtures.add(root)
+  const rom = Buffer.from('backup endpoint rom')
+  const fixture = await createFixture([{ id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom) }], { 'pokemon-red.gb': rom })
+  const server = createHubServer({ ...fixture, backupToken: 'test-backup-token', backupsPath: join(root, 'backups') })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  liveServers.add(server)
+  const baseUrl = `http://127.0.0.1:${server.address().port}`
+  const unauthorized = await fetch(`${baseUrl}/api/ops/backups/backend-state`, { method: 'POST' })
+  assert.equal(unauthorized.status, 401)
+  const authorized = await fetch(`${baseUrl}/api/ops/backups/backend-state`, { method: 'POST', headers: { Authorization: 'Bearer test-backup-token' } })
+  assert.equal(authorized.status, 201)
+  const result = await authorized.json()
+  assert.equal(result.reason, 'operator')
+  assert.equal('saves' in result, false)
 })
 
 afterEach(async () => {

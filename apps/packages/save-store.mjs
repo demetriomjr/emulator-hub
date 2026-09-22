@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, open, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 const maximumSaveBytes = 2 * 1024 * 1024
@@ -11,6 +11,23 @@ export function createSaveStore({ dataPath, lockTimeoutMs = 5_000, lockRetryMs =
   const lockOptions = { lockTimeoutMs, lockRetryMs, now, wait }
   return {
     get,
+    async listAll() {
+      let profiles
+      try { profiles = await readdir(dataPath, { withFileTypes: true }) } catch (error) { if (error.code === 'ENOENT') return []; throw error }
+      const saves = []
+      for (const profileEntry of profiles) {
+        if (!profileEntry.isDirectory()) continue
+        let files
+        try { files = await readdir(join(dataPath, profileEntry.name)) } catch (error) { if (error.code === 'ENOENT') continue; throw error }
+        for (const file of files) {
+          if (!file.endsWith('.sav')) continue
+          const gameId = file.slice(0, -'.sav'.length)
+          const saved = await get(profileEntry.name, gameId)
+          if (saved !== null) saves.push({ profileId: profileEntry.name, gameId, ...saved })
+        }
+      }
+      return saves
+    },
     async put(profileId, gameId, bytes, expectedRevision, { fenceGeneration = 0 } = {}) {
       return serialize(saveKey(profileId, gameId), async () => {
       const paths = savePaths(dataPath, profileId, gameId)

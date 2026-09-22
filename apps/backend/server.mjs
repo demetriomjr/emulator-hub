@@ -38,6 +38,7 @@ import { createClientDiagnosticStore } from '../packages/client-diagnostic-store
 import { createPlayerLeaseCoordinator } from '../packages/player-lease-coordinator.mjs'
 import { createGameSaveLeaseCoordinator } from '../packages/game-save-lease-coordinator.mjs'
 import { createIpsPatchRegistry } from '../packages/game-patches.mjs'
+import { createBackendStateBackup } from '../packages/backend-state-backup.mjs'
 
 const backendDirectory = dirname(fileURLToPath(import.meta.url))
 const defaultCatalogPath = join(backendDirectory, 'catalog.json')
@@ -50,6 +51,7 @@ const defaultSnapshotsPath = join(backendDirectory, 'data', 'snapshots')
 const defaultPokemonHubPath = join(backendDirectory, 'data', 'pokemon-hub')
 const defaultPokemonHubProfilesPath = join(backendDirectory, 'data', 'pokemon-hub-profiles')
 const defaultRomRegistryPath = join(backendDirectory, 'data', 'rom-registry.json')
+const defaultBackupsPath = join(backendDirectory, 'data', 'backups')
 const loadGameMetadata = createGameMetadataLoader()
 const execFileAsync = promisify(execFile)
 const defaultJsonBodyMaximumBytes = 4 * 1024
@@ -106,7 +108,11 @@ export function createHubServer(options = {}) {
     clientDiagnosticLogger: normalizeClientDiagnosticLogger(options.clientDiagnosticLogger),
     gameSaveLeases,
     playerLeases: options.playerLeases ?? createPlayerLeaseCoordinator({ persistence, gameSaveLeases }),
+    backupToken: options.backupToken ?? process.env.EMULATOR_HUB_BACKUP_TOKEN ?? '',
   }
+  config.backupService = options.backupService ?? (typeof config.saveStore.listAll === 'function'
+    ? createBackendStateBackup({ persistence, saveStore: config.saveStore, backupsPath: options.backupsPath ?? defaultBackupsPath, namespace: options.redisNamespace ?? process.env.REDIS_NAMESPACE ?? null })
+    : null)
   config.pokemonHubSnapshotCoordinator = options.pokemonHubSnapshotCoordinator ?? createPokemonHubSnapshotCoordinator({ persistence, eventStore: config.pokemonHubEventStore, logger: config.pokemonHubLogger, validatePlacementChange: createPokemonHubTransferPlacementPolicy(), gameSaveLeases: config.gameSaveLeases })
   const canCreatePokemonHubSessionService = ['getSnapshot', 'renew', 'release', 'sync', 'reconcileWorkspaceLeases'].every(method => typeof config.pokemonHubSnapshotCoordinator[method] === 'function')
   config.pokemonHubSessionService = options.pokemonHubSessionService ?? (canCreatePokemonHubSessionService
@@ -171,6 +177,7 @@ export function createHubServer(options = {}) {
     if (expiredLeaseTimer !== null) clearInterval(expiredLeaseTimer)
     config.pokemonHubSaveFlush.dispose?.()
   })
+  server.backendStateBackup = config.backupService
   return server
 }
 
@@ -247,6 +254,7 @@ async function handleRequest(request, response, config) {
   const pokemonHubProfilesRoute = route.pathname === '/api/pokemon-hub/profiles'
   const pokemonHubProfileRoute = parsePokemonHubProfileRoute(route.pathname)
   const isClientDiagnosticsRoute = route.pathname === '/api/debug/client-events'
+  const isBackupRoute = route.pathname === '/api/ops/backups/backend-state'
   const supportedMethod = request.method === 'GET'
     || (request.method === 'HEAD' && isRomRoute && !patchRoute)
     || (request.method === 'POST' && gameProfilesRoute)
@@ -260,9 +268,15 @@ async function handleRequest(request, response, config) {
     || (request.method === 'PATCH' && gameProfileRoute)
     || (request.method === 'DELETE' && gameProfileRoute)
     || (isClientDiagnosticsRoute && request.method === 'POST')
+    || (isBackupRoute && request.method === 'POST')
   if (!supportedMethod) {
     response.setHeader('Allow', isClientDiagnosticsRoute ? 'GET, POST' : isUserPreferencesRoute ? 'GET, PATCH' : pokemonHubSessionRoute ? pokemonHubSessionRoute.kind === 'detach' || pokemonHubSessionRoute.kind === 'close' ? 'DELETE' : 'POST' : pokemonHubRoute ? ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute.kind) ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'PATCH, DELETE' : pokemonHubProfilesRoute || gameProfilesRoute ? 'GET, POST' : snapshotRoute || saveRoute || isControlProfileRoute ? 'GET, PUT' : gameProfileRoute ? 'PATCH, DELETE' : patchRoute ? 'GET' : isRomRoute ? 'GET, HEAD' : 'GET')
     json(response, 405, { error: 'Method is not supported for this route.' })
+    return
+  }
+
+  if (isBackupRoute) {
+    await handleBackendStateBackup(request, response, config)
     return
   }
 
@@ -1248,6 +1262,20 @@ function getSaveTraceId(request) {
   return typeof candidate === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(candidate) ? candidate : randomUUID()
 }
 
+async function handleBackendStateBackup(request, response, config) {
+  if (!config.backupToken || !config.backupService) return json(response, 503, { error: 'Backend backups are not configured.' })
+  const authorization = request.headers.authorization
+  const expected = `Bearer ${config.backupToken}`
+  if (authorization !== expected) return json(response, 401, { error: 'Backup authorization is required.' })
+  try {
+    const result = await config.backupService.create('operator')
+    return json(response, 201, result)
+  } catch (error) {
+    console.error('[Emulator Hub] backend state backup failed', { code: error.code ?? null, message: error.message })
+    return json(response, 500, { error: 'Backend state backup failed.' })
+  }
+}
+
 async function readBinaryBody(request, expectedContentType = 'application/octet-stream', maximumBytes = 2 * 1024 * 1024) {
   if (request.headers['content-type']?.toLowerCase() !== expectedContentType) {
     const error = new Error(`Content-Type must be ${expectedContentType}.`)
@@ -1899,6 +1927,13 @@ export async function bootstrapHubServer({
     await persistence.connect()
     await migrateLegacy({ persistence, ...legacyMigrationOptions })
     const server = makeServer()
+    if (server.backendStateBackup && typeof server.backendStateBackup.create === 'function') {
+      try {
+        await server.backendStateBackup.create('startup')
+      } catch (error) {
+        throw error
+      }
+    }
     server.once('error', error => { void onListenError(error) })
     server.listen(port, host, onListening)
     return server

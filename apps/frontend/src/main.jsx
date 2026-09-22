@@ -7,6 +7,7 @@ import { replaceCatalogProfile } from '../../packages/save-profile-catalog.mjs'
 import { groupGamesByLayout } from '../../packages/hub-layout.mjs'
 import { getProfilePickerPlacement } from '../../packages/profile-picker-placement.mjs'
 import { appendClientDiagnosticsParameters, createClientDiagnostics, getClientDiagnosticsOptions } from '../../packages/client-diagnostics.mjs'
+import { createMultiSaveCloseCoordinator } from '../../packages/multi-save-close-coordinator.mjs'
 import { closePlayerAfterSaveAttempts } from '../../packages/player-close.mjs'
 import { isMobileLandscapeViewport, isNarrowPortraitViewport } from '../../packages/mobile-viewport.mjs'
 import { shouldReloadForFrontendRevision } from '../../packages/frontend-revision.mjs'
@@ -202,6 +203,8 @@ function App() {
   const [error, setError] = useState('')
   const [installHelpOpen, setInstallHelpOpen] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
+  const [saveCloseRows, setSaveCloseRows] = useState(null)
+  const saveCloseCoordinatorRef = useRef(null)
   const [viewport, setViewport] = useState(readViewport)
   const playerShellRef = useRef(null)
   const profilePickerRequestRef = useRef(0)
@@ -472,6 +475,26 @@ function App() {
   }
 
   async function closePlayer() {
+    if (saveCloseCoordinatorRef.current) return
+    const tasks = activeSessions.map((session, index) => ({
+      id: `${session.gameId}:${session.profileId}`,
+      label: games.find(game => game.id === session.gameId)?.title ?? session.gameId,
+      run: async () => {
+        const frame = document.querySelectorAll('.player-grid iframe')[index]
+        if (!frame) throw new Error('iframe do emulador não encontrado')
+        await flushPlayerSave(frame)
+        await clearPlayerRecovery(frame)
+        await releasePlayerLease(session.sessionId, { profileId: session.profileId, gameId: session.gameId, generation: session.leaseGeneration })
+      },
+    }))
+    const coordinator = createMultiSaveCloseCoordinator({ tasks, onUpdate: rows => setSaveCloseRows(rows) })
+    saveCloseCoordinatorRef.current = coordinator
+    const result = await coordinator.run()
+    if (result.every(row => row.status === 'saved')) await finishPlayerClose()
+    return
+  }
+
+  async function legacyClosePlayer() {
     const result = await closePlayerAfterSaveAttempts({
       saveAttempts: activeSessions.map((session, index) => {
         const frame = document.querySelectorAll('.player-grid iframe')[index]
@@ -490,6 +513,25 @@ function App() {
     if (result.failures.length > 0) setError('O emulador foi fechado, mas alguns saves não puderam ser sincronizados.')
   }
 
+  async function retryFailedSaves() {
+    const coordinator = saveCloseCoordinatorRef.current
+    if (!coordinator) return
+    const result = await coordinator.retryFailed()
+    if (result.every(row => row.status === 'saved')) await finishPlayerClose()
+  }
+
+  async function finishPlayerClose() {
+    try {
+      if (document.fullscreenElement === playerShellRef.current) await document.exitFullscreen()
+    } catch {
+      // The player still needs to close if the browser rejects leaving fullscreen.
+    }
+    setActiveSessions([])
+    setFullscreen(false)
+    setSaveCloseRows(null)
+    saveCloseCoordinatorRef.current = null
+  }
+
   function flushPlayerSave(frame) {
     return new Promise((resolve, reject) => {
       const requestId = `${Date.now()}-${Math.random()}`
@@ -501,7 +543,7 @@ function App() {
       const finish = error => {
         if (timeout) window.clearTimeout(timeout)
         window.removeEventListener('message', receive)
-        if (error) reject(error)
+        if (error) { error.transient = true; reject(error) }
         else resolve()
       }
       try {
@@ -966,6 +1008,19 @@ function App() {
             />)}
           </div>
         </div>
+      </div>
+    </div>}
+    {saveCloseRows && <div className="save-close-overlay" role="dialog" aria-modal="true" aria-labelledby="save-close-title">
+      <div className="save-close-panel">
+        <h2 id="save-close-title">Salvando jogos</h2>
+        <p role="status" aria-live="polite">Aguarde a confirmação de cada save antes de fechar.</p>
+        <ul className="save-close-list">
+          {saveCloseRows.map(row => <li key={row.id} className={`save-close-row save-close-${row.status}`}>
+            <span>{row.label}</span>
+            <strong>{row.status === 'saved' ? 'Salvo' : row.status === 'processing' ? 'Processando' : row.status === 'retrying' ? `Falhou — reenviando (${row.attempt})` : row.status === 'failed' ? 'Falhou — aguardando reenvio' : 'Aguardando'}</strong>
+          </li>)}
+        </ul>
+        {saveCloseRows.some(row => row.status === 'failed') && <button type="button" className="save-close-retry" onClick={retryFailedSaves} disabled={saveCloseRows.some(row => row.status === 'processing' || row.status === 'retrying')}>Reenviar falhos</button>}
       </div>
     </div>}
   </main>

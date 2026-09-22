@@ -30,6 +30,17 @@ hostname and TLS; this project does not bind ports 80 or 443.
 
 ## Persistent data backup
 
+The backend creates one authenticated startup backup before it begins
+listening. Operators can request another backup with:
+
+```sh
+curl -fsS -X POST https://YOUR_HOST/api/ops/backups/backend-state \
+  -H "Authorization: Bearer $EMULATOR_HUB_BACKUP_TOKEN"
+```
+
+Set `EMULATOR_HUB_BACKUP_TOKEN` as a deployment secret. The endpoint returns
+archive metadata only; the archive remains in the backend data volume.
+
 The backend save data lives in the Docker volume named by
 `EMULATOR_HUB_DATA_VOLUME`. Back it up before upgrades and on the schedule your
 operations policy requires:
