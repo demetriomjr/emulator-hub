@@ -11,13 +11,14 @@ test('captures local recovery state only every 2.5 seconds and preserves it on l
   assert.match(player, /addEventListener\('pagehide'/)
 })
 
-test('offers a matching recovery candidate before acquiring a new lease and supports discard', async () => {
+test('offers a matching recovery candidate inside a scoped emulator session', async () => {
   const hub = await readFile(new URL('./src/main.jsx', import.meta.url), 'utf8')
   assert.match(hub, /localRecoveryStore\.get\(profile\.id, game\.id\)/)
-  assert.match(hub, /setRecoveryCandidate\(/)
-  assert.match(hub, /await localRecoveryStore\.clear\(recoveryCandidate\.profileId, recoveryCandidate\.gameId\)/)
+  assert.match(hub, /localRecoveryPrompt/)
+  assert.match(hub, /SnapshotRestorePrompt/)
+  assert.match(hub, /player-cell/)
   assert.match(hub, /await acquirePlayerLease\(game\.id, profile\.id, sessionId\)/)
-  assert.match(hub, /recoveryCandidate && <div className="profile-overlay"/)
+  assert.doesNotMatch(hub, /recoveryCandidate && <div className="profile-overlay"/)
 })
 
 test('clears local recovery after successful close synchronization and preserves it on failure', async () => {

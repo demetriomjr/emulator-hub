@@ -11,6 +11,7 @@ import { instrumentEmulatorLifecycle } from '../../packages/emulator-lifecycle-d
 import { createLocalRuntimeRecoveryStore } from '../../packages/local-runtime-recovery-store.mjs'
 import { selectNewestPokemonGen3SaveCopy } from '../../packages/pokemon-gen3-save-validation.mjs'
 import { validateSaveWithRetry } from '../../packages/emulator-save-validation-retry.mjs'
+import { createRestoreRequest, resolveRestoreRequest } from '../../packages/snapshot-restore-routing.mjs'
 
 const parameters = new URLSearchParams(location.search)
 const id = parameters.get('id')
@@ -18,6 +19,7 @@ const profileId = parameters.get('profileId')
 const sessionId = parameters.get('sessionId')
 const leaseGeneration = Number(parameters.get('leaseGeneration'))
 const restoreLocalRecovery = parameters.get('restoreRecovery') === '1'
+const localRecoveryPrompt = parameters.get('localRecoveryPrompt') === '1'
 const game = document.getElementById('game')
 const isMobilePlayerViewport = window.matchMedia('(max-width: 900px) and (max-height: 500px) and (orientation: landscape)').matches
 const mobileGamepadLayout = Object.freeze([
@@ -68,6 +70,7 @@ let stopFrameProgressMonitor = null
 let stopLifecycleDiagnostics = null
 let leaseHeartbeat = null
 let leaseLost = false
+const pendingRestoreRequests = new Map()
 
 function loseLease() {
   if (leaseLost) return
@@ -93,6 +96,19 @@ function startLeaseHeartbeat() {
 async function hashSave(bytes) {
   const digest = await crypto.subtle.digest('SHA-256', bytes)
   return [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, '0')).join('')
+}
+
+function requestRestoreDecision(kind) {
+  const requestId = `${sessionId}:${kind}:${Date.now()}:${Math.random()}`
+  return new Promise(resolve => {
+    const timeout = window.setTimeout(() => {
+      pendingRestoreRequests.delete(requestId)
+      window.parent.postMessage({ type: 'emulator-hub:snapshot-restore-timeout', requestId, sessionId }, location.origin)
+      resolve(false)
+    }, 30_000)
+    pendingRestoreRequests.set(requestId, { resolve, timeout })
+    window.parent.postMessage(createRestoreRequest({ requestId, kind, gameId: id, profileId }), location.origin)
+  })
 }
 
 function logSavePipeline(event, context = {}) {
@@ -363,6 +379,13 @@ window.addEventListener('message', event => {
     gamepadInput?.update(gamepadBindings)
     return
   }
+  if (event.data?.type === 'emulator-hub:snapshot-restore-response') {
+    const pending = resolveRestoreRequest(pendingRestoreRequests, event.data)
+    if (!pending) return
+    window.clearTimeout(pending.timeout)
+    pending.resolve(pending.restore)
+    return
+  }
   if (event.data?.type === 'emulator-hub:control-profile') {
     const bindings = event.data.bindings
     if (!bindings || typeof bindings !== 'object' || !Object.values(bindings).every(binding => binding && typeof binding.gamepad === 'string')) return
@@ -516,7 +539,7 @@ async function start() {
     normalizeEmulatorChrome()
     applyFastForward()
   }
-  window.EJS_onGameStart = () => {
+  window.EJS_onGameStart = async () => {
     // EJS_ready fires before EmulatorJS creates its gameManager. Reapply here
     // because earlier setting changes can be ignored during loader startup.
     applyFastForward()
@@ -528,9 +551,19 @@ async function start() {
     })
     gamepadInput = createEmulatorGamepadInput(window.EJS_emulator, controlProfile.bindings)
     gamepadInput.update(gamepadBindings)
-    if (localRecovery) {
-      window.EJS_emulator.gameManager.loadState(new Uint8Array(localRecovery.state))
-    } else if (!restoreSnapshotState(savedSnapshot, window.EJS_emulator.gameManager, () => window.confirm('Há um snapshot deste perfil. Deseja restaurá-lo?'))) {
+    let selectedLocalRecovery = localRecovery
+    if (localRecoveryPrompt) {
+      if (await requestRestoreDecision('local-recovery')) {
+        const candidate = await localRecoveryStore.get(profileId, id)
+        if (candidate && candidate.core === launchDescriptor.core && candidate.romSha256 === launchDescriptor.romSha256 && candidate.runtimeId === launchDescriptor.runtimeId && candidate.patchSha256 === launchDescriptor.patchSha256) selectedLocalRecovery = candidate
+      } else {
+        await localRecoveryStore.clear(profileId, id)
+      }
+    }
+    const restoreCloudSnapshot = savedSnapshot ? await requestRestoreDecision('cloud-snapshot') : false
+    if (selectedLocalRecovery) {
+      window.EJS_emulator.gameManager.loadState(new Uint8Array(selectedLocalRecovery.state))
+    } else if (!restoreSnapshotState(savedSnapshot, window.EJS_emulator.gameManager, () => restoreCloudSnapshot)) {
       void Promise.resolve(cloudSaveSynchronizer.restore(window.EJS_emulator.gameManager)).catch(() => {})
     }
     watchBatterySaveChanges()

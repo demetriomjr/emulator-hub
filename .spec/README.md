@@ -1,5 +1,7 @@
 # Specifications
 
+- [Spec 049 — Per-emulator snapshot and local recovery prompt](049-snapshot-restore-prompt.md): one styled, scoped restore decision component for backend snapshots and local runtime recovery in multi-player sessions.
+
 - [Spec 048 — Backend state backup endpoint and startup barrier](048-backend-state-backup.md): authenticated full-state archives for profiles, saves, Pokémon Hub state, and a pre-listen production backup.
 
 - [Spec 047 — Multi-player save integrity and close barrier](047-multi-save-integrity-close.md): parallel per-game save close, bounded retries, lease-safe completion, and an opaque status barrier.

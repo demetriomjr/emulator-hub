@@ -92,6 +92,7 @@ function playerFrameUrl(session) {
     fastForward: session.initialFastForwardEnabled ? '1' : '0',
     fastForwardSpeed: String(session.initialFastForwardSpeed),
     restoreRecovery: session.restoreRecovery ? '1' : '0',
+    localRecoveryPrompt: session.localRecoveryPrompt ? '1' : '0',
   }), clientDiagnosticsOptions)
   return `/player.html?${parameters}`
 }
@@ -121,6 +122,23 @@ function TriggerBinding({ trigger, profile, captureTarget, onCapture }) {
     <button type="button" className="binding-field" onClick={() => onCapture(captureId, 'gamepad')}>
       {isCapturing ? 'Pressione no joystick' : formatGamepadBinding(profile.triggerBindings[trigger.id])}
     </button>
+  </div>
+}
+
+function SnapshotRestorePrompt({ request, onRestore, onContinue }) {
+  const local = request.kind === 'local-recovery'
+  const ready = Boolean(request.requestId)
+  return <div className="snapshot-restore-overlay" role="dialog" aria-modal="true" aria-labelledby={`snapshot-restore-title-${request.sessionId}`}>
+    <div className="snapshot-restore-card">
+      <h2 id={`snapshot-restore-title-${request.sessionId}`}>{local ? 'Recuperação local' : 'Snapshot salvo'}</h2>
+      <p>{local
+        ? (request.reason === 'runtime-break' ? 'O emulador foi interrompido. Restaurar a recuperação local?' : 'Há uma possível recuperação local. Restaurar?')
+        : 'Há um snapshot salvo para este perfil. Deseja restaurá-lo?'}</p>
+      <div className="snapshot-restore-actions">
+        <button type="button" className="snapshot-restore-secondary" disabled={!ready} onClick={onContinue}>Continuar sem restaurar</button>
+        <button type="button" className="snapshot-restore-primary" disabled={!ready} onClick={onRestore}>Restaurar</button>
+      </div>
+    </div>
   </div>
 }
 
@@ -199,7 +217,7 @@ function App() {
   const [creatingProfile, setCreatingProfile] = useState(false)
   const [profileError, setProfileError] = useState('')
   const [profileBusy, setProfileBusy] = useState(false)
-  const [recoveryCandidate, setRecoveryCandidate] = useState(null)
+  const [snapshotRestoreRequests, setSnapshotRestoreRequests] = useState({})
   const [error, setError] = useState('')
   const [installHelpOpen, setInstallHelpOpen] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
@@ -267,16 +285,40 @@ function App() {
 
   useEffect(() => {
     const receive = event => {
-      if (event.origin !== window.location.origin || event.data?.type !== 'emulator-hub:lease-lost') return
+      if (event.origin !== window.location.origin) return
+      if (event.data?.type === 'emulator-hub:snapshot-restore-request') {
+        if (typeof event.data.requestId !== 'string' || !['cloud-snapshot', 'local-recovery'].includes(event.data.kind)) return
+        const frame = [...document.querySelectorAll('.player-cell iframe')].find(candidate => candidate.contentWindow === event.source)
+        const session = activeSessions.find(candidate => frame?.closest('.player-cell')?.dataset.sessionId === candidate.sessionId)
+        if (!session) return
+        setSnapshotRestoreRequests(current => ({ ...current, [session.sessionId]: {
+          ...(current[session.sessionId] ?? {}),
+          sessionId: session.sessionId,
+          requestId: event.data.requestId,
+          kind: event.data.kind,
+          reason: current[session.sessionId]?.reason ?? session.localRecoveryPrompt?.reason,
+        } }))
+        return
+      }
+      if (event.data?.type === 'emulator-hub:snapshot-restore-timeout') {
+        setSnapshotRestoreRequests(current => {
+          const request = current[event.data.sessionId]
+          if (!request || request.requestId !== event.data.requestId) return current
+          const next = { ...current }; delete next[event.data.sessionId]; return next
+        })
+        return
+      }
+      if (event.data?.type !== 'emulator-hub:lease-lost') return
       if (!event.data.unavailable && event.data.sessionId && event.data.profileId && event.data.gameId && Number.isInteger(event.data.generation)) {
         void releasePlayerLease(event.data.sessionId, { profileId: event.data.profileId, gameId: event.data.gameId, generation: event.data.generation }).catch(() => {})
       }
       setActiveSessions(current => current.filter(session => session.sessionId !== event.data.sessionId))
+      setSnapshotRestoreRequests(current => { const next = { ...current }; delete next[event.data.sessionId]; return next })
       setError('A sessão do emulador foi substituída ou expirou.')
     }
     window.addEventListener('message', receive)
     return () => window.removeEventListener('message', receive)
-  }, [])
+  }, [activeSessions])
 
   useEffect(() => {
     if (!profileGame) return undefined
@@ -605,13 +647,12 @@ function App() {
     let candidate = null
     try { candidate = await localRecoveryStore.get(profile.id, game.id) } catch {}
     if (candidate) {
-      setRecoveryCandidate({ ...candidate, profile })
-      return
+      return startPlayerWithProfile(profile, false, { reason: candidate.reason })
     }
     return startPlayerWithProfile(profile, false)
   }
 
-  async function startPlayerWithProfile(profile, restoreRecovery) {
+  async function startPlayerWithProfile(profile, restoreRecovery, localRecoveryPrompt = null) {
     setError('')
     setProfileError('')
     setProfileBusy(true)
@@ -629,12 +670,14 @@ function App() {
         initialFastForwardEnabled: fastForwardEnabled,
         initialFastForwardSpeed: fastForwardSpeed,
         restoreRecovery,
+        localRecoveryPrompt,
       }
       if (profilePurpose === 'add-instance') {
         setActiveSessions(current => current.length >= MAX_PLAYER_INSTANCES ? current : [...current, session])
       } else {
         setActiveSessions([session])
       }
+      if (localRecoveryPrompt) setSnapshotRestoreRequests(current => ({ ...current, [session.sessionId]: { sessionId: session.sessionId, kind: 'local-recovery', reason: localRecoveryPrompt.reason } }))
     } catch (cause) {
       setProfileError(cause.message)
     } finally {
@@ -642,19 +685,10 @@ function App() {
     }
   }
 
-  async function restoreLocalRecovery() {
-    if (!recoveryCandidate) return
-    const candidate = recoveryCandidate
-    setRecoveryCandidate(null)
-    await startPlayerWithProfile(candidate.profile, true)
-  }
-
-  async function discardLocalRecovery() {
-    if (!recoveryCandidate) return
-    const candidate = recoveryCandidate
-    await localRecoveryStore.clear(recoveryCandidate.profileId, recoveryCandidate.gameId)
-    setRecoveryCandidate(null)
-    await startPlayerWithProfile(candidate.profile, false)
+  function respondToRestore(sessionId, requestId, restore) {
+    const cell = [...document.querySelectorAll('.player-cell')].find(candidate => candidate.dataset.sessionId === sessionId)
+    cell?.querySelector('iframe')?.contentWindow?.postMessage({ type: 'emulator-hub:snapshot-restore-response', requestId, restore }, window.location.origin)
+    setSnapshotRestoreRequests(current => { const next = { ...current }; delete next[sessionId]; return next })
   }
 
   async function submitProfile(event) {
@@ -872,14 +906,7 @@ function App() {
         </div>
       </div>
     </div>}
-    {recoveryCandidate && <div className="profile-overlay" role="dialog" aria-modal="true" aria-label="Recuperação local disponível">
-      <div className="profile-panel">
-        <header className="profile-header"><h2>Recuperação local</h2></header>
-        <div className="profile-body"><p>{recoveryCandidate.reason === 'runtime-break' ? 'O emulador foi interrompido. Restaurar a recuperação local?' : 'Há uma possível recuperação local. Restaurar?'}</p></div>
-        <div className="profile-actions"><button type="button" onClick={discardLocalRecovery}>Descartar</button><button type="button" onClick={restoreLocalRecovery}>Restaurar</button></div>
-      </div>
-    </div>}
-    {profileGame && !recoveryCandidate && <div className={`profile-overlay${profilePickerPlacement ? ' profile-picker-overlay' : ''} profile-picker-mobile`} role="dialog" aria-modal="true" aria-label="Selecionar perfil">
+    {profileGame && <div className={`profile-overlay${profilePickerPlacement ? ' profile-picker-overlay' : ''} profile-picker-mobile`} role="dialog" aria-modal="true" aria-label="Selecionar perfil">
       <div className={`profile-panel${profilePickerPlacement ? ' profile-picker-panel' : ''}`} style={profilePickerPlacement ? profilePickerPlacement : undefined}>
         <header className="profile-header">
           <h2>{profileGame.title}</h2>
@@ -999,13 +1026,10 @@ function App() {
         </header>
         <div className={`player-panel player-panel-${activeSessions.length}`}>
           <div className="player-grid">
-            {activeSessions.map(session => <iframe
-              key={`${session.gameId}:${session.profileId}`}
-              src={playerFrameUrl(session)}
-              title="EmulatorJS"
-              allow="fullscreen; gamepad"
-              onLoad={event => configurePlayerFrame(event.currentTarget, { type: 'emulator-hub:fast-forward', enabled: fastForwardEnabled, speed: fastForwardSpeed })}
-            />)}
+            {activeSessions.map(session => <div className="player-cell" data-session-id={session.sessionId} key={`${session.gameId}:${session.profileId}`}>
+              <iframe src={playerFrameUrl(session)} title="EmulatorJS" allow="fullscreen; gamepad" onLoad={event => configurePlayerFrame(event.currentTarget, { type: 'emulator-hub:fast-forward', enabled: fastForwardEnabled, speed: fastForwardSpeed })} />
+              {snapshotRestoreRequests[session.sessionId] && <SnapshotRestorePrompt request={snapshotRestoreRequests[session.sessionId]} onRestore={() => snapshotRestoreRequests[session.sessionId].requestId && respondToRestore(session.sessionId, snapshotRestoreRequests[session.sessionId].requestId, true)} onContinue={() => snapshotRestoreRequests[session.sessionId].requestId && respondToRestore(session.sessionId, snapshotRestoreRequests[session.sessionId].requestId, false)} />}
+            </div>)}
           </div>
         </div>
       </div>

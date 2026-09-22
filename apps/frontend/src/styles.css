@@ -212,7 +212,19 @@ button { font: inherit; }
 .player-panel-3 .player-grid, .player-panel-4 .player-grid { grid-template-rows: repeat(2, 1fr); }
 .player-panel-5 .player-grid { grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(2, 1fr); }
 .player-panel-6 .player-grid { grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(2, 1fr); }
+.player-cell { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #000; }
 .player-grid iframe { display: block; min-width: 0; width: 100%; height: 100%; border: 0; background: #000; }
+.snapshot-restore-overlay { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; padding: clamp(12px, 3vw, 28px); background: #02090dcc; }
+.snapshot-restore-card { width: min(360px, 100%); padding: 22px; border: 1px solid #398269; border-radius: 14px; color: #e8f5ef; background: linear-gradient(145deg, #123f38, #10262a); box-shadow: 0 18px 48px #000b, inset 0 1px #bff2da1c; text-align: center; }
+.snapshot-restore-card h2 { margin: 0 0 9px; color: #effff5; font-size: 18px; }
+.snapshot-restore-card p { margin: 0; color: #c5e5d5; font-size: 13px; line-height: 1.45; }
+.snapshot-restore-actions { display: flex; justify-content: center; gap: 8px; margin-top: 18px; }
+.snapshot-restore-actions button { min-height: 38px; border: 1px solid #70c99e; border-radius: 8px; padding: 0 12px; color: #e8fff1; background: #174b3c; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.snapshot-restore-actions button:hover { border-color: #b5f7d0; background: #22624f; }
+.snapshot-restore-actions button:disabled { opacity: .5; cursor: wait; }
+.snapshot-restore-actions button:focus-visible { outline: 3px solid #ddffe9; outline-offset: 2px; }
+.snapshot-restore-actions .snapshot-restore-primary { border-color: #6fe0a4; color: #082219; background: #69d99e; }
+.snapshot-restore-actions .snapshot-restore-primary:hover { border-color: #b5f7d0; background: #8cf0ba; }
 .player-actions { display: flex; gap: 7px; }
 .player-global-controls, .fast-forward-control { display: flex; align-items: center; gap: 7px; }
 .trigger-action-control { display: flex; align-items: center; gap: 4px; color: #e8f5ef; font-size: 12px; }
