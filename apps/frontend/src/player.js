@@ -57,6 +57,7 @@ let fastForwardRevision = 0
 let savedSnapshot = null
 let snapshotRevision = null
 let launchDescriptor = null
+let emulatorGameId = null
 let gamepadInput = null
 let gamepadBindings = []
 let cloudSaveSynchronizer = null
@@ -103,6 +104,10 @@ async function hashSave(bytes) {
   return [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, '0')).join('')
 }
 
+function createEmulatorGameId(gameId, profileId) {
+  return `emulator-hub-${encodeURIComponent(gameId)}--profile-${encodeURIComponent(profileId)}`
+}
+
 function requestRestoreDecision(kind) {
   const requestId = `${sessionId}:${kind}:${Date.now()}:${Math.random()}`
   return new Promise(resolve => {
@@ -117,7 +122,7 @@ function requestRestoreDecision(kind) {
 }
 
 function logSavePipeline(event, context = {}) {
-  const record = { timestamp: new Date().toISOString(), event, gameId: id, profileId, ...context }
+  const record = { timestamp: new Date().toISOString(), event, gameId: id, profileId, emulatorGameId, ...context }
   const output = event.endsWith('failed') ? console.error : context.ok === false || event.includes('rejected') ? console.warn : console.info
   output.call(console, '[save-pipeline]', record)
 }
@@ -450,6 +455,7 @@ async function start() {
   const [launch, controlProfile] = await Promise.all([getPlayerLeaseLaunch(sessionId, { profileId, gameId: id, generation: leaseGeneration }), getControlProfile()])
   if (!launch.romUrl || !launch.core) throw new Error('Incomplete launch configuration')
   launchDescriptor = launch
+  emulatorGameId = createEmulatorGameId(launch.gameId, profileId)
   if (restoreLocalRecovery) {
     const candidate = await localRecoveryStore.get(profileId, id)
     if (!candidate) throw new Error('Local recovery is no longer available.')
@@ -502,7 +508,7 @@ async function start() {
   window.EJS_gameUrl = URL.createObjectURL(new Blob([romBytes]))
   if (patchBytes) window.EJS_gamePatchUrl = URL.createObjectURL(new Blob([patchBytes]))
   window.EJS_gameName = launch.title
-  window.EJS_gameID = launch.gameId
+  window.EJS_gameID = emulatorGameId
   window.EJS_defaultControls = { 0: controlProfile.bindings, 1: {}, 2: {}, 3: {} }
   // EmulatorJS only detects touch once during startup. Match the Hub's mobile
   // player breakpoint so Chrome's device viewport simulation is deterministic.
