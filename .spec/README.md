@@ -1,5 +1,7 @@
 # Specifications
 
+- [Spec 046 — Global player-header preferences and L2/R2 Fast Forward](046-trigger-fast-forward-toggle.md): persist Fast Forward speed and L2/R2 actions in one backend-global preference document, and toggle session Fast Forward using the first active emulator as the state reference.
+
 - [Spec 045 — Six-instance player surface](045-six-instance-player.md): increase the session cap to six while preserving all existing global player controls and per-instance isolation.
 
 - [Spec 043 — Generic IPS patch discovery](043-ips-patch-discovery.md): ROM-hash registry, IPS validation, optional patch application, and game-agnostic launch behavior.

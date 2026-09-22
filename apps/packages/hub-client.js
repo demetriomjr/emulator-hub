@@ -320,6 +320,19 @@ export async function getCloudSave(url, lease, traceId = null, logger = () => {}
   return { bytes, revision: Number(revision), traceId }
 }
 
+export function getUserPreferences() {
+  return getJson('/api/user-preferences')
+}
+
+export async function updateUserPreferences(preferences) {
+  const response = await fetch('/api/user-preferences', {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(preferences),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`)
+  return body
+}
+
 export async function putCloudSave(url, bytes, revision, lease, traceId = null, logger = () => {}) {
   const headers = { 'Content-Type': 'application/octet-stream', 'If-Match': revision === null ? '*' : `"${revision}"`, ...leaseHeaders(lease) }
   if (traceId) headers['X-Save-Trace-Id'] = traceId

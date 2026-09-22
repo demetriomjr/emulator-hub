@@ -12,7 +12,20 @@ test('defaults both controller triggers to doing nothing', () => {
     { value: 'reset', label: 'Reset game' },
     { value: 'save-state', label: 'Save state' },
     { value: 'load-state', label: 'Load state' },
+    { value: 'fast-forward', label: 'Fast Forward' },
   ])
+})
+
+test('runs one fast-forward toggle for each configured trigger press edge', () => {
+  const toggles = []
+  const triggers = createPlayerTriggerActions({ toggleFastForward: trigger => toggles.push(trigger) })
+
+  triggers.update(['LEFT_BOTTOM_SHOULDER', 'RIGHT_BOTTOM_SHOULDER'], { l2: 'fast-forward', r2: 'fast-forward' })
+  triggers.update(['LEFT_BOTTOM_SHOULDER', 'RIGHT_BOTTOM_SHOULDER'], { l2: 'fast-forward', r2: 'fast-forward' })
+  triggers.update([], { l2: 'fast-forward', r2: 'fast-forward' })
+  triggers.update(['RIGHT_BOTTOM_SHOULDER'], { l2: 'fast-forward', r2: 'fast-forward' })
+
+  assert.deepEqual(toggles, ['l2', 'r2', 'r2'])
 })
 
 test('dispatches each configured trigger action once per controller press', () => {

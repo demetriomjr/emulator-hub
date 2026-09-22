@@ -10,6 +10,7 @@ import { createGameMetadataLoader } from '../packages/game-metadata.mjs'
 import { createGameCatalogResponse } from '../packages/game-catalog-contract.mjs'
 import { createRedisProfileStore } from '../packages/profile-store.mjs'
 import { createRedisControlProfileStore } from '../packages/control-profile-store.mjs'
+import { createRedisUserPreferencesStore } from '../packages/user-preferences-store.mjs'
 import { createSaveStore } from '../packages/save-store.mjs'
 import { createSnapshotStore } from '../packages/snapshot-store.mjs'
 import { decodeSnapshotBundle, encodeSnapshotBundle } from '../packages/emulator-snapshot.mjs'
@@ -90,6 +91,7 @@ export function createHubServer(options = {}) {
     metadataLoader: options.metadataLoader ?? loadGameMetadata,
     profileStore: options.profileStore ?? createRedisProfileStore({ persistence }),
     controlProfileStore: options.controlProfileStore ?? createRedisControlProfileStore({ persistence }),
+    userPreferencesStore: options.userPreferencesStore ?? createRedisUserPreferencesStore({ persistence }),
     saveStore: options.saveStore ?? createSaveStore({ dataPath: options.savesPath ?? defaultSavesPath }),
     snapshotStore: options.snapshotStore ?? createSnapshotStore({ dataPath: options.snapshotsPath ?? defaultSnapshotsPath }),
     pokemonHubStore: options.pokemonHubStore ?? createRedisPokemonHubStore({ persistence }),
@@ -208,6 +210,7 @@ async function handleRequest(request, response, config) {
   const gameProfilesRoute = parseGameProfilesRoute(route.pathname)
   const gameProfileRoute = parseGameProfileRoute(route.pathname)
   const isControlProfileRoute = route.pathname === '/api/control-profile'
+  const isUserPreferencesRoute = route.pathname === '/api/user-preferences'
   const saveRoute = parseSaveRoute(route.pathname)
   const snapshotRoute = parseSnapshotRoute(route.pathname)
   const playerLeaseRoute = parsePlayerLeaseRoute(route.pathname)
@@ -250,6 +253,7 @@ async function handleRequest(request, response, config) {
     || (request.method === 'POST' && pokemonHubProfilesRoute)
     || ((request.method === 'PATCH' || request.method === 'DELETE') && pokemonHubProfileRoute)
     || (request.method === 'PUT' && (isControlProfileRoute || saveRoute || snapshotRoute))
+    || (request.method === 'PATCH' && isUserPreferencesRoute)
     || (playerLeaseRoute && ((request.method === 'POST' && ['acquire', 'heartbeat'].includes(playerLeaseRoute.kind)) || (request.method === 'DELETE' && playerLeaseRoute.kind === 'release') || (request.method === 'GET' && playerLeaseRoute.kind === 'launch')))
     || (request.method === 'POST' && ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute?.kind))
     || (pokemonHubSessionRoute && ((request.method === 'POST' && ['open', 'attach', 'pane-load', 'heartbeat', 'snapshot', 'close-command'].includes(pokemonHubSessionRoute.kind)) || (request.method === 'DELETE' && ['detach', 'close'].includes(pokemonHubSessionRoute.kind))))
@@ -257,7 +261,7 @@ async function handleRequest(request, response, config) {
     || (request.method === 'DELETE' && gameProfileRoute)
     || (isClientDiagnosticsRoute && request.method === 'POST')
   if (!supportedMethod) {
-    response.setHeader('Allow', isClientDiagnosticsRoute ? 'GET, POST' : pokemonHubSessionRoute ? pokemonHubSessionRoute.kind === 'detach' || pokemonHubSessionRoute.kind === 'close' ? 'DELETE' : 'POST' : pokemonHubRoute ? ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute.kind) ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'PATCH, DELETE' : pokemonHubProfilesRoute || gameProfilesRoute ? 'GET, POST' : snapshotRoute || saveRoute || isControlProfileRoute ? 'GET, PUT' : gameProfileRoute ? 'PATCH, DELETE' : patchRoute ? 'GET' : isRomRoute ? 'GET, HEAD' : 'GET')
+    response.setHeader('Allow', isClientDiagnosticsRoute ? 'GET, POST' : isUserPreferencesRoute ? 'GET, PATCH' : pokemonHubSessionRoute ? pokemonHubSessionRoute.kind === 'detach' || pokemonHubSessionRoute.kind === 'close' ? 'DELETE' : 'POST' : pokemonHubRoute ? ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute.kind) ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'PATCH, DELETE' : pokemonHubProfilesRoute || gameProfilesRoute ? 'GET, POST' : snapshotRoute || saveRoute || isControlProfileRoute ? 'GET, PUT' : gameProfileRoute ? 'PATCH, DELETE' : patchRoute ? 'GET' : isRomRoute ? 'GET, HEAD' : 'GET')
     json(response, 405, { error: 'Method is not supported for this route.' })
     return
   }
@@ -341,6 +345,24 @@ async function handleRequest(request, response, config) {
 
   if (patchRoute) {
     await streamGamePatch(response, config, patchRoute.id)
+    return
+  }
+
+  if (isUserPreferencesRoute) {
+    if (request.method === 'GET') {
+      response.setHeader('Cache-Control', 'no-store')
+      json(response, 200, await config.userPreferencesStore.get())
+    } else {
+      let body
+      try { body = await readJsonBody(request) } catch (error) { json(response, error.code === 'REQUEST_BODY_TOO_LARGE' ? 413 : 400, { error: error.message }); return }
+      try {
+        response.setHeader('Cache-Control', 'no-store')
+        json(response, 200, await config.userPreferencesStore.patch(body))
+      } catch (error) {
+        if (error.code === 'USER_PREFERENCES_INVALID') { json(response, 400, { error: error.message }); return }
+        throw error
+      }
+    }
     return
   }
 

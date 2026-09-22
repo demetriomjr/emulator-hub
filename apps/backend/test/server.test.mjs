@@ -1248,6 +1248,48 @@ describe('hub backend HTTP contract', () => {
     assert.equal(malformed.status, 400)
   })
 
+  test('loads and atomically patches global user preferences', async () => {
+    const { baseUrl } = await startFixture([])
+    const initialResponse = await fetch(`${baseUrl}/api/user-preferences`)
+    assert.equal(initialResponse.status, 200)
+    assert.equal(initialResponse.headers.get('cache-control'), 'no-store')
+    assert.deepEqual(await jsonResponse(initialResponse), {
+      preferences: { version: 1, fastForwardSpeed: 1.5, triggerActions: { l2: 'none', r2: 'none' } },
+      initialized: false,
+    })
+
+    const migratedResponse = await fetch(`${baseUrl}/api/user-preferences`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fastForwardSpeed: 3.5, initializeIfAbsent: true }),
+    })
+    assert.equal(migratedResponse.status, 200)
+    assert.deepEqual(await jsonResponse(migratedResponse), {
+      preferences: { version: 1, fastForwardSpeed: 3.5, triggerActions: { l2: 'none', r2: 'none' } },
+      initialized: true,
+    })
+
+    const updateResponse = await fetch(`${baseUrl}/api/user-preferences`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ triggerActions: { l2: 'fast-forward' } }),
+    })
+    assert.equal(updateResponse.status, 200)
+    assert.deepEqual(await jsonResponse(updateResponse), {
+      preferences: { version: 1, fastForwardSpeed: 3.5, triggerActions: { l2: 'fast-forward', r2: 'none' } },
+      initialized: true,
+    })
+
+    const invalidResponse = await fetch(`${baseUrl}/api/user-preferences`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ triggerActions: { r2: 'cheat' } }),
+    })
+    assert.equal(invalidResponse.status, 400)
+    const storedResponse = await fetch(`${baseUrl}/api/user-preferences`)
+    assert.deepEqual(await jsonResponse(storedResponse), {
+      preferences: { version: 1, fastForwardSpeed: 3.5, triggerActions: { l2: 'fast-forward', r2: 'none' } },
+      initialized: true,
+    })
+  })
+
   test('creates profiles and requires one for a launch', async () => {
     const rom = Buffer.from('profiled launch test rom')
     const { baseUrl } = await startFixture([{

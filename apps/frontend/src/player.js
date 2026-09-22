@@ -388,6 +388,11 @@ window.addEventListener('message', event => {
     applyFastForward()
     return
   }
+  if (event.data?.type === 'emulator-hub:get-fast-forward-state') {
+    if (typeof event.data.requestId !== 'string') return
+    window.parent.postMessage({ type: 'emulator-hub:fast-forward-state', requestId: event.data.requestId, enabled: fastForwardRequest.enabled }, location.origin)
+    return
+  }
   if (event.data?.type === 'emulator-hub:close-player') {
     closeEmulator().then(
       () => window.parent.postMessage({ type: 'emulator-hub:save-synced', requestId: event.data.requestId, ok: true }, location.origin),

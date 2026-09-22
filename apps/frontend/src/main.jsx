@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ConfigProvider } from 'antd'
-import { acquirePlayerLease, createProfile, deleteProfile as deleteProfileRequest, getControlProfile, getGames, getProfiles, releasePlayerLease, updateControlProfile, updateProfile } from '../../packages/hub-client.js'
+import { acquirePlayerLease, createProfile, deleteProfile as deleteProfileRequest, getControlProfile, getGames, getProfiles, getUserPreferences, releasePlayerLease, updateControlProfile, updateProfile, updateUserPreferences } from '../../packages/hub-client.js'
 import { activeGamepadBindings, readGamepadBinding, readGamepadSnapshot } from '../../packages/gamepad-input.mjs'
 import { replaceCatalogProfile } from '../../packages/save-profile-catalog.mjs'
 import { groupGamesByLayout } from '../../packages/hub-layout.mjs'
@@ -10,7 +10,7 @@ import { appendClientDiagnosticsParameters, createClientDiagnostics, getClientDi
 import { closePlayerAfterSaveAttempts } from '../../packages/player-close.mjs'
 import { isMobileLandscapeViewport, isNarrowPortraitViewport } from '../../packages/mobile-viewport.mjs'
 import { shouldReloadForFrontendRevision } from '../../packages/frontend-revision.mjs'
-import { readFastForwardSpeed, writeFastForwardSpeed } from '../../packages/fast-forward-preference.mjs'
+import { readFastForwardSpeed } from '../../packages/fast-forward-preference.mjs'
 import { createLocalRuntimeRecoveryStore } from '../../packages/local-runtime-recovery-store.mjs'
 import { createPlayerTriggerActions, playerTriggerActionOptions } from '../../packages/player-trigger-actions.mjs'
 import hubLayout from './hub-layout.json'
@@ -205,12 +205,24 @@ function App() {
   const [viewport, setViewport] = useState(readViewport)
   const playerShellRef = useRef(null)
   const profilePickerRequestRef = useRef(0)
+  const preferenceWriteRef = useRef(Promise.resolve())
+  const fastForwardToggleRef = useRef(Promise.resolve())
+  const confirmedPreferencesRef = useRef({ fastForwardSpeed, triggerActions: { l2: 'none', r2: 'none' } })
 
   useEffect(() => {
-    if (activeSessions.length) return
-    setL2TriggerAction('none')
-    setR2TriggerAction('none')
-  }, [activeSessions.length])
+    let active = true
+    getUserPreferences().then(({ preferences, initialized }) => {
+      if (!active) return
+      const speed = initialized ? preferences.fastForwardSpeed : readFastForwardSpeed(document.cookie)
+      setFastForwardSpeed(speed)
+      setL2TriggerAction(preferences.triggerActions.l2)
+      setR2TriggerAction(preferences.triggerActions.r2)
+      confirmedPreferencesRef.current = { fastForwardSpeed: speed, triggerActions: { ...preferences.triggerActions } }
+      if (!initialized && /(?:^|;\s*)emulator_hub_fast_forward_speed=/.test(document.cookie)) void saveUserPreferences({ fastForwardSpeed: speed, initializeIfAbsent: true })
+      else if (initialized) document.cookie = 'emulator_hub_fast_forward_speed=; Path=/; Max-Age=0; SameSite=Lax'
+    }).catch(() => {})
+    return () => { active = false }
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -371,7 +383,7 @@ function App() {
 
   useEffect(() => {
     if (!activeSessions.length) return
-    const triggerActions = createPlayerTriggerActions({ dispatch: broadcastPlayerMessage })
+    const triggerActions = createPlayerTriggerActions({ dispatch: broadcastPlayerMessage, toggleFastForward: () => { void toggleFastForwardFromFirstFrame() } })
     const broadcast = bindings => {
       for (const frame of document.querySelectorAll('.player-grid iframe')) {
         frame.contentWindow?.postMessage({ type: 'emulator-hub:gamepad', bindings }, window.location.origin)
@@ -403,9 +415,51 @@ function App() {
     }
   }, [activeSessions, fastForwardEnabled, fastForwardSpeed])
 
-  useEffect(() => {
-    writeFastForwardSpeed(document, fastForwardSpeed)
-  }, [fastForwardSpeed])
+  async function saveUserPreferences(partial) {
+    preferenceWriteRef.current = preferenceWriteRef.current.catch(() => {}).then(async () => {
+      const result = await updateUserPreferences(partial)
+      setFastForwardSpeed(result.preferences.fastForwardSpeed)
+      setL2TriggerAction(result.preferences.triggerActions.l2)
+      setR2TriggerAction(result.preferences.triggerActions.r2)
+      confirmedPreferencesRef.current = { fastForwardSpeed: result.preferences.fastForwardSpeed, triggerActions: { ...result.preferences.triggerActions } }
+      document.cookie = 'emulator_hub_fast_forward_speed=; Path=/; Max-Age=0; SameSite=Lax'
+      return result
+    }).catch(cause => {
+      const confirmed = confirmedPreferencesRef.current
+      setFastForwardSpeed(confirmed.fastForwardSpeed)
+      setL2TriggerAction(confirmed.triggerActions.l2)
+      setR2TriggerAction(confirmed.triggerActions.r2)
+      setError(cause.message)
+      throw cause
+    })
+    return preferenceWriteRef.current
+  }
+
+  function toggleFastForward() {
+    setFastForwardEnabled(current => !current)
+  }
+
+  function toggleFastForwardFromFirstFrame() {
+    fastForwardToggleRef.current = fastForwardToggleRef.current.then(() => new Promise(resolve => {
+      const frame = document.querySelector('.player-grid iframe')
+      if (!frame?.contentWindow) { resolve(); return }
+      const requestId = `${Date.now()}-${Math.random()}`
+      const finish = () => { window.clearTimeout(timeout); window.removeEventListener('message', receive); resolve() }
+      const receive = event => {
+        if (event.origin !== window.location.origin || event.source !== frame.contentWindow || event.data?.type !== 'emulator-hub:fast-forward-state' || event.data.requestId !== requestId || typeof event.data.enabled !== 'boolean') return
+        if (document.querySelector('.player-grid iframe') !== frame) { finish(); return }
+        const enabled = !event.data.enabled
+        setFastForwardEnabled(enabled)
+        const message = { type: 'emulator-hub:fast-forward', enabled, speed: fastForwardSpeed }
+        for (const activeFrame of document.querySelectorAll('.player-grid iframe')) configurePlayerFrame(activeFrame, message)
+        finish()
+      }
+      const timeout = window.setTimeout(finish, 1000)
+      window.addEventListener('message', receive)
+      frame.contentWindow.postMessage({ type: 'emulator-hub:get-fast-forward-state', requestId }, window.location.origin)
+    })).catch(() => {})
+    return fastForwardToggleRef.current
+  }
 
   async function toggleFullscreen() {
     if (isMobileLandscape) return
@@ -862,10 +916,10 @@ function App() {
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h8M5 5v8M5 5l5 5a7 7 0 1 1-1 9" /></svg>
             </button>
             <div className="fast-forward-control">
-              <button className={`fast-forward-button${fastForwardEnabled ? ' is-active' : ''}`} type="button" aria-label="Avanço rápido" aria-pressed={fastForwardEnabled} onClick={() => setFastForwardEnabled(current => !current)}>
+              <button className={`fast-forward-button${fastForwardEnabled ? ' is-active' : ''}`} type="button" aria-label="Avanço rápido" aria-pressed={fastForwardEnabled} onClick={toggleFastForward}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5v14l7-7-7-7Zm8 0v14l7-7-7-7Z" /></svg>
               </button>
-              <select aria-label="Velocidade do avanço rápido" value={fastForwardSpeed} onChange={event => setFastForwardSpeed(Number(event.target.value))}>
+              <select aria-label="Velocidade do avanço rápido" value={fastForwardSpeed} onChange={event => { const speed = Number(event.target.value); setFastForwardSpeed(speed); void saveUserPreferences({ fastForwardSpeed: speed }) }}>
                 {fastForwardSpeeds.map(speed => <option key={speed} value={speed}>{speed}×</option>)}
               </select>
               <button className="global-reset-button" type="button" aria-label="Resetar todos os emuladores" onClick={() => {
@@ -876,12 +930,12 @@ function App() {
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 1-2.3-5.7M20 4v7h-7" /></svg>
               </button>
               <label className="trigger-action-control">L2
-                <select aria-label="Ação do L2" value={l2TriggerAction} onChange={event => setL2TriggerAction(event.target.value)}>
+                <select aria-label="Ação do L2" value={l2TriggerAction} onChange={event => { const action = event.target.value; setL2TriggerAction(action); void saveUserPreferences({ triggerActions: { l2: action } }) }}>
                   {playerTriggerActionOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
               </label>
               <label className="trigger-action-control">R2
-                <select aria-label="Ação do R2" value={r2TriggerAction} onChange={event => setR2TriggerAction(event.target.value)}>
+                <select aria-label="Ação do R2" value={r2TriggerAction} onChange={event => { const action = event.target.value; setR2TriggerAction(action); void saveUserPreferences({ triggerActions: { r2: action } }) }}>
                   {playerTriggerActionOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
               </label>
