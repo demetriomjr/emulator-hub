@@ -116,8 +116,8 @@ function requestRestoreDecision(kind) {
       window.parent.postMessage({ type: 'emulator-hub:snapshot-restore-timeout', requestId, sessionId }, location.origin)
       resolve(false)
     }, 30_000)
-    pendingRestoreRequests.set(requestId, { resolve, timeout })
-    window.parent.postMessage(createRestoreRequest({ requestId, kind, gameId: id, profileId }), location.origin)
+    pendingRestoreRequests.set(requestId, { resolve, timeout, sessionId, gameId: id, profileId })
+    window.parent.postMessage(createRestoreRequest({ requestId, kind, gameId: id, profileId, sessionId }), location.origin)
   })
 }
 
@@ -586,9 +586,17 @@ async function start() {
       }
     }
     const restoreCloudSnapshot = savedSnapshot ? await requestRestoreDecision('cloud-snapshot') : false
-    if (selectedLocalRecovery) window.EJS_emulator.gameManager.loadState(new Uint8Array(selectedLocalRecovery.state))
-    else restoreSnapshotState(savedSnapshot, window.EJS_emulator.gameManager, () => restoreCloudSnapshot)
-    await cloudSaveSynchronizer.restore(window.EJS_emulator.gameManager)
+    let restoredRuntimeState = false
+    if (selectedLocalRecovery) {
+      window.EJS_emulator.gameManager.loadState(new Uint8Array(selectedLocalRecovery.state))
+      restoredRuntimeState = true
+    } else {
+      restoredRuntimeState = restoreSnapshotState(savedSnapshot, window.EJS_emulator.gameManager, () => restoreCloudSnapshot)
+    }
+    if (!restoredRuntimeState) {
+      await Promise.resolve(window.EJS_emulator.gameManager.restart?.())
+      await cloudSaveSynchronizer.restore(window.EJS_emulator.gameManager)
+    }
     watchBatterySaveChanges()
     cloudSaveInterval = window.setInterval(() => saveEmulatorState().catch(() => {}), 15000)
     localRecoveryInterval = window.setInterval(() => void captureLocalRecovery(), 2_500)

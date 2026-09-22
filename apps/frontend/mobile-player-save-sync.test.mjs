@@ -34,19 +34,35 @@ test('uploads battery saves from EmulatorJS save events and keeps periodic snaps
   assert.match(player, /restoreSnapshotState\(savedSnapshot/)
   assert.match(player, /await cloudSaveSynchronizer\.restore\(window\.EJS_emulator\.gameManager\)/)
   assert.match(player, /await cloudSaveSynchronizer\.restore\([\s\S]*?setPlayerReady\(\)/)
-  assert.match(player, /else restoreSnapshotState\(savedSnapshot,[\s\S]*?await cloudSaveSynchronizer\.restore\(window\.EJS_emulator\.gameManager\)/)
+  assert.match(player, /let restoredRuntimeState = false/)
+  assert.match(player, /if \(!restoredRuntimeState\) \{[\s\S]*?await Promise\.resolve\(window\.EJS_emulator\.gameManager\.restart\?\.\(\)\)/)
+  assert.match(player, /if \(!restoredRuntimeState\) \{[\s\S]*?await cloudSaveSynchronizer\.restore\(window\.EJS_emulator\.gameManager\)/)
+  assert.doesNotMatch(player, /else restoreSnapshotState\(savedSnapshot,[\s\S]*?await cloudSaveSynchronizer\.restore\(window\.EJS_emulator\.gameManager\)/)
+  assert.doesNotMatch(player, /saveWritesBlockedByRuntimeState/)
+  assert.match(player, /createRestoreRequest\(\{ requestId, kind, gameId: id, profileId, sessionId \}\)/)
   assert.match(player, /function createEmulatorGameId\(gameId, profileId\)/)
   assert.match(player, /window\.EJS_gameID = emulatorGameId/)
   assert.match(player, /emulatorGameId, \.\.\.context/)
 })
 
-test('flushes the current gameManager battery save when closing even if no save event fired', async () => {
+test('keeps restore responses scoped to the originating player profile', async () => {
+  const hub = await readFile(new URL('./src/main.jsx', import.meta.url), 'utf8')
+  const routing = await readFile(new URL('../packages/snapshot-restore-routing.mjs', import.meta.url), 'utf8')
+
+  assert.match(hub, /event\.data\.sessionId !== session\.sessionId \|\| event\.data\.gameId !== session\.gameId \|\| event\.data\.profileId !== session\.profileId/)
+  assert.match(hub, /type: 'emulator-hub:snapshot-restore-response', requestId, sessionId, gameId: session\.gameId, profileId: session\.profileId, restore/)
+  assert.match(routing, /message\.sessionId !== request\.sessionId/)
+  assert.match(routing, /message\.profileId !== request\.profileId/)
+})
+
+test('keeps close-time battery flushes independent from snapshot restoration', async () => {
   const player = await readFile(new URL('./src/player.js', import.meta.url), 'utf8')
   const closePlayer = player.slice(player.indexOf('async function closeEmulator()'), player.indexOf('window.emulatorHubClose'))
 
   assert.match(closePlayer, /window\.EJS_emulator\?\.gameManager\?\.getSaveFile\?\.\(\)/)
   assert.match(closePlayer, /queueCloudSave\(finalSaveBytes\)/)
   assert.match(closePlayer, /await pendingSaveSync/)
+  assert.match(player, /if \(leaseLost \|\| !cloudSaveSynchronizer/)
 })
 
 test('refreshes lease availability every three seconds only while the profile picker is open', async () => {

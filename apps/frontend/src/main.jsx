@@ -291,9 +291,12 @@ function App() {
         const frame = [...document.querySelectorAll('.player-cell iframe')].find(candidate => candidate.contentWindow === event.source)
         const session = activeSessions.find(candidate => frame?.closest('.player-cell')?.dataset.sessionId === candidate.sessionId)
         if (!session) return
+        if (event.data.sessionId !== session.sessionId || event.data.gameId !== session.gameId || event.data.profileId !== session.profileId) return
         setSnapshotRestoreRequests(current => ({ ...current, [session.sessionId]: {
           ...(current[session.sessionId] ?? {}),
           sessionId: session.sessionId,
+          gameId: session.gameId,
+          profileId: session.profileId,
           requestId: event.data.requestId,
           kind: event.data.kind,
           reason: current[session.sessionId]?.reason ?? session.localRecoveryPrompt?.reason,
@@ -687,7 +690,9 @@ function App() {
 
   function respondToRestore(sessionId, requestId, restore) {
     const cell = [...document.querySelectorAll('.player-cell')].find(candidate => candidate.dataset.sessionId === sessionId)
-    cell?.querySelector('iframe')?.contentWindow?.postMessage({ type: 'emulator-hub:snapshot-restore-response', requestId, restore }, window.location.origin)
+    const session = activeSessions.find(candidate => candidate.sessionId === sessionId)
+    if (!session) return
+    cell?.querySelector('iframe')?.contentWindow?.postMessage({ type: 'emulator-hub:snapshot-restore-response', requestId, sessionId, gameId: session.gameId, profileId: session.profileId, restore }, window.location.origin)
     setSnapshotRestoreRequests(current => { const next = { ...current }; delete next[sessionId]; return next })
   }
 
