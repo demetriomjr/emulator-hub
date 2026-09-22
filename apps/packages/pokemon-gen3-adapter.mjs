@@ -1,7 +1,6 @@
 import { getGen3NationalDex } from './pokemon-gen3-species.mjs'
+import { selectNewestPokemonGen3SaveCopy } from './pokemon-gen3-save-validation.mjs'
 import transferCapabilityProfiles from './pokemon-gen3-save-capabilities.json' with { type: 'json' }
-
-const gen3SaveBytes = 0x20000
 
 export const pokemonGen3Adapter = Object.freeze({
   id: 'gen3-gba-v1',
@@ -190,29 +189,7 @@ const substructureOrders = [
 ]
 
 function selectNewestCopy(saveBytes) {
-  if (!Buffer.isBuffer(saveBytes) && !(saveBytes instanceof Uint8Array)) throw invalidSave('A Gen III save is required.')
-  if (saveBytes.length !== gen3SaveBytes) throw invalidSave('A Gen III save must be exactly 128 KiB.')
-  if (Buffer.from(saveBytes).every(byte => byte === 0xff)) throw invalidSave('A Gen III save must be initialized.')
-  const copies = [readSaveCopy(saveBytes, 0), readSaveCopy(saveBytes, 0xe000)].filter(copy => copy !== null)
-  if (!copies.length) throw invalidSave('A valid initialized Gen III save is required.')
-  return copies.reduce((current, candidate) => candidate.saveIndex > current.saveIndex ? candidate : current)
-}
-
-function readSaveCopy(bytes, copyOffset) {
-  const sectors = new Map()
-  let saveIndex
-  for (let physicalIndex = 0; physicalIndex < 14; physicalIndex += 1) {
-    const offset = copyOffset + physicalIndex * 0x1000
-    const sectionId = bytes.readUInt16LE(offset + 0xff4)
-    const checksum = bytes.readUInt16LE(offset + 0xff6)
-    const signature = bytes.readUInt32LE(offset + 0xff8)
-    const sectorSaveIndex = bytes.readUInt32LE(offset + 0xffc)
-    if (sectionId > 13 || signature !== 0x08012025 || sectors.has(sectionId) || checksum !== sectorChecksum(bytes, offset, sectionId)) return null
-    if (saveIndex !== undefined && saveIndex !== sectorSaveIndex) return null
-    saveIndex = sectorSaveIndex
-    sectors.set(sectionId, { offset, sectionId })
-  }
-  return sectors.size === 14 ? { copyOffset, saveIndex, sectors } : null
+  return selectNewestPokemonGen3SaveCopy(saveBytes)
 }
 
 function pcSpans(save, box, slot) {

@@ -1525,7 +1525,7 @@ describe('hub backend HTTP contract', () => {
     assert.equal(first.status, 200)
     assert.deepEqual(await jsonResponse(first), await jsonResponse(second))
     const descriptor = await (await fetch(launchUrl)).json()
-    assert.deepEqual(Object.keys(descriptor).sort(), ['core', 'gameId', 'id', 'profileId', 'romSha256', 'romUrl', 'runtimeId', 'saveUrl', 'snapshotUrl', 'title'])
+    assert.deepEqual(Object.keys(descriptor).sort(), ['core', 'gameId', 'id', 'profileId', 'romSha256', 'romUrl', 'runtimeId', 'saveAdapter', 'saveUrl', 'snapshotUrl', 'title'])
     assert.equal(descriptor.id, 'pokemon-red')
     assert.equal(descriptor.title, 'Pokémon Red')
     assert.equal(descriptor.core, 'gambatte')
@@ -1534,6 +1534,7 @@ describe('hub backend HTTP contract', () => {
     assert.equal(descriptor.saveUrl, `/api/profiles/${profile.id}/games/pokemon-red/save`)
     assert.equal(descriptor.snapshotUrl, `/api/profiles/${profile.id}/games/pokemon-red/snapshot`)
     assert.equal(descriptor.romSha256, sha256(rom))
+    assert.equal(descriptor.saveAdapter, null)
     assert.equal(descriptor.runtimeId, 'emulatorjs-4.2.3')
     assert.equal(Number.isInteger(descriptor.gameId), true)
 

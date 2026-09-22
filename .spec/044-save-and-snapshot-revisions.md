@@ -71,6 +71,13 @@ bytes to the `.sav` path.
 - On close, stop save polling and periodic snapshots, read and queue the final
   battery-save bytes, await outstanding capture/upload work, then reconcile
   the snapshot before releasing the player lease.
+- For a game launch that declares the `gen3-gba-v1` save adapter, validate every
+  captured battery-save payload with the same shared Gen III validator used by
+  backend save adoption. If a captured payload is invalid, wait 800 ms, read the
+  current EmulatorJS battery-save bytes again, and validate that fresh read
+  before uploading. If the retry is still invalid, do not upload that payload;
+  the next observed battery-save event can try again. Games without this save
+  adapter keep their existing save validation behavior.
 - A failed write is surfaced by the existing close error behavior; the server
   must not delete a prior snapshot unless the comparison has completed.
 
@@ -100,3 +107,6 @@ releasing the lease, so no other player can race the comparison.
    canonical save revision; equal/newer snapshots remain.
 6. Existing profile/game lease fencing and optimistic snapshot revisions
    continue to reject stale clients.
+7. Gen III save payloads are validated in the browser and backend through the
+   same shared validation code; an invalid browser read is reread after 800 ms
+   before it can be uploaded.

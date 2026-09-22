@@ -9,6 +9,8 @@ import { getEmulatorAudioContext, installAudioResumeOnUserGesture } from '../../
 import { monitorEmulatorFrameProgress } from '../../packages/emulator-frame-progress.mjs'
 import { instrumentEmulatorLifecycle } from '../../packages/emulator-lifecycle-diagnostics.mjs'
 import { createLocalRuntimeRecoveryStore } from '../../packages/local-runtime-recovery-store.mjs'
+import { selectNewestPokemonGen3SaveCopy } from '../../packages/pokemon-gen3-save-validation.mjs'
+import { validateSaveWithRetry } from '../../packages/emulator-save-validation-retry.mjs'
 
 const parameters = new URLSearchParams(location.search)
 const id = parameters.get('id')
@@ -99,13 +101,32 @@ function logSavePipeline(event, context = {}) {
   output.call(console, '[save-pipeline]', record)
 }
 
-function queueCloudSave(bytes) {
+async function queueCloudSave(bytes) {
   if (leaseLost || !cloudSaveSynchronizer || !(bytes instanceof Uint8Array) || bytes.byteLength === 0) {
     logSavePipeline('save.front.bytes-ignored', { reason: leaseLost ? 'lease-lost' : !cloudSaveSynchronizer ? 'synchronizer-unavailable' : 'invalid-or-empty-payload', sizeBytes: bytes?.byteLength ?? 0 })
     return Promise.resolve(false)
   }
   const traceId = crypto.randomUUID()
-  const copy = new Uint8Array(bytes)
+  let saveBytes = bytes
+  if (launchDescriptor?.saveAdapter === 'gen3-gba-v1') {
+    const validated = await validateSaveWithRetry(saveBytes, {
+      validate: selectNewestPokemonGen3SaveCopy,
+      readCurrent: () => window.EJS_emulator?.gameManager?.getSaveFile?.(false),
+      wait: milliseconds => new Promise(resolve => window.setTimeout(resolve, milliseconds)),
+      onAttempt: async ({ attempt, bytes: attemptedBytes, valid, validation, error }) => {
+        const context = { traceId, attempt, sizeBytes: attemptedBytes?.byteLength ?? 0 }
+        if (attemptedBytes instanceof Uint8Array && attemptedBytes.byteLength > 0) context.sha256 = await hashSave(attemptedBytes)
+        if (valid) {
+          logSavePipeline('save.front.validation-accepted', { ...context, saveIndex: validation.saveIndex, copyOffset: validation.copyOffset })
+        } else {
+          logSavePipeline('save.front.validation-rejected', { ...context, code: error?.code ?? null, error: error?.message ?? String(error) })
+        }
+      },
+    })
+    if (!validated) return false
+    saveBytes = validated.bytes
+  }
+  const copy = new Uint8Array(saveBytes)
   latestSaveBytes = copy
   logSavePipeline('save.front.bytes-observed', { traceId, sizeBytes: copy.byteLength })
   const upload = pendingSaveSync.then(() => cloudSaveSynchronizer.syncBytes(copy, traceId))

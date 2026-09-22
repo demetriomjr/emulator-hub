@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { pokemonGen3Adapter } from './pokemon-gen3-adapter.mjs'
+import { selectNewestPokemonGen3SaveCopy } from './pokemon-gen3-save-validation.mjs'
 
 test('identifies its adapter ID and rejects non-128KiB saves', () => {
   assert.equal(pokemonGen3Adapter.id, 'gen3-gba-v1')
@@ -22,6 +23,13 @@ test('selects the newest valid Gen III save copy from ordered sector IDs', () =>
   assert.equal(inspected.copyOffset, 0xe000)
   assert.equal(inspected.boxes.length, 14)
   assert.equal(inspected.boxes.every(box => box.slots.length === 30), true)
+
+  const wrapped = new Uint8Array(bytes.byteLength + 10)
+  wrapped.set(bytes, 5)
+  const browserView = wrapped.subarray(5, 5 + bytes.byteLength)
+  const sharedValidation = selectNewestPokemonGen3SaveCopy(browserView)
+  assert.equal(sharedValidation.saveIndex, 7)
+  assert.equal(sharedValidation.copyOffset, 0xe000)
 })
 
 test('projects Emerald transfer capabilities from the newest validated save copy', () => {

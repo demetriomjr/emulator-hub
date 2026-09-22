@@ -1616,6 +1616,7 @@ function playerLeaseHeaders(request) {
 function launchDescriptor(entry, profileId, patch) {
   return {
     id: entry.id, title: entry.title, core: entry.core, profileId, gameId: stableGameId(`${profileId}:${entry.id}`), romUrl: `/roms/${encodeURIComponent(entry.id)}`,
+    saveAdapter: entry.pokemonSave?.adapter ?? null,
     saveUrl: `/api/profiles/${encodeURIComponent(profileId)}/games/${encodeURIComponent(entry.id)}/save`, snapshotUrl: `/api/profiles/${encodeURIComponent(profileId)}/games/${encodeURIComponent(entry.id)}/snapshot`,
     romSha256: entry.sha256, runtimeId: 'emulatorjs-4.2.3',
     ...(patch ? { patchUrl: `/roms/${encodeURIComponent(entry.id)}/patch`, patchSha256: patch.sha256 } : {}),
