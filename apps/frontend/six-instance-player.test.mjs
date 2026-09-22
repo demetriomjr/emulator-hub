@@ -11,14 +11,15 @@ test('caps player sessions at six instances in both the control and launch flow'
   assert.match(hub, /async function launchWithProfile\(profile\)\s*\{\s*if \(profilePurpose === 'add-instance' && activeSessions\.length >= MAX_PLAYER_INSTANCES\) return/)
 })
 
-test('lays out five instances in two columns and six instances horizontally in three columns by two rows', async () => {
+test('lays out five and six instances horizontally in three columns by two rows', async () => {
   const css = await readFile(new URL('./src/styles.css', import.meta.url), 'utf8')
 
-  assert.match(css, /\.player-shell-5\s*\{[^}]*calc\(\(100dvh - 52px\)\s*\*\s*1\)\)/)
-  assert.match(css, /\.player-panel-5\s*\{[^}]*aspect-ratio:\s*1\s*\/\s*1;/)
-  assert.match(css, /\.player-panel-5 \.player-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, 1fr\);[^}]*grid-template-rows:\s*repeat\(3, 1fr\);/)
+  assert.match(css, /\.player-shell-5\s*\{[^}]*calc\(\(100dvh - 52px\)\s*\*\s*2\.25\)\)/)
+  assert.match(css, /\.player-panel-5\s*\{[^}]*aspect-ratio:\s*9\s*\/\s*4;/)
+  assert.match(css, /\.player-panel-5 \.player-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3, 1fr\);[^}]*grid-template-rows:\s*repeat\(2, 1fr\);/)
   assert.match(css, /\.player-panel-6\s*\{[^}]*aspect-ratio:\s*9\s*\/\s*4;/)
   assert.match(css, /\.player-panel-6 \.player-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3, 1fr\);[^}]*grid-template-rows:\s*repeat\(2, 1fr\);/)
+  assert.match(css, /\.player-shell-5:fullscreen \.player-panel\s*\{[^}]*\*\s*2\.25\)\)/)
   assert.match(css, /\.player-shell-6:fullscreen \.player-panel\s*\{[^}]*\*\s*2\.25\)\)/)
 })
 
@@ -28,5 +29,5 @@ test('keeps session-wide controls wired to every active iframe', async () => {
   assert.match(hub, /function broadcastPlayerMessage\(type, payload = \{\}\)\s*\{\s*for \(const frame of document\.querySelectorAll\('\.player-grid iframe'\)\)/)
   assert.match(hub, /emulator-hub:fast-forward[\s\S]*?querySelectorAll\('\.player-grid iframe'\)/)
   assert.match(hub, /global-reset-button[\s\S]*?querySelectorAll\('\.player-grid iframe'\)/)
-  assert.match(hub, /saveAttempts: activeSessions\.map\(\(session, index\)/)
+  assert.match(hub, /createMultiSaveCloseCoordinator\(\{ tasks, onUpdate:/)
 })
