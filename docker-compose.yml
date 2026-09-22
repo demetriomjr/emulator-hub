@@ -22,6 +22,7 @@ services:
       PORT: "3001"
       REDIS_URL: ${REDIS_URL:?Set REDIS_URL in deploy/.env}
       REDIS_NAMESPACE: ${REDIS_NAMESPACE:-emulator-hub:v1}
+      EMULATOR_HUB_BACKUP_TOKEN: ${EMULATOR_HUB_BACKUP_TOKEN:?Set EMULATOR_HUB_BACKUP_TOKEN in deploy/.env}
     volumes:
       - emulator-hub-data:/app/apps/backend/data
       - ./deploy/roms:/app/apps/backend/roms:ro
