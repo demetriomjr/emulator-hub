@@ -1,5 +1,7 @@
 # Specifications
 
+- [Spec 045 — Six-instance player surface](045-six-instance-player.md): increase the session cap to six while preserving all existing global player controls and per-instance isolation.
+
 - [Spec 043 — Generic IPS patch discovery](043-ips-patch-discovery.md): ROM-hash registry, IPS validation, optional patch application, and game-agnostic launch behavior.
 
 - [Spec 044 — Battery saves and independent emulator snapshots](044-save-and-snapshot-revisions.md): event-driven canonical `.sav` uploads, state-only snapshots, explicit restore choice, and close-time revision reconciliation.

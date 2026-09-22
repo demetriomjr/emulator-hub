@@ -45,6 +45,7 @@ const triggerControls = Object.freeze({
 })
 
 const fastForwardSpeeds = Object.freeze([1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5])
+const MAX_PLAYER_INSTANCES = 6
 const configuredPlayerFrames = new WeakSet()
 const localRecoveryStore = createLocalRuntimeRecoveryStore()
 const antTheme = {
@@ -503,6 +504,7 @@ function App() {
   }
 
   async function launchWithProfile(profile) {
+    if (profilePurpose === 'add-instance' && activeSessions.length >= MAX_PLAYER_INSTANCES) return
     const game = profileGame
     let candidate = null
     try { candidate = await localRecoveryStore.get(profile.id, game.id) } catch {}
@@ -533,7 +535,7 @@ function App() {
         restoreRecovery,
       }
       if (profilePurpose === 'add-instance') {
-        setActiveSessions(current => [...current, session])
+        setActiveSessions(current => current.length >= MAX_PLAYER_INSTANCES ? current : [...current, session])
       } else {
         setActiveSessions([session])
       }
@@ -613,7 +615,7 @@ function App() {
   }
 
   function openInstancePicker() {
-    if (isMobileLandscape) return
+    if (isMobileLandscape || activeSessions.length >= MAX_PLAYER_INSTANCES) return
     setError('')
     setInstancePicker(true)
   }
@@ -887,7 +889,7 @@ function App() {
           </div>
           <div className="player-actions">
             {!isMobileLandscape && <>
-              <button type="button" aria-label="Adicionar instância" disabled={activeSessions.length >= 4} onClick={openInstancePicker}>
+              <button type="button" aria-label="Adicionar instância" disabled={activeSessions.length >= MAX_PLAYER_INSTANCES} onClick={openInstancePicker}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
               </button>
               <button type="button" aria-label={fullscreen ? 'Sair da tela cheia' : 'Tela cheia'} onClick={toggleFullscreen}>
