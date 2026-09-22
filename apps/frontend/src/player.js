@@ -22,6 +22,10 @@ const leaseGeneration = Number(parameters.get('leaseGeneration'))
 const restoreLocalRecovery = parameters.get('restoreRecovery') === '1'
 const localRecoveryPrompt = parameters.get('localRecoveryPrompt') === '1'
 const game = document.getElementById('game')
+const playerLoading = document.createElement('div')
+playerLoading.textContent = 'Carregando save...'
+Object.assign(playerLoading.style, { position: 'fixed', inset: '0', zIndex: '9999', display: 'grid', placeItems: 'center', background: '#10141a', color: '#fff', font: '14px system-ui' })
+document.body.append(playerLoading)
 const isMobilePlayerViewport = window.matchMedia('(max-width: 900px) and (max-height: 500px) and (orientation: landscape)').matches
 const mobileGamepadLayout = Object.freeze([
   { id: 'dpad', x: 133, y: 263, size: 195, shape: 'zone' },
@@ -116,6 +120,15 @@ function logSavePipeline(event, context = {}) {
   const record = { timestamp: new Date().toISOString(), event, gameId: id, profileId, ...context }
   const output = event.endsWith('failed') ? console.error : context.ok === false || event.includes('rejected') ? console.warn : console.info
   output.call(console, '[save-pipeline]', record)
+}
+
+function setPlayerLoading(message) {
+  playerLoading.textContent = message
+  playerLoading.style.display = 'grid'
+}
+
+function setPlayerReady() {
+  playerLoading.style.display = 'none'
 }
 
 async function queueCloudSave(bytes) {
@@ -545,6 +558,7 @@ async function start() {
     applyFastForward()
   }
   window.EJS_onGameStart = async () => {
+    setPlayerLoading('Carregando save...')
     // EJS_ready fires before EmulatorJS creates its gameManager. Reapply here
     // because earlier setting changes can be ignored during loader startup.
     applyFastForward()
@@ -569,7 +583,7 @@ async function start() {
     if (selectedLocalRecovery) {
       window.EJS_emulator.gameManager.loadState(new Uint8Array(selectedLocalRecovery.state))
     } else if (!restoreSnapshotState(savedSnapshot, window.EJS_emulator.gameManager, () => restoreCloudSnapshot)) {
-      void Promise.resolve(cloudSaveSynchronizer.restore(window.EJS_emulator.gameManager)).catch(() => {})
+      await cloudSaveSynchronizer.restore(window.EJS_emulator.gameManager)
     }
     watchBatterySaveChanges()
     cloudSaveInterval = window.setInterval(() => saveEmulatorState().catch(() => {}), 15000)
@@ -582,6 +596,7 @@ async function start() {
         report: clientDiagnostics.capture,
       })
     }
+    setPlayerReady()
   }
   const loader = document.createElement('script')
   loader.src = `${dataUrl}loader.js`

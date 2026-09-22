@@ -30,7 +30,10 @@ test('uploads battery saves from EmulatorJS save events and keeps periodic snaps
   const snapshotCapture = player.slice(player.indexOf('async function persistEmulatorState()'), player.indexOf('async function closeEmulator()'))
   assert.match(snapshotCapture, /manager\.getState\?\.\(\)/)
   assert.doesNotMatch(snapshotCapture, /saveSaveFiles|getSaveFile|syncBytes|\.sav/)
-  assert.match(player, /restoreSnapshotState\(savedSnapshot,[\s\S]*?window\.confirm\(/)
+  assert.match(player, /const restoreCloudSnapshot = savedSnapshot \? await requestRestoreDecision\('cloud-snapshot'\) : false/)
+  assert.match(player, /restoreSnapshotState\(savedSnapshot/)
+  assert.match(player, /await cloudSaveSynchronizer\.restore\(window\.EJS_emulator\.gameManager\)/)
+  assert.match(player, /await cloudSaveSynchronizer\.restore\([\s\S]*?setPlayerReady\(\)/)
 })
 
 test('flushes the current gameManager battery save when closing even if no save event fired', async () => {
