@@ -9,7 +9,8 @@ test('defaults both controller triggers to doing nothing', () => {
   assert.deepEqual(triggers.defaults, { l2: 'none', r2: 'none' })
   assert.deepEqual(playerTriggerActionOptions, [
     { value: 'none', label: 'Do nothing' },
-    { value: 'reset', label: 'Reset game' },
+    { value: 'soft-reset', label: 'Soft Reset' },
+    { value: 'reset', label: 'Hard Reset' },
     { value: 'save-state', label: 'Save state' },
     { value: 'load-state', label: 'Load state' },
     { value: 'fast-forward', label: 'Fast Forward' },

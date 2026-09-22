@@ -226,7 +226,8 @@ button { font: inherit; }
 .snapshot-restore-actions .snapshot-restore-primary { border-color: #6fe0a4; color: #082219; background: #69d99e; }
 .snapshot-restore-actions .snapshot-restore-primary:hover { border-color: #b5f7d0; background: #8cf0ba; }
 .player-actions { display: flex; gap: 7px; }
-.player-global-controls, .fast-forward-control { display: flex; align-items: center; gap: 7px; }
+.player-global-controls, .fast-forward-control, .player-header-group { display: flex; align-items: center; gap: 7px; }
+.player-header-separator { width: 1px; height: 24px; background: #6aa88d80; }
 .trigger-action-control { display: flex; align-items: center; gap: 4px; color: #e8f5ef; font-size: 12px; }
 .player-control-button, .player-actions button { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid #a0dcc4a0; border-radius: 9px; color: white; background: #102b30e8; cursor: pointer; }
 .player-control-button:hover, .player-actions button:hover:not(:disabled) { background: #22624f; }
@@ -294,6 +295,8 @@ button { font: inherit; }
   .player-shell { --mobile-player-control-height: min(42px, calc((100dvh - 72px) / 9)); display: grid; width: 100vw !important; height: 100dvh !important; grid-template-columns: 80px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
   .player-header { grid-column: 1; grid-row: 1; height: auto; flex-direction: column; justify-content: space-between; gap: 7px; padding: 8px; border: 0; border-right: 0; border-radius: 0; background: transparent; overflow: hidden; }
   .player-global-controls, .player-actions, .fast-forward-control { flex-direction: column; }
+  .player-header-group { flex-direction: column; }
+  .player-header-separator { width: 24px; height: 1px; }
   .player-actions { margin-top: 0; }
   .player-control-button, .player-actions button, .fast-forward-button, .global-reset-button { width: 64px; height: var(--mobile-player-control-height); }
   .hub-sidebar .hub-sidebar-action[aria-label='Configurar controles'], .player-header .player-control-button[aria-label='Configurar controles'] { display: none; }

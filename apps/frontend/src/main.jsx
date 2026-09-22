@@ -972,54 +972,67 @@ function App() {
       <div className={`player-shell player-shell-${activeSessions.length}`} ref={playerShellRef}>
         <header className="player-header">
           <div className="player-global-controls">
-            <button className="player-control-button" type="button" aria-label="Configurar controles" onClick={openControlPanel}>
+            <div className="fast-forward-control">
+              <button className={`fast-forward-button${fastForwardEnabled ? ' is-active' : ''}`} type="button" aria-label="Fast Forward" title="Fast Forward" aria-pressed={fastForwardEnabled} onClick={toggleFastForward}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5v14l7-7-7-7Zm8 0v14l7-7-7-7Z" /></svg>
+              </button>
+              <select aria-label="Velocidade do Fast Forward" title="Velocidade do Fast Forward" value={fastForwardSpeed} onChange={event => { const speed = Number(event.target.value); setFastForwardSpeed(speed); void saveUserPreferences({ fastForwardSpeed: speed }) }}>
+                {fastForwardSpeeds.map(speed => <option key={speed} value={speed}>{speed}×</option>)}
+              </select>
+            </div>
+            <span className="player-header-separator" aria-hidden="true" />
+            <div className="player-header-group">
+              <button className="player-control-button" type="button" aria-label="Salvar estado" title="Salvar estado" onClick={() => broadcastPlayerMessage('emulator-hub:save-state')}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5zM8 4v6h8V4M8 20v-6h8v6" /></svg>
+              </button>
+              <button className="player-control-button" type="button" aria-label="Carregar estado" title="Carregar estado" onClick={() => broadcastPlayerMessage('emulator-hub:load-state')}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7 9m5-5 5 5M5 14v5h14v-5" /></svg>
+              </button>
+            </div>
+            <span className="player-header-separator" aria-hidden="true" />
+            <div className="player-header-group">
+              <button className="player-control-button" type="button" aria-label="Soft Reset" title="Soft Reset" onClick={() => broadcastPlayerMessage('emulator-hub:soft-reset')}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 1-2.3-5.7M20 4v7h-7" /></svg>
+              </button>
+              <button className="player-control-button global-reset-button" type="button" aria-label="Hard Reset" title="Hard Reset" onClick={() => {
+                for (const frame of document.querySelectorAll('.player-grid iframe')) {
+                  frame.contentWindow?.postMessage({ type: 'emulator-hub:reset' }, window.location.origin)
+                }
+              }}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v8M6.4 6.4a8 8 0 1 0 11.2 0" /></svg>
+              </button>
+            </div>
+            <span className="player-header-separator" aria-hidden="true" />
+            <div className="player-header-group">
+              <label className="trigger-action-control">L2
+                <select aria-label="Ação do L2" title="Ação do L2" value={l2TriggerAction} onChange={event => { const action = event.target.value; setL2TriggerAction(action); void saveUserPreferences({ triggerActions: { l2: action } }) }}>
+                  {playerTriggerActionOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </label>
+              <label className="trigger-action-control">R2
+                <select aria-label="Ação do R2" title="Ação do R2" value={r2TriggerAction} onChange={event => { const action = event.target.value; setR2TriggerAction(action); void saveUserPreferences({ triggerActions: { r2: action } }) }}>
+                  {playerTriggerActionOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </label>
+            </div>
+            <span className="player-header-separator" aria-hidden="true" />
+            <button className="player-control-button" type="button" aria-label="Configurar controles" title="Configurar controles" onClick={openControlPanel}>
               <svg viewBox="0 0 24 24" className="control-configuration-icon" aria-hidden="true">
                 <path d="M7.1 8.5h9.8c1.5 0 2.8 1 3.2 2.45l1.08 4.15a2.35 2.35 0 0 1-4.08 2.1l-1.55-1.7H8.4l-1.55 1.7a2.35 2.35 0 0 1-4.08-2.1l1.08-4.15A3.3 3.3 0 0 1 7.1 8.5Z" />
                 <path d="M7.3 11.15v3.1M5.75 12.7h3.1M16.35 11.8h.01M18.25 13.65h.01" />
               </svg>
             </button>
-            <button className="player-control-button" type="button" aria-label="Salvar estado" title="Salvar estado" onClick={() => broadcastPlayerMessage('emulator-hub:save-state')}>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5zM8 4v6h8V4M8 20v-6h8v6" /></svg>
-            </button>
-            <button className="player-control-button" type="button" aria-label="Carregar estado" title="Carregar estado" onClick={() => broadcastPlayerMessage('emulator-hub:load-state')}>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h8M5 5v8M5 5l5 5a7 7 0 1 1-1 9" /></svg>
-            </button>
-            <div className="fast-forward-control">
-              <button className={`fast-forward-button${fastForwardEnabled ? ' is-active' : ''}`} type="button" aria-label="Avanço rápido" aria-pressed={fastForwardEnabled} onClick={toggleFastForward}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5v14l7-7-7-7Zm8 0v14l7-7-7-7Z" /></svg>
-              </button>
-              <select aria-label="Velocidade do avanço rápido" value={fastForwardSpeed} onChange={event => { const speed = Number(event.target.value); setFastForwardSpeed(speed); void saveUserPreferences({ fastForwardSpeed: speed }) }}>
-                {fastForwardSpeeds.map(speed => <option key={speed} value={speed}>{speed}×</option>)}
-              </select>
-              <button className="global-reset-button" type="button" aria-label="Resetar todos os emuladores" onClick={() => {
-                for (const frame of document.querySelectorAll('.player-grid iframe')) {
-                  frame.contentWindow?.postMessage({ type: 'emulator-hub:reset' }, window.location.origin)
-                }
-              }}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 1-2.3-5.7M20 4v7h-7" /></svg>
-              </button>
-              <label className="trigger-action-control">L2
-                <select aria-label="Ação do L2" value={l2TriggerAction} onChange={event => { const action = event.target.value; setL2TriggerAction(action); void saveUserPreferences({ triggerActions: { l2: action } }) }}>
-                  {playerTriggerActionOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
-              </label>
-              <label className="trigger-action-control">R2
-                <select aria-label="Ação do R2" value={r2TriggerAction} onChange={event => { const action = event.target.value; setR2TriggerAction(action); void saveUserPreferences({ triggerActions: { r2: action } }) }}>
-                  {playerTriggerActionOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
-              </label>
-            </div>
           </div>
           <div className="player-actions">
             {!isMobileLandscape && <>
-              <button type="button" aria-label="Adicionar instância" disabled={activeSessions.length >= MAX_PLAYER_INSTANCES} onClick={openInstancePicker}>
+              <button type="button" aria-label="Adicionar instância" title="Adicionar instância" disabled={activeSessions.length >= MAX_PLAYER_INSTANCES} onClick={openInstancePicker}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
               </button>
-              <button type="button" aria-label={fullscreen ? 'Sair da tela cheia' : 'Tela cheia'} onClick={toggleFullscreen}>
+              <button type="button" aria-label={fullscreen ? 'Sair da tela cheia' : 'Tela cheia'} title={fullscreen ? 'Sair da tela cheia' : 'Tela cheia'} onClick={toggleFullscreen}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d={fullscreen ? 'M4 9h5V4M20 9h-5V4M4 15h5v5M20 15h-5v5' : 'M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5'} /></svg>
               </button>
             </>}
-            <button type="button" aria-label="Fechar emulador" onClick={closePlayer}>
+            <button type="button" aria-label="Fechar emulador" title="Fechar emulador" onClick={closePlayer}>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19" /></svg>
             </button>
           </div>

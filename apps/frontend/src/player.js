@@ -12,6 +12,7 @@ import { createLocalRuntimeRecoveryStore } from '../../packages/local-runtime-re
 import { selectNewestPokemonGen3SaveCopy } from '../../packages/pokemon-gen3-save-validation.mjs'
 import { validateSaveWithRetry } from '../../packages/emulator-save-validation-retry.mjs'
 import { createRestoreRequest, resolveRestoreRequest } from '../../packages/snapshot-restore-routing.mjs'
+import { softResetEmulator } from '../../packages/player-reset.mjs'
 
 const parameters = new URLSearchParams(location.search)
 const id = parameters.get('id')
@@ -394,6 +395,10 @@ window.addEventListener('message', event => {
   }
   if (event.data?.type === 'emulator-hub:reset') {
     window.EJS_emulator?.gameManager?.restart()
+    return
+  }
+  if (event.data?.type === 'emulator-hub:soft-reset') {
+    void softResetEmulator(window.EJS_emulator?.gameManager)
     return
   }
   if (event.data?.type === 'emulator-hub:save-state') {

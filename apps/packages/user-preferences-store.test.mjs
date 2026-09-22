@@ -27,3 +27,9 @@ test('initialization does not overwrite an existing global document', async () =
   const result = await store.patch({ fastForwardSpeed: 5, initializeIfAbsent: true })
   assert.equal(result.preferences.fastForwardSpeed, 2)
 })
+
+test('accepts Soft Reset as a persisted trigger action', async () => {
+  const store = createRedisUserPreferencesStore({ persistence: createMemoryRedisPersistence() })
+  const result = await store.patch({ triggerActions: { l2: 'soft-reset' } })
+  assert.equal(result.preferences.triggerActions.l2, 'soft-reset')
+})
