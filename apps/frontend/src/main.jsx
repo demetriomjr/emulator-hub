@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { createRoot } from 'react-dom/client'
+import { createPortal, createRoot } from 'react-dom'
 import { ConfigProvider } from 'antd'
 import { acquirePlayerLease, createProfile, deleteProfile as deleteProfileRequest, getControlProfile, getGames, getProfiles, getUserPreferences, releasePlayerLease, syncOddsResetCount, updateControlProfile, updateProfile, updateUserPreferences } from '../../packages/hub-client.js'
 import { activeGamepadBindings, readGamepadBinding, readGamepadSnapshot } from '../../packages/gamepad-input.mjs'
@@ -911,6 +911,9 @@ function App() {
   const isStandalone = window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true
   const isNarrowPortrait = isNarrowPortraitViewport(viewport)
   const isMobileLandscape = isMobileLandscapeViewport(viewport)
+  const renderLayer = content => fullscreen && playerShellRef.current
+    ? createPortal(content, playerShellRef.current)
+    : content
 
   return <main className="hub">
     <div className="hub-layout" inert={activeSessions.length || profileGame || instancePicker || controlPanelOpen || pokemonHubOpen ? true : undefined}>
@@ -960,7 +963,7 @@ function App() {
         {error && <p className="error" role="alert">{error}</p>}
       </section>
     </div>
-    {controlPanelOpen && <div className="profile-overlay" role="dialog" aria-modal="true" aria-label="Configurar controles">
+    {controlPanelOpen && renderLayer(<div className="profile-overlay" role="dialog" aria-modal="true" aria-label="Configurar controles">
       <div className="profile-panel control-panel">
         <header className="profile-header">
           <h2>Controles</h2>
@@ -999,9 +1002,9 @@ function App() {
           {controlError && <p className="profile-error" role="alert">{controlError}</p>}
         </div>
       </div>
-    </div>}
-    {pokemonHubOpen && <React.Suspense fallback={<div className="pokemon-workspace" role="status">Carregando workspace...</div>}><PokemonHub onClose={() => setPokemonHubOpen(false)} closeSignal={pokemonHubCloseSignal} /></React.Suspense>}
-    {instancePicker && <div className="profile-overlay" role="dialog" aria-modal="true" aria-label="Selecionar jogo">
+    </div>)}
+    {pokemonHubOpen && renderLayer(<React.Suspense fallback={<div className="pokemon-workspace" role="status">Carregando workspace...</div>}><PokemonHub onClose={() => setPokemonHubOpen(false)} closeSignal={pokemonHubCloseSignal} /></React.Suspense>)}
+    {instancePicker && renderLayer(<div className="profile-overlay" role="dialog" aria-modal="true" aria-label="Selecionar jogo">
       <div className="profile-panel">
         <header className="profile-header">
           <h2>Selecionar jogo</h2>
@@ -1015,8 +1018,8 @@ function App() {
           </div>
         </div>
       </div>
-    </div>}
-    {profileGame && <div className={`profile-overlay${profilePickerPlacement ? ' profile-picker-overlay' : ''} profile-picker-mobile`} role="dialog" aria-modal="true" aria-label="Selecionar perfil">
+    </div>)}
+    {profileGame && renderLayer(<div className={`profile-overlay${profilePickerPlacement ? ' profile-picker-overlay' : ''} profile-picker-mobile`} role="dialog" aria-modal="true" aria-label="Selecionar perfil">
       <div className={`profile-panel${profilePickerPlacement ? ' profile-picker-panel' : ''}`} style={profilePickerPlacement ? profilePickerPlacement : undefined}>
         <header className="profile-header">
           <h2>{profileGame.title}</h2>
@@ -1064,20 +1067,20 @@ function App() {
           </div>
         </div>
       </div>
-    </div>}
-    {isNarrowPortrait && <div className="mobile-rotate-overlay" role="status" aria-live="assertive">
+    </div>)}
+    {isNarrowPortrait && renderLayer(<div className="mobile-rotate-overlay" role="status" aria-live="assertive">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7a3 3 0 0 1 3 3v4M17 21h-7a3 3 0 0 1-3-3v-4M17 3l3 3-3 3M7 21l-3-3 3-3" /></svg>
       <strong>Gire o aparelho</strong>
       <span>A experiência de jogo funciona melhor na horizontal.</span>
-    </div>}
-    {installHelpOpen && <div className="mobile-install-overlay" role="dialog" aria-modal="true" aria-labelledby="mobile-install-title">
+    </div>)}
+    {installHelpOpen && renderLayer(<div className="mobile-install-overlay" role="dialog" aria-modal="true" aria-labelledby="mobile-install-title">
       <div className="mobile-install-panel">
         <button className="dialog-close" type="button" aria-label="Fechar instruções de instalação" onClick={() => setInstallHelpOpen(false)}>×</button>
         <h2 id="mobile-install-title">Instalar no iPhone</h2>
         <p>No Chrome, toque em <strong>Compartilhar</strong> e depois em <strong>Adicionar à Tela de Início</strong>.</p>
         <p>Depois, abra o ícone “Emulator Hub” pela Tela de Início.</p>
       </div>
-    </div>}
+    </div>)}
     {activeSessions.length > 0 && <div className="player-overlay" role="dialog" aria-modal="true" aria-label="Emulator">
       <div className={`player-shell player-shell-${activeSessions.length}`} ref={playerShellRef}>
         <header className="player-header">
@@ -1156,7 +1159,7 @@ function App() {
         </div>
       </div>
     </div>}
-    {saveCloseRows && <div className="save-close-overlay" role="dialog" aria-modal="true" aria-labelledby="save-close-title">
+    {saveCloseRows && renderLayer(<div className="save-close-overlay" role="dialog" aria-modal="true" aria-labelledby="save-close-title">
       <div className="save-close-panel">
         <h2 id="save-close-title">Salvando jogos</h2>
         <p role="status" aria-live="polite">Aguarde a confirmação de cada save antes de fechar.</p>
@@ -1168,7 +1171,7 @@ function App() {
         </ul>
         {saveCloseRows.some(row => row.status === 'failed') && <button type="button" className="save-close-retry" onClick={retryFailedSaves} disabled={saveCloseRows.some(row => row.status === 'processing' || row.status === 'retrying')}>Reenviar falhos</button>}
       </div>
-    </div>}
+    </div>)}
   </main>
 }
 
