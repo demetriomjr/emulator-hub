@@ -2,6 +2,8 @@
 
 - [Spec 050 — Authentic GBA RTC clock provider](050-authentic-gba-rtc-clock.md): make the host-clock RTC path explicit, testable, and extensible without changing game RNG semantics.
 
+- [Spec 055 — Reset advances the emulator clock](055-reset-advances-emulator-clock.md): optionally configure a virtual clock for reset-based shiny hunting, advancing it on soft and hard resets.
+
 - [Spec 049 — Per-emulator snapshot and local recovery prompt](049-snapshot-restore-prompt.md): one styled, scoped restore decision component for backend snapshots and local runtime recovery in multi-player sessions.
 
 - [Spec 048 — Backend state backup endpoint and startup barrier](048-backend-state-backup.md): authenticated full-state archives for profiles, saves, Pokémon Hub state, and a pre-listen production backup.

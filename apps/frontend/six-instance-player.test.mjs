@@ -28,6 +28,6 @@ test('keeps session-wide controls wired to every active iframe', async () => {
 
   assert.match(hub, /function broadcastPlayerMessage\(type, payload = \{\}\)\s*\{\s*for \(const frame of document\.querySelectorAll\('\.player-grid iframe'\)\)/)
   assert.match(hub, /emulator-hub:fast-forward[\s\S]*?querySelectorAll\('\.player-grid iframe'\)/)
-  assert.match(hub, /global-reset-button[\s\S]*?querySelectorAll\('\.player-grid iframe'\)/)
+  assert.match(hub, /global-reset-button[\s\S]*?dispatchReset\('emulator-hub:reset'\)/)
   assert.match(hub, /createMultiSaveCloseCoordinator\(\{ tasks, onUpdate:/)
 })

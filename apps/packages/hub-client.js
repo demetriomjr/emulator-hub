@@ -320,6 +320,17 @@ export async function getCloudSave(url, lease, traceId = null, logger = () => {}
   return { bytes, revision: Number(revision), traceId }
 }
 
+export async function syncOddsResetCount(gameId, profileId, oddsResetCount) {
+  const response = await fetch(`${profileCollectionUrl(gameId)}/${encodeURIComponent(profileId)}/odds-state`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ oddsResetCount }),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw Object.assign(new Error(body.error || `Request failed (${response.status})`), { code: body.code })
+  return body
+}
+
 export function getUserPreferences() {
   return getJson('/api/user-preferences')
 }

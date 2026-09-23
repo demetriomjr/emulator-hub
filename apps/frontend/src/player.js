@@ -13,6 +13,7 @@ import { selectNewestPokemonGen3SaveCopy } from '../../packages/pokemon-gen3-sav
 import { validateSaveWithRetry } from '../../packages/emulator-save-validation-retry.mjs'
 import { createRestoreRequest, resolveRestoreRequest } from '../../packages/snapshot-restore-routing.mjs'
 import { softResetEmulator } from '../../packages/player-reset.mjs'
+import { createOddsManipulatorClock } from '../../packages/odds-manipulator-clock.mjs'
 
 const parameters = new URLSearchParams(location.search)
 const id = parameters.get('id')
@@ -40,7 +41,7 @@ const mobileGamepadLayout = Object.freeze([
 // fixes ahead of the pinned 4.2.3 release. This branch exercises it against
 // the known iPhone WebKit rendering stall.
 const dataUrl = 'https://cdn.emulatorjs.org/4.2.3/data/'
-const clientDiagnosticsOptions = getClientDiagnosticsOptions(location.search)
+const clientDiagnosticsOptions = getClientDiagnosticsOptions(import.meta.env.VITE_DEBUG, location.search)
 const clientDiagnostics = clientDiagnosticsOptions.enabled
   ? createClientDiagnostics({ browser: window, source: 'player', sessionId: clientDiagnosticsOptions.sessionId })
   : null
@@ -77,6 +78,8 @@ let stopLifecycleDiagnostics = null
 let leaseHeartbeat = null
 let leaseLost = false
 const pendingRestoreRequests = new Map()
+const oddsClock = createOddsManipulatorClock()
+oddsClock.install()
 
 function loseLease() {
   if (leaseLost) return
@@ -411,11 +414,34 @@ window.addEventListener('message', event => {
     gamepadInput?.setBindings(bindings)
     return
   }
+  if (event.data?.type === 'emulator-hub:odds-manipulator-configure') {
+    const accepted = oddsClock.configure(event.data)
+    clientDiagnostics?.capture({ kind: 'odds-manipulator', message: accepted ? 'odds.clock.configured' : 'odds.clock.configuration-rejected', enabled: event.data.enabled === true, oddsResetCount: event.data.oddsResetCount ?? null, virtualTimestamp: event.data.virtualTimestamp ?? null, dateNow: Date.now() })
+    event.source?.postMessage({
+      type: 'emulator-hub:odds-manipulator-ready',
+      requestId: event.data.requestId ?? null,
+      sessionId: event.data.sessionId ?? null,
+      accepted,
+      enabled: event.data.enabled === true,
+      oddsResetCount: accepted ? event.data.oddsResetCount ?? 0 : null,
+      virtualTimestamp: accepted ? event.data.virtualTimestamp ?? 0 : null,
+      dateNow: Date.now(),
+    }, event.origin)
+    return
+  }
   if (event.data?.type === 'emulator-hub:reset') {
+    if (event.data.oddsResetCount !== undefined || event.data.virtualTimestamp !== undefined) {
+      const accepted = oddsClock.configure({ enabled: true, oddsResetCount: event.data.oddsResetCount, virtualTimestamp: event.data.virtualTimestamp })
+      clientDiagnostics?.capture({ kind: 'odds-manipulator', message: accepted ? 'odds.hard-reset.clock-applied' : 'odds.hard-reset.clock-rejected', oddsResetCount: event.data.oddsResetCount ?? null, virtualTimestamp: event.data.virtualTimestamp ?? null, dateNow: Date.now(), managerReady: Boolean(window.EJS_emulator?.gameManager) })
+    }
     window.EJS_emulator?.gameManager?.restart()
     return
   }
   if (event.data?.type === 'emulator-hub:soft-reset') {
+    if (event.data.oddsResetCount !== undefined || event.data.virtualTimestamp !== undefined) {
+      const accepted = oddsClock.configure({ enabled: true, oddsResetCount: event.data.oddsResetCount, virtualTimestamp: event.data.virtualTimestamp })
+      clientDiagnostics?.capture({ kind: 'odds-manipulator', message: accepted ? 'odds.soft-reset.clock-applied' : 'odds.soft-reset.clock-rejected', oddsResetCount: event.data.oddsResetCount ?? null, virtualTimestamp: event.data.virtualTimestamp ?? null, dateNow: Date.now(), managerReady: Boolean(window.EJS_emulator?.gameManager) })
+    }
     void softResetEmulator(window.EJS_emulator?.gameManager)
     return
   }
