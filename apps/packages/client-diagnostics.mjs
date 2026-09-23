@@ -1,15 +1,15 @@
 export const clientDiagnosticEndpoint = '/api/debug/client-events'
 
-export function getClientDiagnosticsOptions(search, createSessionId = defaultSessionId) {
+export function getClientDiagnosticsOptions(debugValue, search = '', createSessionId = defaultSessionId) {
   const parameters = new URLSearchParams(search)
-  if (parameters.get('debug') !== '1') return { enabled: false, sessionId: null }
+  const enabled = String(debugValue ?? '').trim() === '1'
+  if (!enabled) return { enabled: false, sessionId: null }
   const supplied = parameters.get('debugSession')
   return { enabled: true, sessionId: isSessionId(supplied) ? supplied : createSessionId() }
 }
 
 export function appendClientDiagnosticsParameters(parameters, options) {
   if (!options?.enabled) return parameters
-  parameters.set('debug', '1')
   parameters.set('debugSession', options.sessionId)
   return parameters
 }
@@ -19,7 +19,12 @@ export function createClientDiagnostics({ browser = window, source = 'player', s
   const originalFetch = browser.fetch?.bind(browser)
   const send = report ?? createReporter({ browser, endpoint, fetch: originalFetch })
   const common = () => ({ sessionId, source, page: browser.location.pathname, userAgent: browser.navigator?.userAgent ?? '', viewport: { width: browser.innerWidth, height: browser.innerHeight } })
-  const capture = event => { void Promise.resolve(send({ ...common(), ...event })).catch(() => {}) }
+  const capture = event => {
+    const record = { ...common(), ...event }
+    const output = event.kind === 'uncaught-error' || event.kind === 'unhandled-rejection' || event.kind === 'network-error' ? 'error' : event.message?.includes('rejected') || event.message?.includes('failed') ? 'warn' : 'info'
+    browser.console?.[output]?.('[client-diagnostics]', record)
+    void Promise.resolve(send(record)).catch(() => {})
+  }
   const onError = event => {
     const error = event.error ?? event
     capture(errorEvent('uncaught-error', error))

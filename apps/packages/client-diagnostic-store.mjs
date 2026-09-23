@@ -1,5 +1,5 @@
 const sources = new Set(['hub', 'player'])
-const kinds = new Set(['uncaught-error', 'unhandled-rejection', 'network-error', 'emulator-failure', 'emulator-frame-stall', 'emulator-lifecycle'])
+const kinds = new Set(['uncaught-error', 'unhandled-rejection', 'network-error', 'emulator-failure', 'emulator-frame-stall', 'emulator-lifecycle', 'odds-manipulator'])
 const maximumMessageLength = 512
 const maximumStackLength = 2_048
 const maximumUserAgentLength = 512
@@ -38,6 +38,16 @@ export function normalizeClientDiagnostic(input, now = () => new Date().toISOStr
   addString(event, 'userAgent', input.userAgent, maximumUserAgentLength)
   addViewport(event, input.viewport)
   addRequest(event, input.request)
+  addString(event, 'gameId', input.gameId, 256)
+  addString(event, 'profileId', input.profileId, 128)
+  addString(event, 'resetType', input.resetType, 64)
+  addOptionalNonNegativeInteger(event, 'oddsResetCount', input.oddsResetCount)
+  addOptionalNonNegativeInteger(event, 'virtualTimestamp', input.virtualTimestamp)
+  addOptionalNonNegativeInteger(event, 'dateNow', input.dateNow)
+  addOptionalBoolean(event, 'enabled', input.enabled)
+  addOptionalBoolean(event, 'managerReady', input.managerReady)
+  addOptionalBoolean(event, 'pending', input.pending)
+  addActiveProfiles(event, input.activeProfiles)
   return event
 }
 
@@ -81,6 +91,25 @@ function requiredString(value, maximumLength) {
 }
 
 function validDimension(value) { return Number.isInteger(value) && value >= 0 && value <= 16_384 }
+function addOptionalNonNegativeInteger(target, key, value) {
+  if (value === undefined || value === null) return
+  if (!Number.isSafeInteger(value) || value < 0) throw invalidDiagnostic()
+  target[key] = value
+}
+function addOptionalBoolean(target, key, value) {
+  if (value === undefined || value === null) return
+  if (typeof value !== 'boolean') throw invalidDiagnostic()
+  target[key] = value
+}
+function addActiveProfiles(target, value) {
+  if (value === undefined) return
+  if (!Array.isArray(value) || value.length > 16 || value.some(profile => !profile || typeof profile !== 'object')) throw invalidDiagnostic()
+  target.activeProfiles = value.map(profile => ({
+    ...(typeof profile.gameId === 'string' ? { gameId: profile.gameId.slice(0, 256) } : {}),
+    ...(typeof profile.profileId === 'string' ? { profileId: profile.profileId.slice(0, 128) } : {}),
+    ...(Number.isSafeInteger(profile.oddsResetCount) && profile.oddsResetCount >= 0 ? { oddsResetCount: profile.oddsResetCount } : {}),
+  }))
+}
 function safeSessionId(value) { return /^[A-Za-z0-9_-]+$/.test(value) }
 function invalidDiagnostic() { return Object.assign(new Error('Client diagnostic is invalid.'), { code: 'CLIENT_DIAGNOSTIC_INVALID' }) }
 function clone(event) { return structuredClone(event) }

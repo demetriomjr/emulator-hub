@@ -3,8 +3,9 @@ import { test } from 'node:test'
 
 import { appendClientDiagnosticsParameters, createClientDiagnostics, getClientDiagnosticsOptions } from './client-diagnostics.mjs'
 
-function createWindow(search = '?debug=1') {
+function createWindow(search = '') {
   const listeners = new Map()
+  const consoleEvents = []
   return {
     location: { search, pathname: '/player.html', origin: 'https://hub.test' },
     navigator: { userAgent: 'Mozilla/5.0 (iPhone)' },
@@ -14,19 +15,22 @@ function createWindow(search = '?debug=1') {
     removeEventListener(type) { listeners.delete(type) },
     emit(type, event) { listeners.get(type)?.(event) },
     fetch: async () => { throw new Error('offline') },
+    console: { info: (...args) => consoleEvents.push(args), warn: (...args) => consoleEvents.push(args), error: (...args) => consoleEvents.push(args) },
+    consoleEvents,
   }
 }
 
-test('enables a stable diagnostic session only for debug URLs', () => {
-  assert.deepEqual(getClientDiagnosticsOptions('?debug=1', () => 'generated'), { enabled: true, sessionId: 'generated' })
-  assert.deepEqual(getClientDiagnosticsOptions('?debug=1&debugSession=shared-session', () => 'generated'), { enabled: true, sessionId: 'shared-session' })
-  assert.deepEqual(getClientDiagnosticsOptions('?debug=0', () => 'generated'), { enabled: false, sessionId: null })
+test('enables diagnostics only when VITE_DEBUG is 1', () => {
+  assert.deepEqual(getClientDiagnosticsOptions('1', '', () => 'generated'), { enabled: true, sessionId: 'generated' })
+  assert.deepEqual(getClientDiagnosticsOptions('1', '?debugSession=shared-session', () => 'generated'), { enabled: true, sessionId: 'shared-session' })
+  assert.deepEqual(getClientDiagnosticsOptions('0', '?debug=1', () => 'generated'), { enabled: false, sessionId: null })
+  assert.deepEqual(getClientDiagnosticsOptions('?debug=1', '', () => 'generated'), { enabled: false, sessionId: null })
 })
 
 test('adds the shared debug session to a player URL only when diagnostics are enabled', () => {
   const enabled = new URLSearchParams({ id: 'pokemon-red', profileId: 'red' })
   appendClientDiagnosticsParameters(enabled, { enabled: true, sessionId: 'shared-session' })
-  assert.equal(enabled.toString(), 'id=pokemon-red&profileId=red&debug=1&debugSession=shared-session')
+  assert.equal(enabled.toString(), 'id=pokemon-red&profileId=red&debugSession=shared-session')
 
   const disabled = new URLSearchParams({ id: 'pokemon-red' })
   appendClientDiagnosticsParameters(disabled, { enabled: false, sessionId: null })
@@ -51,6 +55,7 @@ test('reports uncaught and failed API events without wrapping the diagnostics re
     { sessionId: 'ios-session-1', source: 'player', kind: 'uncaught-error', message: 'EmulatorJS loader failed', page: '/player.html', request: undefined },
     { sessionId: 'ios-session-1', source: 'player', kind: 'network-error', message: 'offline', page: '/player.html', request: { method: 'GET', path: '/api/games' } },
   ])
+  assert.equal(browser.consoleEvents.length, 2)
   diagnostics.dispose()
 })
 

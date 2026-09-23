@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, test } from 'node:test'
@@ -27,11 +27,35 @@ test('creates and lists a durable profile for one game only', async () => {
   assert.match(created.id, /^[0-9a-f-]{36}$/)
   assert.equal(created.name, 'Ash')
   assert.match(created.createdAt, /^\d{4}-\d{2}-\d{2}T/)
+  assert.equal(created.oddsResetCount, 0)
   assert.deepEqual(await profiles.list('pokemon-emerald'), [created])
   assert.deepEqual(await profiles.list('pokemon-firered'), [])
 
   const reopened = createProfileStore({ dataPath })
   assert.deepEqual(await reopened.list('pokemon-emerald'), [created])
+})
+
+test('persists odds reset count monotonically and migrates legacy profiles', async () => {
+  const dataPath = await profilePath()
+  const profiles = createProfileStore({ dataPath })
+  const created = await profiles.create('pokemon-emerald', 'Ash')
+
+  assert.deepEqual(await profiles.updateOddsResetCount('pokemon-emerald', created.id, 3), { ...created, oddsResetCount: 3 })
+  assert.deepEqual(await profiles.updateOddsResetCount('pokemon-emerald', created.id, 2), { ...created, oddsResetCount: 3 })
+  assert.equal((await profiles.get('pokemon-emerald', created.id)).oddsResetCount, 3)
+  await assert.rejects(() => profiles.updateOddsResetCount('pokemon-emerald', created.id, -1), { code: 'PROFILE_ODDS_COUNT_INVALID' })
+  await assert.rejects(() => profiles.updateOddsResetCount('pokemon-emerald', created.id, 1.5), { code: 'PROFILE_ODDS_COUNT_INVALID' })
+})
+
+test('normalizes a null odds reset count left by an interrupted legacy migration', async () => {
+  const dataPath = await profilePath()
+  const profile = { id: '972e1110-fbd6-4f88-bbd5-2039fe20ee65', name: 'Ash', createdAt: '2026-09-23T00:00:00.000Z', oddsResetCount: null }
+  await mkdir(dataPath, { recursive: true })
+  await writeFile(join(dataPath, 'pokemon-emerald.json'), JSON.stringify([profile]))
+  const profiles = createProfileStore({ dataPath })
+
+  assert.equal((await profiles.get('pokemon-emerald', profile.id)).oddsResetCount, 0)
+  assert.equal((await profiles.updateOddsResetCount('pokemon-emerald', profile.id, 1)).oddsResetCount, 1)
 })
 
 test('deletes a durable profile from its own game collection', async () => {

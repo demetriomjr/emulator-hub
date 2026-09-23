@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ConfigProvider } from 'antd'
-import { acquirePlayerLease, createProfile, deleteProfile as deleteProfileRequest, getControlProfile, getGames, getProfiles, getUserPreferences, releasePlayerLease, updateControlProfile, updateProfile, updateUserPreferences } from '../../packages/hub-client.js'
+import { acquirePlayerLease, createProfile, deleteProfile as deleteProfileRequest, getControlProfile, getGames, getProfiles, getUserPreferences, releasePlayerLease, syncOddsResetCount, updateControlProfile, updateProfile, updateUserPreferences } from '../../packages/hub-client.js'
 import { activeGamepadBindings, readGamepadBinding, readGamepadSnapshot } from '../../packages/gamepad-input.mjs'
 import { replaceCatalogProfile } from '../../packages/save-profile-catalog.mjs'
 import { groupGamesByLayout } from '../../packages/hub-layout.mjs'
@@ -14,15 +14,18 @@ import { shouldReloadForFrontendRevision } from '../../packages/frontend-revisio
 import { readFastForwardSpeed } from '../../packages/fast-forward-preference.mjs'
 import { createLocalRuntimeRecoveryStore } from '../../packages/local-runtime-recovery-store.mjs'
 import { createPlayerTriggerActions, playerTriggerActionOptions } from '../../packages/player-trigger-actions.mjs'
+import { createOddsManipulatorSync } from '../../packages/odds-manipulator-sync.mjs'
 import hubLayout from './hub-layout.json'
 import './styles.css'
 
 const PokemonHub = React.lazy(() => import('../../packages/pokemon-hub-ui.jsx'))
 
-const clientDiagnosticsOptions = getClientDiagnosticsOptions(window.location.search)
-if (clientDiagnosticsOptions.enabled) {
-  createClientDiagnostics({ browser: window, source: 'hub', sessionId: clientDiagnosticsOptions.sessionId })
-}
+// The Hub document owns the session lifecycle: every full load/F5 gets a new ID.
+// Player iframes receive that ID explicitly through their launch query string.
+const clientDiagnosticsOptions = getClientDiagnosticsOptions(import.meta.env.VITE_DEBUG)
+const clientDiagnostics = clientDiagnosticsOptions.enabled
+  ? createClientDiagnostics({ browser: window, source: 'hub', sessionId: clientDiagnosticsOptions.sessionId })
+  : null
 
 function readViewport() {
   return { width: window.innerWidth, height: window.innerHeight }
@@ -200,6 +203,7 @@ function App() {
   const [pokemonHubOpen, setPokemonHubOpen] = useState(false)
   const [pokemonHubCloseSignal, setPokemonHubCloseSignal] = useState(0)
   const [fastForwardEnabled, setFastForwardEnabled] = useState(false)
+  const [oddsManipulatorEnabled, setOddsManipulatorEnabled] = useState(false)
   const [fastForwardSpeed, setFastForwardSpeed] = useState(() => readFastForwardSpeed(document.cookie))
   const [l2TriggerAction, setL2TriggerAction] = useState('none')
   const [r2TriggerAction, setR2TriggerAction] = useState('none')
@@ -229,6 +233,9 @@ function App() {
   const preferenceWriteRef = useRef(Promise.resolve())
   const fastForwardToggleRef = useRef(Promise.resolve())
   const confirmedPreferencesRef = useRef({ fastForwardSpeed, triggerActions: { l2: 'none', r2: 'none' } })
+  const oddsSyncRef = useRef(new Map())
+  const oddsClockReadyRef = useRef(new Map())
+  const oddsResetQueueRef = useRef(new Map())
 
   useEffect(() => {
     let active = true
@@ -311,10 +318,20 @@ function App() {
         })
         return
       }
+      if (event.data?.type === 'emulator-hub:odds-manipulator-ready') {
+        if (!event.data.sessionId || !event.data.accepted) return
+        const sessionIndex = activeSessions.findIndex(candidate => candidate.sessionId === event.data.sessionId)
+        const frame = sessionIndex === -1 ? null : document.querySelectorAll('.player-grid iframe')[sessionIndex]
+        if (!frame || event.source !== frame.contentWindow) return
+        oddsClockReadyRef.current.set(event.data.sessionId, { oddsResetCount: event.data.oddsResetCount, virtualTimestamp: event.data.virtualTimestamp })
+        return
+      }
       if (event.data?.type !== 'emulator-hub:lease-lost') return
       if (!event.data.unavailable && event.data.sessionId && event.data.profileId && event.data.gameId && Number.isInteger(event.data.generation)) {
         void releasePlayerLease(event.data.sessionId, { profileId: event.data.profileId, gameId: event.data.gameId, generation: event.data.generation }).catch(() => {})
       }
+      oddsSyncRef.current.get(event.data.sessionId)?.stop()
+      oddsSyncRef.current.delete(event.data.sessionId)
       setActiveSessions(current => current.filter(session => session.sessionId !== event.data.sessionId))
       setSnapshotRestoreRequests(current => { const next = { ...current }; delete next[event.data.sessionId]; return next })
       setError('A sessão do emulador foi substituída ou expirou.')
@@ -431,7 +448,10 @@ function App() {
 
   useEffect(() => {
     if (!activeSessions.length) return
-    const triggerActions = createPlayerTriggerActions({ dispatch: broadcastPlayerMessage, toggleFastForward: () => { void toggleFastForwardFromFirstFrame() } })
+    const triggerActions = createPlayerTriggerActions({ dispatch: message => {
+      if (message === 'emulator-hub:reset' || message === 'emulator-hub:soft-reset') dispatchReset(message)
+      else broadcastPlayerMessage(message)
+    }, toggleFastForward: () => { void toggleFastForwardFromFirstFrame() } })
     const broadcast = bindings => {
       for (const frame of document.querySelectorAll('.player-grid iframe')) {
         frame.contentWindow?.postMessage({ type: 'emulator-hub:gamepad', bindings }, window.location.origin)
@@ -454,14 +474,17 @@ function App() {
       document.removeEventListener('visibilitychange', poll)
       broadcast([])
     }
-  }, [activeSessions.length, controlPanelOpen, profileGame, instancePicker, l2TriggerAction, r2TriggerAction, triggerBindings])
+  }, [activeSessions.length, controlPanelOpen, profileGame, instancePicker, l2TriggerAction, r2TriggerAction, triggerBindings, oddsManipulatorEnabled])
 
   useEffect(() => {
     const message = { type: 'emulator-hub:fast-forward', enabled: fastForwardEnabled, speed: fastForwardSpeed }
-    for (const frame of document.querySelectorAll('.player-grid iframe')) {
+    const frames = [...document.querySelectorAll('.player-grid iframe')]
+    for (const [index, frame] of frames.entries()) {
       configurePlayerFrame(frame, message)
+      const session = activeSessions[index]
+      if (session && oddsManipulatorEnabled) void configureOddsClock(frame, session, session.oddsResetCount ?? 0, (session.oddsResetCount ?? 0) * 60_000)
     }
-  }, [activeSessions, fastForwardEnabled, fastForwardSpeed])
+  }, [activeSessions, fastForwardEnabled, fastForwardSpeed, oddsManipulatorEnabled])
 
   async function saveUserPreferences(partial) {
     preferenceWriteRef.current = preferenceWriteRef.current.catch(() => {}).then(async () => {
@@ -519,6 +542,78 @@ function App() {
     }
   }
 
+  function dispatchReset(type) {
+    const frames = [...document.querySelectorAll('.player-grid iframe')]
+    activeSessions.forEach((session, index) => {
+      const frame = frames[index]
+      if (!frame) return
+      if (!oddsManipulatorEnabled) {
+        frame.contentWindow?.postMessage({ type }, window.location.origin)
+        return
+      }
+      const nextCount = (session.oddsResetCount ?? 0) + 1
+      const nextTimestamp = nextCount * 60_000
+      session.oddsResetCount = nextCount
+      const run = async () => {
+        const configured = await configureOddsClock(frame, session, nextCount, nextTimestamp)
+        if (!configured) {
+          clientDiagnostics?.capture({ kind: 'odds-manipulator', message: 'odds.reset.clock-not-ready', gameId: session.gameId, profileId: session.profileId, sessionId: session.sessionId, resetType: type, oddsResetCount: nextCount, virtualTimestamp: nextTimestamp })
+          return
+        }
+        const diagnostic = { kind: 'odds-manipulator', message: 'odds.reset.applied', gameId: session.gameId, profileId: session.profileId, sessionId: session.sessionId, resetType: type, oddsResetCount: nextCount, virtualTimestamp: nextTimestamp }
+        clientDiagnostics?.capture(diagnostic)
+        console.info('[odds-manipulator]', diagnostic)
+        frame.contentWindow?.postMessage({ type, oddsResetCount: nextCount, virtualTimestamp: nextTimestamp }, window.location.origin)
+        oddsSyncRef.current.get(session.sessionId)?.markDirty(nextCount)
+      }
+      const queued = (oddsResetQueueRef.current.get(session.sessionId) ?? Promise.resolve()).catch(() => {}).then(run)
+      oddsResetQueueRef.current.set(session.sessionId, queued)
+    })
+    setActiveSessions(current => current.map(session => ({ ...session })))
+  }
+
+  function configureOddsClock(frame, session, oddsResetCount, virtualTimestamp) {
+    const ready = oddsClockReadyRef.current.get(session.sessionId)
+    if (ready?.oddsResetCount === oddsResetCount && ready.virtualTimestamp === virtualTimestamp) return Promise.resolve(true)
+    return new Promise(resolve => {
+      const requestId = crypto.randomUUID()
+      let settled = false
+      const finish = result => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(timeout)
+        window.removeEventListener('message', receive)
+        if (result) oddsClockReadyRef.current.set(session.sessionId, { oddsResetCount, virtualTimestamp })
+        resolve(result)
+      }
+      const receive = event => {
+        if (event.origin !== window.location.origin || event.source !== frame.contentWindow || event.data?.type !== 'emulator-hub:odds-manipulator-ready' || event.data.requestId !== requestId) return
+        finish(event.data.accepted === true && event.data.oddsResetCount === oddsResetCount && event.data.virtualTimestamp === virtualTimestamp)
+      }
+      const timeout = window.setTimeout(() => finish(false), 2_000)
+      window.addEventListener('message', receive)
+      frame.contentWindow?.postMessage({ type: 'emulator-hub:odds-manipulator-configure', enabled: true, sessionId: session.sessionId, requestId, oddsResetCount, virtualTimestamp }, window.location.origin)
+    })
+  }
+
+  function toggleOddsManipulator() {
+    const enabled = !oddsManipulatorEnabled
+    setOddsManipulatorEnabled(enabled)
+    clientDiagnostics?.capture({ kind: 'odds-manipulator', message: enabled ? 'odds.toggle.enabled' : 'odds.toggle.disabled', activeProfiles: activeSessions.map(session => ({ gameId: session.gameId, profileId: session.profileId, oddsResetCount: session.oddsResetCount ?? 0 })) })
+    const frames = [...document.querySelectorAll('.player-grid iframe')]
+    activeSessions.forEach((session, index) => {
+      const frame = frames[index]
+      if (!frame) return
+      if (enabled) {
+        void configureOddsClock(frame, session, session.oddsResetCount ?? 0, (session.oddsResetCount ?? 0) * 60_000)
+      } else {
+        oddsClockReadyRef.current.delete(session.sessionId)
+        void oddsSyncRef.current.get(session.sessionId)?.flush()
+        frame.contentWindow?.postMessage({ type: 'emulator-hub:odds-manipulator-configure', enabled: false }, window.location.origin)
+      }
+    })
+  }
+
   async function closePlayer() {
     if (saveCloseCoordinatorRef.current) return
     const tasks = activeSessions.map((session, index) => ({
@@ -527,9 +622,12 @@ function App() {
       run: async () => {
         const frame = document.querySelectorAll('.player-grid iframe')[index]
         if (!frame) throw new Error('iframe do emulador não encontrado')
+        await oddsSyncRef.current.get(session.sessionId)?.flush()
         await flushPlayerSave(frame)
         await clearPlayerRecovery(frame)
         await releasePlayerLease(session.sessionId, { profileId: session.profileId, gameId: session.gameId, generation: session.leaseGeneration })
+        oddsSyncRef.current.get(session.sessionId)?.stop()
+        oddsSyncRef.current.delete(session.sessionId)
       },
     }))
     const coordinator = createMultiSaveCloseCoordinator({ tasks, onUpdate: rows => setSaveCloseRows(rows) })
@@ -572,6 +670,7 @@ function App() {
       // The player still needs to close if the browser rejects leaving fullscreen.
     }
     setActiveSessions([])
+    setOddsManipulatorEnabled(false)
     setFullscreen(false)
     setSaveCloseRows(null)
     saveCloseCoordinatorRef.current = null
@@ -668,6 +767,7 @@ function App() {
       const session = {
         gameId: game.id,
         profileId: profile.id,
+        oddsResetCount: profile.oddsResetCount ?? 0,
         sessionId,
         leaseGeneration: lease.leaseGeneration,
         initialFastForwardEnabled: fastForwardEnabled,
@@ -675,6 +775,11 @@ function App() {
         restoreRecovery,
         localRecoveryPrompt,
       }
+      oddsSyncRef.current.set(sessionId, createOddsManipulatorSync({
+        send: count => syncOddsResetCount(game.id, profile.id, count),
+        onError: cause => console.warn('[odds-manipulator] sync failed', { gameId: game.id, profileId: profile.id, error: cause.message }),
+        onEvent: (event, context) => clientDiagnostics?.capture({ kind: 'odds-manipulator', message: event, gameId: game.id, profileId: profile.id, sessionId, ...context }),
+      }))
       if (profilePurpose === 'add-instance') {
         setActiveSessions(current => current.length >= MAX_PLAYER_INSTANCES ? current : [...current, session])
       } else {
@@ -996,14 +1101,10 @@ function App() {
             </div>
             <span className="player-header-separator" aria-hidden="true" />
             <div className="player-header-group">
-              <button className="player-control-button" type="button" aria-label="Soft Reset" title="Soft Reset" onClick={() => broadcastPlayerMessage('emulator-hub:soft-reset')}>
+              <button className="player-control-button" type="button" aria-label="Soft Reset" title="Soft Reset" onClick={() => dispatchReset('emulator-hub:soft-reset')}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 1-2.3-5.7M20 4v7h-7" /></svg>
               </button>
-              <button className="player-control-button global-reset-button" type="button" aria-label="Hard Reset" title="Hard Reset" onClick={() => {
-                for (const frame of document.querySelectorAll('.player-grid iframe')) {
-                  frame.contentWindow?.postMessage({ type: 'emulator-hub:reset' }, window.location.origin)
-                }
-              }}>
+              <button className="player-control-button global-reset-button" type="button" aria-label="Hard Reset" title="Hard Reset" onClick={() => dispatchReset('emulator-hub:reset')}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v8M6.4 6.4a8 8 0 1 0 11.2 0" /></svg>
               </button>
             </div>
@@ -1026,6 +1127,9 @@ function App() {
                 <path d="M7.1 8.5h9.8c1.5 0 2.8 1 3.2 2.45l1.08 4.15a2.35 2.35 0 0 1-4.08 2.1l-1.55-1.7H8.4l-1.55 1.7a2.35 2.35 0 0 1-4.08-2.1l1.08-4.15A3.3 3.3 0 0 1 7.1 8.5Z" />
                 <path d="M7.3 11.15v3.1M5.75 12.7h3.1M16.35 11.8h.01M18.25 13.65h.01" />
               </svg>
+            </button>
+            <button className={`player-control-button${oddsManipulatorEnabled ? ' is-active' : ''}`} type="button" aria-label="Manipulador de odds" title="Manipulador de odds" aria-pressed={oddsManipulatorEnabled} onClick={toggleOddsManipulator}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M5 8.5h14M5 15.5h14M8 5.5v14M16 5.5v14" /></svg>
             </button>
           </div>
           <div className="player-actions">

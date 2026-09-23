@@ -216,6 +216,7 @@ async function handleRequest(request, response, config) {
   const isRomRoute = route.pathname.startsWith('/roms/')
   const gameProfilesRoute = parseGameProfilesRoute(route.pathname)
   const gameProfileRoute = parseGameProfileRoute(route.pathname)
+  const oddsStateRoute = parseOddsStateRoute(route.pathname)
   const isControlProfileRoute = route.pathname === '/api/control-profile'
   const isUserPreferencesRoute = route.pathname === '/api/user-preferences'
   const saveRoute = parseSaveRoute(route.pathname)
@@ -266,6 +267,7 @@ async function handleRequest(request, response, config) {
     || (request.method === 'POST' && ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute?.kind))
     || (pokemonHubSessionRoute && ((request.method === 'POST' && ['open', 'attach', 'pane-load', 'heartbeat', 'snapshot', 'close-command'].includes(pokemonHubSessionRoute.kind)) || (request.method === 'DELETE' && ['detach', 'close'].includes(pokemonHubSessionRoute.kind))))
     || (request.method === 'PATCH' && gameProfileRoute)
+    || (request.method === 'PATCH' && oddsStateRoute)
     || (request.method === 'DELETE' && gameProfileRoute)
     || (isClientDiagnosticsRoute && request.method === 'POST')
     || (isBackupRoute && request.method === 'POST')
@@ -362,6 +364,11 @@ async function handleRequest(request, response, config) {
     return
   }
 
+  if (oddsStateRoute) {
+    await handleOddsState(request, response, config, oddsStateRoute)
+    return
+  }
+
   if (isUserPreferencesRoute) {
     if (request.method === 'GET') {
       response.setHeader('Cache-Control', 'no-store')
@@ -454,6 +461,11 @@ async function lookupRomBatch(lookups) {
 
 function parseGameProfileRoute(pathname) {
   const match = /^\/api\/games\/([^/]+)\/profiles\/([^/]+)$/.exec(pathname)
+  return match ? { gameId: match[1], profileId: match[2] } : null
+}
+
+function parseOddsStateRoute(pathname) {
+  const match = /^\/api\/games\/([^/]+)\/profiles\/([^/]+)\/odds-state$/.exec(pathname)
   return match ? { gameId: match[1], profileId: match[2] } : null
 }
 
@@ -769,6 +781,30 @@ async function launchGame(response, config, encodedId, profileId) {
   }
 
   json(response, 200, launchDescriptor(entry, profile.id, patchVerification.patch))
+}
+
+async function handleOddsState(request, response, config, route) {
+  const entry = await findProfileGame(response, config, route.gameId)
+  if (entry === null) return
+  let body
+  try {
+    body = await readJsonBody(request)
+  } catch (error) {
+    json(response, error.code === 'REQUEST_BODY_TOO_LARGE' ? 413 : 400, { error: error.message })
+    return
+  }
+  try {
+    const profile = await config.profileStore.updateOddsResetCount(entry.id, route.profileId, body.oddsResetCount)
+    if (profile === null) return json(response, 404, { error: 'Profile was not found.' })
+    console.info('[odds-manipulator] odds.sync.persisted', { gameId: entry.id, profileId: route.profileId, oddsResetCount: profile.oddsResetCount })
+    json(response, 200, profile)
+  } catch (error) {
+    if (error.code === 'PROFILE_ODDS_COUNT_INVALID') {
+      console.warn('[odds-manipulator] odds.sync.rejected', { gameId: entry.id, profileId: route.profileId, error: error.message })
+      return json(response, 400, { error: error.message, code: error.code })
+    }
+    throw error
+  }
 }
 
 function parseSaveRoute(pathname) {

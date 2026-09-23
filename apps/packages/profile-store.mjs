@@ -10,6 +10,19 @@ export function createProfileStore({ dataPath }) {
     get: async (gameId, id) => id === undefined
       ? findProfile(dataPath, gameId)
       : (await readProfiles(dataPath, gameId)).find(profile => profile.id === id) ?? null,
+    updateOddsResetCount(gameId, id, count) {
+      const operation = queue.then(async () => {
+        validateOddsResetCount(count)
+        const profiles = await readProfiles(dataPath, gameId)
+        const index = profiles.findIndex(profile => profile.id === id)
+        if (index === -1) return null
+        profiles[index] = { ...profiles[index], oddsResetCount: Math.max(profiles[index].oddsResetCount ?? 0, count) }
+        await writeProfiles(dataPath, gameId, profiles)
+        return copyProfile(profiles[index])
+      })
+      queue = operation.catch(() => {})
+      return operation
+    },
     create(gameId, name) {
       const operation = queue.then(async () => {
         const normalizedName = normalizeProfileName(name)
@@ -18,7 +31,7 @@ export function createProfileStore({ dataPath }) {
           throw profileError('PROFILE_NAME_DUPLICATE', 'A profile with this name already exists.')
         }
 
-        const profile = { id: randomUUID(), name: normalizedName, createdAt: new Date().toISOString() }
+        const profile = { id: randomUUID(), name: normalizedName, createdAt: new Date().toISOString(), oddsResetCount: 0 }
         await writeProfiles(dataPath, gameId, [...profiles, profile])
         return copyProfile(profile)
       })
@@ -35,7 +48,7 @@ export function createProfileStore({ dataPath }) {
           throw profileError('PROFILE_NAME_DUPLICATE', 'A profile with this name already exists.')
         }
 
-        const profile = { ...profiles[index], name: normalizedName }
+        const profile = { ...profiles[index], name: normalizedName, oddsResetCount: profiles[index].oddsResetCount ?? 0 }
         profiles[index] = profile
         await writeProfiles(dataPath, gameId, profiles)
         return copyProfile(profile)
@@ -67,12 +80,25 @@ export function createRedisProfileStore({ persistence }) {
     get: async (gameId, id) => id === undefined
       ? findRedisProfile(persistence, gameId)
       : (await readRedisProfiles(persistence, gameId)).find(profile => profile.id === id) ?? null,
+    updateOddsResetCount(gameId, id, count) {
+      const operation = queue.then(async () => {
+        validateOddsResetCount(count)
+        const profiles = await readRedisProfiles(persistence, gameId)
+        const index = profiles.findIndex(profile => profile.id === id)
+        if (index === -1) return null
+        profiles[index] = { ...profiles[index], oddsResetCount: Math.max(profiles[index].oddsResetCount ?? 0, count) }
+        await writeRedisProfiles(persistence, gameId, profiles)
+        return copyProfile(profiles[index])
+      })
+      queue = operation.catch(() => {})
+      return operation
+    },
     create(gameId, name) {
       const operation = queue.then(async () => {
         const normalizedName = normalizeProfileName(name)
         const profiles = await readRedisProfiles(persistence, gameId)
         if (profiles.some(profile => profile.name.localeCompare(normalizedName, undefined, { sensitivity: 'accent' }) === 0)) throw profileError('PROFILE_NAME_DUPLICATE', 'A profile with this name already exists.')
-        const profile = { id: randomUUID(), name: normalizedName, createdAt: new Date().toISOString() }
+        const profile = { id: randomUUID(), name: normalizedName, createdAt: new Date().toISOString(), oddsResetCount: 0 }
         await writeRedisProfiles(persistence, gameId, [...profiles, profile])
         return copyProfile(profile)
       })
@@ -86,7 +112,7 @@ export function createRedisProfileStore({ persistence }) {
         const index = profiles.findIndex(profile => profile.id === id)
         if (index === -1) return null
         if (profiles.some(profile => profile.id !== id && profile.name.localeCompare(normalizedName, undefined, { sensitivity: 'accent' }) === 0)) throw profileError('PROFILE_NAME_DUPLICATE', 'A profile with this name already exists.')
-        const profile = { ...profiles[index], name: normalizedName }
+        const profile = { ...profiles[index], name: normalizedName, oddsResetCount: profiles[index].oddsResetCount ?? 0 }
         profiles[index] = profile
         await writeRedisProfiles(persistence, gameId, profiles)
         return copyProfile(profile)
@@ -138,7 +164,7 @@ async function readProfiles(dataPath, gameId) {
     const source = await readFile(collectionPath(dataPath, gameId), 'utf8')
     const profiles = JSON.parse(source)
     if (!Array.isArray(profiles) || profiles.some(profile => !validProfile(profile))) throw new Error('Invalid profile data.')
-    return profiles
+    return profiles.map(profile => ({ ...profile, oddsResetCount: profile.oddsResetCount ?? 0 }))
   } catch (error) {
     if (error.code === 'ENOENT') return []
     if (error.code?.startsWith('PROFILE_')) throw error
@@ -183,7 +209,7 @@ async function readRedisProfiles(persistence, gameId) {
     if (source === null) return []
     const profiles = JSON.parse(source)
     if (!Array.isArray(profiles) || profiles.some(profile => !validProfile(profile))) throw new Error('Invalid profile data.')
-    return profiles
+    return profiles.map(profile => ({ ...profile, oddsResetCount: profile.oddsResetCount ?? 0 }))
   } catch (error) {
     if (error.code?.startsWith('PROFILE_')) throw error
     const storeError = new Error('Profiles could not be loaded.', { cause: error })
@@ -210,10 +236,19 @@ function validProfile(profile) {
     && typeof profile.id === 'string' && /^[0-9a-f-]{36}$/i.test(profile.id)
     && typeof profile.name === 'string' && profile.name.length > 0 && profile.name.length <= 32
     && typeof profile.createdAt === 'string' && Number.isFinite(Date.parse(profile.createdAt))
+    && (profile.oddsResetCount === undefined || profile.oddsResetCount === null || validOddsResetCount(profile.oddsResetCount))
 }
 
 function copyProfile(profile) {
-  return { id: profile.id, name: profile.name, createdAt: profile.createdAt }
+  return { id: profile.id, name: profile.name, createdAt: profile.createdAt, oddsResetCount: profile.oddsResetCount ?? 0 }
+}
+
+function validOddsResetCount(value) {
+  return Number.isSafeInteger(value) && value >= 0
+}
+
+function validateOddsResetCount(value) {
+  if (!validOddsResetCount(value)) throw profileError('PROFILE_ODDS_COUNT_INVALID', 'Odds reset count must be a non-negative safe integer.')
 }
 
 function profileError(code, message) {

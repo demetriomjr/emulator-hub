@@ -230,7 +230,8 @@ button { font: inherit; }
 .player-header-separator { width: 1px; height: 24px; background: #6aa88d80; }
 .trigger-action-control { display: flex; align-items: center; gap: 4px; color: #e8f5ef; font-size: 12px; }
 .player-control-button, .player-actions button { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid #a0dcc4a0; border-radius: 9px; color: white; background: #102b30e8; cursor: pointer; }
-.player-control-button:hover, .player-actions button:hover:not(:disabled) { background: #22624f; }
+.player-control-button:hover, .player-control-button.is-active, .player-actions button:hover:not(:disabled) { background: #22624f; }
+.player-control-button.is-active { border-color: #77e2af; color: #fff; }
 .fast-forward-button { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 1px solid #a0dcc4a0; border-radius: 9px; color: #e8f5ef; background: #102b30e8; cursor: pointer; }
 .fast-forward-button:hover, .fast-forward-button.is-active { background: #22624f; }
 .fast-forward-button.is-active { border-color: #77e2af; color: #fff; }
