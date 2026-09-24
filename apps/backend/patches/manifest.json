@@ -3,8 +3,8 @@
   "patches": [
     {
       "romSha256": "a9dec84dfe7f62ab2220bafaef7479da0929d066ece16a6885f6226db19085af",
-      "file": "Pokemon Emerald.ips",
-      "patchSha256": "9c3795241bc91199cbe14b53cd4934f009119f2bb3ba9d06c1af3931a19a24b6"
+      "file": "Pokemon Emerald/a9dec84dfe7f62ab2220bafaef7479da0929d066ece16a6885f6226db19085af.ips",
+      "patchSha256": "e12480bad322c9bbb20ebba943ab5d1987001657e0f69d74f5cd94d6ba20a6b3"
     }
   ]
 }

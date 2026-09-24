@@ -92,14 +92,26 @@ async function readRegisteredPatch(directory, entry) {
   if (!/^[a-f0-9]{64}$/.test(entry.romSha256) || !/^[a-f0-9]{64}$/.test(entry.patchSha256)) {
     return { patch: null, warning: 'IPS manifest entry must contain valid ROM and patch SHA-256 values.' }
   }
-  if (typeof entry.file !== 'string' || entry.file.includes('\0') || entry.file.includes('/') || entry.file.includes('\\') || isAbsolute(entry.file) || extname(entry.file).toLowerCase() !== patchExtension) {
-    return { patch: null, warning: 'IPS manifest patch path must be a safe .ips filename.' }
+  const pathSegments = typeof entry.file === 'string' ? entry.file.split('/') : []
+  if (pathSegments.length === 0 || pathSegments.some(segment => !segment || segment === '.' || segment === '..' || segment.trim() !== segment || /[<>:"\\|?*\x00-\x1f]/.test(segment)) || isAbsolute(entry.file) || extname(entry.file).toLowerCase() !== patchExtension) {
+    return { patch: null, warning: 'IPS manifest patch path must be a safe relative .ips path.' }
   }
 
   const patchPath = resolve(directory, entry.file)
   const relativePath = relative(directory, patchPath)
   if (!relativePath || relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) {
     return { patch: null, warning: 'IPS manifest patch path must stay inside the patch directory.' }
+  }
+
+  for (let depth = 1; depth < pathSegments.length; depth += 1) {
+    const componentPath = resolve(directory, ...pathSegments.slice(0, depth))
+    let componentStat
+    try {
+      componentStat = await lstat(componentPath)
+    } catch (error) {
+      return { patch: null, warning: error.code === 'ENOENT' ? 'IPS patch directory was not found.' : `IPS patch directory could not be read (${error.code ?? 'unknown error'}).` }
+    }
+    if (componentStat.isSymbolicLink() || !componentStat.isDirectory()) return { patch: null, warning: 'IPS patch directory must be a non-symlink directory.' }
   }
 
   let fileStat

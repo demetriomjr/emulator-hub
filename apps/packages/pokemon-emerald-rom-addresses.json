@@ -1,0 +1,28 @@
+{
+  "a9dec84dfe7f62ab2220bafaef7479da0929d066ece16a6885f6226db19085af": {
+    "validated": false,
+    "size": 16777216,
+    "addresses": {
+      "gRngValue": "0x03005D80",
+      "agbMainHook": "0x08000400",
+      "rtcGetMinuteCountThumb": "0x0802F665",
+      "seedRngThumb": "0x0806F5F9",
+      "codeCave": "0x089C0D00",
+      "agbMainContinuationThumb": "0x0800040D"
+    },
+    "offsets": {
+      "agbMainHook": "0x00000400",
+      "codeCave": "0x009C0D00"
+    },
+    "values": {
+      "agbMainHookExpected": "1D 48 00 24 04 70 1D 48 00 68 01 28",
+      "agbMainHookReplacement": "01 48 00 47 C0 46 C0 46 01 0D 9C 08",
+      "codeCaveExpected": "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+      "codeCave": "0A 48 7B 46 05 33 9E 46 00 47 01 0C 00 04 00 0C 48 40 07 49 7B 46 05 33 9E 46 08 47 05 48 00 24 04 70 05 48 00 68 01 28 04 48 00 47 65 F6 02 08 F9 F5 06 08 00 27 00 03 88 5D 00 03 0D 04 00 08",
+      "replayedLiteralAddresses": [
+        "0x03002700",
+        "0x03005D88"
+      ]
+    }
+  }
+}

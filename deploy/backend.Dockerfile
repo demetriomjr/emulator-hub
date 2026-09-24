@@ -6,6 +6,7 @@ RUN npm ci --omit=dev
 
 COPY apps/backend ./backend
 COPY apps/packages ./packages
+RUN rm -rf ./backend/patches
 COPY assets/ips/ ./backend/patches/
 
 WORKDIR /app/apps/backend

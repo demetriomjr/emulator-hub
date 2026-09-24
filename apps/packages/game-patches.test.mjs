@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
@@ -25,7 +25,10 @@ function validIps(value = 1) {
 async function fixture(t, { patchFiles = {}, entries = [] } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'emulator-hub-ips-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
-  for (const [file, bytes] of Object.entries(patchFiles)) await writeFile(join(directory, file), bytes)
+  for (const [file, bytes] of Object.entries(patchFiles)) {
+    await mkdir(dirname(join(directory, file)), { recursive: true })
+    await writeFile(join(directory, file), bytes)
+  }
   await writeFile(join(directory, 'manifest.json'), JSON.stringify({ version: 1, patches: entries }))
   return directory
 }
@@ -57,6 +60,20 @@ test('discovers a verified IPS by ROM hash for any game identity', async (t) => 
   assert.equal(noMatch.warning, null)
 })
 
+test('discovers a hash-named IPS inside a game directory', async (t) => {
+  const romSha256 = sha256(Buffer.from('nested patch ROM'))
+  const patch = validIps(37)
+  const file = `Pokemon Emerald/${romSha256}.ips`
+  const directory = await fixture(t, {
+    patchFiles: { [file]: patch },
+    entries: [{ romSha256, file, patchSha256: sha256(patch) }],
+  })
+  const result = await gamePatches.createIpsPatchRegistry({ patchesDirectory: directory }).findForRomSha256(romSha256)
+  assert.equal(result.warning, null)
+  assert.equal(result.patch.file, file)
+  assert.deepEqual(result.patch.bytes, patch)
+})
+
 test('skips duplicate, missing, tampered, unsafe, and malformed IPS entries', async (t) => {
   assert.equal(typeof gamePatches.createIpsPatchRegistry, 'function')
   const patch = validIps()
@@ -69,6 +86,7 @@ test('skips duplicate, missing, tampered, unsafe, and malformed IPS entries', as
     { name: 'missing', entries: [{ romSha256, file: 'missing.ips', patchSha256: sha256(patch) }], reason: /missing|not found/i },
     { name: 'tampered', entries: [{ romSha256, file: 'patch.ips', patchSha256: sha256(validIps(99)) }], patchFiles: { 'patch.ips': patch }, reason: /hash/i },
     { name: 'unsafe', entries: [{ romSha256, file: '../outside.ips', patchSha256: sha256(patch) }], reason: /path|safe/i },
+    { name: 'nested traversal', entries: [{ romSha256, file: 'Pokemon Emerald/../outside.ips', patchSha256: sha256(patch) }], reason: /path|safe/i },
     { name: 'malformed IPS', entries: [{ romSha256, file: 'patch.ips', patchSha256: sha256(Buffer.from('not IPS')) }], patchFiles: { 'patch.ips': Buffer.from('not IPS') }, reason: /IPS|format/i },
   ]
 
@@ -96,11 +114,11 @@ test('registers and validates the shipped Emerald IPS as data instead of code', 
   const patchesDirectory = fileURLToPath(new URL('../../assets/ips/', import.meta.url))
   const registry = gamePatches.createIpsPatchRegistry({ patchesDirectory })
   const result = await registry.findForRomSha256('a9dec84dfe7f62ab2220bafaef7479da0929d066ece16a6885f6226db19085af')
-  const sourceBytes = await readFile(new URL('../../assets/ips/Pokemon%20Emerald.ips', import.meta.url))
+  const sourceBytes = await readFile(new URL(`../../assets/ips/Pokemon%20Emerald/a9dec84dfe7f62ab2220bafaef7479da0929d066ece16a6885f6226db19085af.ips`, import.meta.url))
 
   assert.equal(result.warning, null)
-  assert.equal(result.patch.file, 'Pokemon Emerald.ips')
-  assert.equal(result.patch.sha256, '9c3795241bc91199cbe14b53cd4934f009119f2bb3ba9d06c1af3931a19a24b6')
+  assert.equal(result.patch.file, 'Pokemon Emerald/a9dec84dfe7f62ab2220bafaef7479da0929d066ece16a6885f6226db19085af.ips')
+  assert.equal(result.patch.sha256, 'e12480bad322c9bbb20ebba943ab5d1987001657e0f69d74f5cd94d6ba20a6b3')
   assert.deepEqual(result.patch.bytes, sourceBytes)
 })
 
@@ -121,6 +139,24 @@ test('skips a registered IPS symbolic link', async (t) => {
 
   const result = await registry.findForRomSha256(romSha256)
 
+  assert.equal(result.patch, null)
+  assert.match(result.warning, /symlink/i)
+})
+
+test('skips a registered IPS inside a symbolic-link directory', async (t) => {
+  const patch = validIps()
+  const romSha256 = sha256(Buffer.from('symlinked patch directory'))
+  const directory = await fixture(t, { entries: [{ romSha256, file: 'linked/patch.ips', patchSha256: sha256(patch) }] })
+  const outsideDirectory = await mkdtemp(join(tmpdir(), 'emulator-hub-ips-outside-'))
+  t.after(() => rm(outsideDirectory, { recursive: true, force: true }))
+  await writeFile(join(outsideDirectory, 'patch.ips'), patch)
+  try {
+    await symlink(outsideDirectory, join(directory, 'linked'), 'dir')
+  } catch (error) {
+    if (['EPERM', 'EACCES', 'ENOTSUP'].includes(error.code)) return t.skip('symbolic links are unavailable in this environment')
+    throw error
+  }
+  const result = await gamePatches.createIpsPatchRegistry({ patchesDirectory: directory }).findForRomSha256(romSha256)
   assert.equal(result.patch, null)
   assert.match(result.warning, /symlink/i)
 })
