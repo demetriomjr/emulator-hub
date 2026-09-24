@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { createPortal, createRoot } from 'react-dom'
+import { createPortal } from 'react-dom'
+import { createRoot } from 'react-dom/client'
 import { ConfigProvider } from 'antd'
 import { acquirePlayerLease, createProfile, deleteProfile as deleteProfileRequest, getControlProfile, getGames, getProfiles, getUserPreferences, releasePlayerLease, syncOddsResetCount, updateControlProfile, updateProfile, updateUserPreferences } from '../../packages/hub-client.js'
 import { activeGamepadBindings, readGamepadBinding, readGamepadSnapshot } from '../../packages/gamepad-input.mjs'
