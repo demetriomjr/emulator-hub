@@ -55,6 +55,8 @@
 
 This directory holds the project's specifications. Define the architecture, shared package contracts, application responsibilities, and feature acceptance criteria here before implementing them.
 
+- [Spec 059 — Canonical game save and snapshot independence](059-canonical-save-and-snapshot-independence.md): permanent `.sav` versus runtime-snapshot invariant, load order, and player-visible failure boundary.
+
 The initial direction is recorded in the root `AGENTS.md`.
 
 - [Spec 001 — Pokémon Emulator Hub](001-hub.md): catalog, selection, embedded play, and Electron windows.

@@ -23,7 +23,7 @@ test('blocks the Hub with rotate guidance until the narrow viewport becomes land
   const css = await readFile(new URL('./src/styles.css', frontend), 'utf8')
 
   assert.match(css, /\.mobile-rotate-overlay\s*\{[^}]*position:\s*fixed;[^}]*z-index:\s*100;/)
-  assert.match(source, /isNarrowPortrait && <div className="mobile-rotate-overlay"/)
+  assert.match(source, /isNarrowPortrait && renderLayer\(<div className="mobile-rotate-overlay"/)
   assert.match(source, /window\.addEventListener\('orientationchange', updateViewport\)/)
   assert.match(source, /return \{ width: window\.innerWidth, height: window\.innerHeight \}/)
 })

@@ -2,7 +2,7 @@
 title: Current snapshot system audit
 date: 2026-09-24
 tags: [spec, audit, snapshots, recovery, frontend, backend]
-status: snapshot-types-architecture-proposed
+status: implemented-awaiting-browser-validation
 ---
 
 # Spec 058 — Current snapshot system audit
@@ -217,6 +217,8 @@ The previous verification counts apply to the superseded marker-based behavior. 
 
 ## Architecture proposal: typed restore candidates with provenance
 
+This section records the design proposed before implementation. Its close-time capture references are superseded by the implemented close contract at the end of this spec.
+
 ### Goal and current gap
 
 The restore experience must tell the user what state is available, why it exists, when it was captured, and whether the game's own save indicates newer progress. Today the backend has one remote snapshot slot per profile/game. Automatic 15-second captures and the user's **Salvar estado** overwrite the same slot; metadata does not say which action produced it. Local recovery is a separate IndexedDB record, but only a confirmed lease loss changes its reason to `runtime-break`; a surviving `active` record is described as possible recovery in UI copy. The modal receives only `kind`, session/profile/game, and optional local reason. It receives no capture time or remote snapshot details. The backend already stores remote `createdAt`, but the frontend does not present it.
@@ -231,6 +233,14 @@ The system therefore has three restore purposes, though only two runtime-state s
 
 The canonical `.sav` remains a distinct fourth artifact, not a runtime snapshot. Pokémon Hub placement snapshots also remain unrelated.
 
+### Type decision from current writers
+
+The current remote store has **one untyped slot**. It receives three writes: explicit **Salvar estado**, 15-second periodic capture, and a useful close capture. Its persisted metadata cannot reliably identify which of those writers produced an older record. The local IndexedDB record is a second store, written on a 2.5-second cadence; `active`, `possible-recovery`, and `runtime-break` describe circumstances of that local candidate, not separate storage types.
+
+The restore chooser will use exactly three candidate kinds: `user-state` for an explicit user action, `cloud-recovery` for periodic or useful close captures, and `local-recovery` for the browser record. A remote recovery opened on another device remains `cloud-recovery` with `origin: other-installation`. An interrupted session remains local or cloud recovery according to where its bytes are stored; the interruption is a reason. A redundant save-then-close capture is discarded, not classified as a fourth type. The canonical `.sav` is game save data, and Pokémon Hub placement snapshots are a different domain; neither appears as a runtime-state candidate.
+
+Until typed remote slots and migration are implemented, a legacy remote candidate must be shown as recovery of unknown manual/automatic origin. Do not label it “salvo por você” based only on its existence or capture time. New explicit user states must be retained separately from automatic recovery so the periodic timer, close capture, and redundancy rule cannot overwrite or delete them.
+
 ### Shared candidate contract
 
 The iframe owns state bytes; the parent modal receives metadata only. Add a shared summary contract in `apps/packages/`:
@@ -244,7 +254,7 @@ type RestoreCandidateSummary = {
   candidateId: string
   kind: RestoreCandidateKind
   reasonCode: string
-  capturedAt: string                 // ISO-8601 instant
+  capturedAt: string | null          // ISO-8601 instant; null only for legacy local records with no captured timestamp
   captureClock: CaptureClock
   origin: 'this-installation' | 'other-installation' | 'unknown'
   saveRevision?: number
@@ -253,9 +263,11 @@ type RestoreCandidateSummary = {
 }
 ```
 
-`capturedAt` is required for every candidate. Remote types use backend-generated UTC time; local recovery uses the time recorded by the browser and labels it as local-clock time. `gameTime` is optional and must preserve the underlying meaning. Only a verified absolute in-game wall-clock save timestamp may be shown as a date/time or compared as one. A playtime counter or rotating-save sequence is shown with that label and is never converted to a calendar time. The current Gen III adapter exposes `saveIndex`, a sequence used to choose the newest valid save copy; it does not currently expose a wall-clock last-save time.
+`capturedAt` is required for new captures. Remote types use backend-generated UTC time; local recovery uses the time recorded by the browser and labels it as local-clock time. `gameTime` is optional and must preserve the underlying meaning. Only a verified absolute in-game wall-clock save timestamp may be shown as a date/time or compared as one. A playtime counter or rotating-save sequence is shown with that label and is never converted to a calendar time. The current Gen III adapter exposes `saveIndex`, a sequence used to choose the newest valid save copy; it does not currently expose a wall-clock last-save time.
 
-For snapshot-vs-save freshness, compare the snapshot's `saveRevision` with the current canonical save revision. If the canonical revision advanced after the snapshot, show “O save do jogo foi atualizado depois deste estado.” Do not call that revision a timestamp. Sort remote candidates by server `capturedAt`. Show local capture time with its browser-clock source; do not assert cross-device ordering between server and browser clocks. Display a verified internal game time separately; it does not replace capture time or revision checks.
+Legacy local records have no captured timestamp. Their `capturedAt` is `null` and the chooser says “Horário desconhecido”; it must not substitute the discovery time and call that the capture time. New local writes always stamp a browser-clock timestamp.
+
+For snapshot-vs-save freshness, compare the snapshot's `saveRevision` with the current canonical save revision. If the canonical revision advanced after the snapshot, show “O save do jogo foi atualizado depois deste estado.” Do not call that revision a timestamp. Sort local and remote candidates by their UTC `capturedAt` values, newest first, with missing timestamps last. The user accepts minute-scale browser/server clock skew for this ordering. Continue to label each timestamp's clock source. Display a verified internal game time separately; it does not replace capture time or revision checks.
 
 Use an opaque per-installation UUID stored with browser metadata to label a remote candidate as this or another installation. It is presentation provenance, not authentication or a device name. If unavailable after storage reset, show “origem desconhecida.” Do not expose state bytes or the raw UUID in the parent UI.
 
@@ -269,6 +281,7 @@ Use an opaque per-installation UUID stored with browser metadata to label a remo
 - The iframe retains candidate state bytes and resolves the opaque `candidateId` only within that iframe. The parent sends the selected ID or `continue` to the requesting session. Recheck compatibility immediately before `loadState()`.
 - The user may delete an individual candidate from the chooser before restoring or continuing. Deletion is candidate-scoped, requires an explicit confirmation, and never deletes the canonical `.sav` or a sibling candidate. For a remote candidate, delete only its typed slot and require the candidate revision/ETag plus the current lease fence; for local recovery, delete only that IndexedDB record after rechecking its candidate ID and generation. A stale/replaced candidate must not cause its replacement to be deleted.
 - Remove a candidate from the chooser and refresh **Carregar estado** availability only after storage confirms deletion. On failure or revision conflict, keep the candidate visible, refresh its metadata if possible, and explain that it could not be deleted. Bind the delete command and result to session, game, profile, candidate ID, revision/generation and request ID.
+- If the iframe does not answer a delete request within 8 seconds, restore the same chooser and actions with an error message. A later reply for that exact request reconciles the card only while the same chooser is idle; it cannot affect a newer request. If the user chooses a candidate while deletion is still finishing, the iframe rejects a stale ID and returns its current candidate list. The timeout proves only that the UI did not receive confirmation; it cannot prove whether persistence completed. A retry remains conditional on the candidate identity/revision, and an already absent candidate can be dismissed safely.
 - **Carregar estado** loads only `user-state`; it does not silently load the latest automatic recovery. Disable the action when no compatible user-state candidate exists. Startup recovery remains in the chooser.
 
 ### Persistence and migration
@@ -321,7 +334,8 @@ For every candidate, show its type, why it exists, origin, capture time with tim
 - [ ] Route explicit **Salvar estado** only to `user-state`; route 15-second and useful close captures only to `cloud-recovery`.
 - [ ] Apply the existing save-then-close redundant-state deletion only to `cloud-recovery`; prove `user-state` and local recovery remain untouched.
 - [ ] Replace boolean restore answers with `{ candidateId }` or `continue`, scoped to the requesting session/game/profile. Revalidate the candidate ID and compatibility before `loadState()`.
-- [ ] Add a candidate-scoped delete command and response. Remote deletion must target the typed slot and require the displayed revision/ETag plus active lease fence; local deletion must revalidate candidate ID/generation and remove only its IndexedDB record. Clear in-memory candidate bytes only after the backing store confirms deletion.
+- [x] Add a candidate-scoped delete command and response to the current flow. Remote deletion uses the current snapshot endpoint with its displayed revision/ETag and active lease fence; local deletion revalidates a stable candidate ID and removes only its IndexedDB record. Clear in-memory candidate bytes only after the backing store confirms deletion.
+- [ ] After typed remote slots are introduced, route deletion to the selected slot and keep revision/lease fencing independent per type.
 - [ ] Make **Carregar estado** select only the compatible `user-state` candidate and report its availability to the parent. Target one iframe rather than broadcasting to automatic recoveries.
 - [ ] Test coexistence of both remote types, candidate replacement during restore/delete, invalid/stale IDs, two simultaneous sessions and manual save/load isolation. Verify deleting either local or remote candidates leaves sibling candidates and `.sav` untouched.
 
@@ -330,9 +344,10 @@ For every candidate, show its type, why it exists, origin, capture time with tim
 **Files:** Modify `SnapshotRestorePrompt` and player header controls in `apps/frontend/src/main.jsx`; update existing frontend UI tests and only the styles needed by this chooser.
 
 - [ ] Render one chooser per player with candidate cards for type, reason, origin, capture time/timezone, verified internal game time and save-revision relationship.
-- [ ] Sort remote candidates by server capture time; label browser-clock local time and avoid claiming cross-clock order when synchronization is unknown.
+- [x] Sort local and remote candidates by UTC capture time, newest first, accepting browser/server clock skew; label each clock source.
 - [ ] Offer restore per candidate and **Continuar pelo save do jogo**. Keep identical metadata layout when there is a single candidate.
-- [ ] Offer **Excluir estado** per candidate with explicit confirmation. On success remove only that candidate and recompute manual **Carregar estado** availability; on failure/conflict keep it visible and report the failure.
+- [x] Offer **Excluir estado** in the current local/remote restore prompts with explicit confirmation. On success dismiss that candidate only after storage confirms deletion; on failure/conflict keep it visible and report the failure.
+- [ ] In the typed chooser, recompute manual **Carregar estado** availability after deleting a `user-state` candidate.
 - [ ] Verify local and remote candidates no longer produce sequential prompts; metadata crosses to the parent but state bytes and installation UUID do not.
 
 #### Task 6: Migration and end-to-end verification
@@ -344,13 +359,76 @@ For every candidate, show its type, why it exists, origin, capture time with tim
 - [ ] Verify recovery from another installation shows its source and server capture time; show a newer canonical save through revision comparison.
 - [ ] Verify redundant cloud recovery is deleted without deleting user-state or local recovery.
 - [ ] Verify user deletion works for local and remote candidates, is isolated to the selected candidate, and cannot delete a replacement after candidate revision/generation changes.
-- [ ] Run package, backend, and frontend tests and exercise manual save/load, local interruption recovery, other-installation recovery and save-then-close in a browser. Do not run project builds unless explicitly requested.
+- [x] Run targeted unit and integration tests for local candidate identity, remote revision/lease deletion, frontend delete protocol and no-response rollback.
+- [ ] User-owned end-to-end browser check: exercise manual save/load, local interruption recovery, other-installation recovery and save-then-close. Do not run project builds unless explicitly requested.
 
 ### Review focus
 
-1. A manual user-state and cloud recovery coexist; automatic capture and redundant deletion touch only cloud recovery.
-2. Browser time is ahead/behind backend UTC; the chooser labels clock source and avoids false cross-installation ordering.
+### Implementation decisions confirmed against the 2026-09-24 checkout
+
+The existing untyped `/snapshot` route and `<gameId>.json` file are the legacy `cloud-recovery` slot. Typed requests use `?kind=cloud-recovery` or `?kind=user-state`; omission remains an alias for cloud recovery so older clients and records remain readable. The first fenced write to the legacy cloud record adds `kind: cloud-recovery` and `reasonCode: legacy-unknown` without moving or rewriting state bytes. An old manual capture cannot be identified reliably and must never be relabeled as a user state. New user states have their own metadata, state file, lock, revision sequence and fence; acquiring a new player lease advances both remote slot fences. A normal lease release removes cloud recovery regardless of save revision; a release that preserves unresolved or interrupted recovery leaves it intact. Neither path deletes the user slot.
+
+`capturedAt` for remote candidates is the backend acceptance time (`createdAt` for legacy data); client supplied timestamps do not override it. `originInstallationId` is a presentation UUID stored in this browser installation and sent with new captures; missing values display as unknown. A UUID created for the first time in this session cannot distinguish a new device from cleared browser storage, so existing remote candidates display unknown origin until a later visit can compare a previously stored ID. New cloud captures use `periodic-recovery`, user captures use `user-request`, and migrated data uses `legacy-unknown`; `session-close` remains readable for older states. A missing internal game timestamp is displayed as unavailable, not guessed from `saveIndex` or the machine clock. The independent canonical `.sav` revision, not wall-clock comparison, determines whether the save advanced after a candidate.
+
+The iframe holds bytes for all candidates and sends only validated summaries to the parent. One per-session request contains all compatible summaries. A response names one current `candidateId` or chooses `continue`; the iframe rechecks compatibility and ID before loading. On an explicit choice, Continue loads canonical `.sav`; the previously offered local recovery is deleted immediately if it was declined, or after a successful local restore if it was selected. Any previously offered cloud recovery is conditionally deleted ten seconds after runtime readiness, regardless of which candidate was selected. The chooser has no expiration: with compatible candidates, the pinned EmulatorJS 4.2.3 runtime is paused and startup waits for an explicit Restore or Continue. The runtime resumes only after the choice is applied and marked ready; automatic save synchronization and recovery capture begin then. Closing the emulator without choosing preserves the candidates. Deleting the last visible candidate resolves the pending choice as Continue after storage confirms deletion. A timed-out deletion restores the same chooser and permits a guarded retry; a late result may update only that idle chooser.
+
+Manual **Salvar estado** writes only `user-state`; periodic captures write only `cloud-recovery`. Closing never creates a new runtime snapshot. **Carregar estado** is enabled only when the selected player has a compatible user state and sends its command to that iframe only. `user-state` is the only automatic-cleanup-exempt runtime state. The ten-second delay concerns consumption of a prior cloud candidate after an explicit restore choice, not the former save-then-close heuristic.
+
+Implementation proceeds contract/store/backend, then player candidate collection and actions, then the single chooser, followed by focused package/frontend/backend unit and integration tests. Browser end-to-end validation belongs to the user. This task does not authorize a project build or Git commit.
+
+### Implementation record and remaining validation
+
+- `apps/packages/snapshot-store.mjs` now has isolated `user-state` storage under `<snapshots>/<profileId>/user-state/`; `cloud-recovery` keeps the legacy `<snapshots>/<profileId>/<gameId>.json` path. This avoids file-name collisions with game IDs, preserves cloud bytes during migration, and gives each slot an independent revision, lock and fence. Lease acquisition advances both fences, generation calculation considers both slots, and lease-release pruning touches only cloud recovery. Remote GET/PUT/DELETE accept the typed query parameter with lease and ETag checks; the unqualified route remains a cloud alias.
+- Each remote slot persists its last deleted revision in a separate marker before removing the current metadata. The next state receives a strictly larger revision, including after backend restart. An old candidate ID or `If-Match` value therefore cannot delete a replacement created after the slot was empty.
+- New remote writes carry kind, reason and optional installation provenance; the server stamps `capturedAt` and persists patch identity. Legacy cloud reads get `legacy-unknown` and the original `createdAt`; the next fence update writes the migrated metadata without rewriting state bytes. The UI labels such records “Estado antigo”, since their original manual/automatic writer is unknowable.
+- New local recovery writes stamp browser capture time and keep their candidate ID. Older local records retain an unknown capture time. The shared candidate summary contains only metadata. The iframe collects compatible local, cloud and user candidates, and one session-scoped chooser replaces the two sequential questions.
+- The chooser shows type, reason, origin, capture time and clock source, and whether the canonical save revision advanced. Restore and explicit delete target a candidate; deletion is conditional on candidate identity, remote ETag and lease or local IndexedDB ID. Missing delete responses restore the chooser after eight seconds. A late deletion response reconciles only its original idle chooser. The iframe acknowledges accepted restore choices; a missing acknowledgement retries only the already locked choice every eight seconds. Manual **Carregar estado** uses only the selected player's compatible user state; **Salvar estado** writes only that user's separate slot. An explicit startup choice consumes the prior automatic candidates with the local/immediate and cloud/ten-second rules.
+- There is no verified absolute in-game save timestamp in the current Gen III adapter. Its existing `saveIndex` is a sequence, not a calendar time. The chooser therefore relies on capture time and canonical save revision. The optional `gameTime` display contract is ready for a future verified adapter; no unverified internal date is shown.
+- Added and updated package, frontend and backend unit/integration tests cover typed storage, legacy migration, separate deletion, capture-time authority, provenance, local IDs, chooser metadata, scoped response, late deletion, no-response rollback, monotonic revision after delete/recreate and save preservation. The focused package/frontend run passed 77/77 tests and the backend HTTP run passed 62/62 tests, including close without choosing, both frontend close transport paths, and preservation across lease release. The frontend JSX syntax transform, player syntax check and `git diff --check` passed. Browser end-to-end checks remain with the user. No project build or Git commit was run for this implementation task.
+
+### Implemented decision matrix
+
+| Condition | Current action |
+| --- | --- |
+| No compatible runtime candidate | Start from the canonical `.sav`; show no chooser. |
+| One or more compatible user, cloud or local candidates | Show one chooser for that player, with all available summaries. Selecting one restores only its runtime state; Continue loads the canonical `.sav`. |
+| Manual **Salvar estado** | Replace only `user-state`, mark it `user-request`, and make it available to that player's **Carregar estado**. |
+| Periodic capture during play | Replace only `cloud-recovery`, marked `periodic-recovery`. Closing creates no new runtime snapshot. |
+| Explicit startup choice: Continue, local, cloud, or manual state | Preserve automatic candidates during initialization. After the choice is applied, delete the prior local candidate immediately (after `loadState()` if selected), and schedule conditional deletion of the prior cloud candidate ten seconds after runtime readiness. Keep `user-state`. |
+| Close before startup choice is applied | Do not flush an unselected save or delete automatic recovery. Release the lease with `preserveRecovery: true`. |
+| Normal close after runtime readiness, with or without an in-game save | Flush the canonical `.sav`, then remove local and cloud automatic recovery; keep `user-state`. No close-time runtime capture is created. |
+| Unexpected exit or lost lease | Preserve local and cloud recovery for the next launch; release the lease with `preserveRecovery: true` when possible. |
+| Surviving local record after interruption | Show local recovery with `runtime-break` or conservative `possible-recovery`; an explicit startup choice consumes the prior record. |
+| Legacy remote slot | Read as cloud recovery with `legacy-unknown`, preserving original capture time and bytes; migrate metadata on fence advancement. Never infer manual intent. |
+| Candidate deleted or replaced while the chooser is open | Conditional local ID or remote ETag/fence check prevents deleting the replacement. A stale restore choice receives the current list for a new selection. |
+| Delete acknowledgement missing | After eight seconds, report the missing response and let the chooser act on its current candidates. A late delete result reconciles only its original idle chooser. Storage may still finish the original delete; its result cannot be assumed from a timeout alone. |
+| Restore acknowledgement missing | Keep the chosen candidate locked in the frontend session and resend the same request and attempt ID every eight seconds. Never reopen the chooser for a different choice. Dismiss it only when the iframe confirms that the accepted candidate equals the locked choice. The acknowledgement precedes runtime `loadState`; it does not itself prove loading succeeded. |
+| No verified internal last-save clock | Display capture time and canonical save revision relationship. Do not reinterpret Gen III `saveIndex` as a calendar time. |
+
+Unit and HTTP integration tests establish these contracts without a live EmulatorJS/browser run. The user's browser end-to-end checks still need to exercise save then close, manual save/load, interruption recovery, another installation, and deletion on both storage types. The historical audit and earlier marker-based plan above intentionally remain as a dated record; this matrix and implementation record define the current code behavior.
+
+### Implemented close contract after pre-browser review
+
+The header **Close emulator** action remains available while the restore chooser is open. The player tracks whether initial restore selection and canonical save loading have finished. If Close is pressed before a choice is applied, it stops the pending choice without loading any state or flushing an unselected emulator save, creates no snapshot, and reports `preserveRecovery: true` to the parent. If the user has already selected Restore and its synchronous state load has happened, a later Close does not undo that action. The parent leaves IndexedDB recovery intact and passes the preservation flag when releasing the lease; the backend skips cloud cleanup for this deferred choice. A later launch can offer the same compatible local and remote candidates. There is no chooser-specific close guard.
+
+Once the game is playable, Close cancels the delayed cloud deletion, stops capture timers, waits for in-flight saves/captures, and flushes the final canonical `.sav`. It never captures a new runtime snapshot. It conditionally deletes any current cloud recovery, regardless of `.sav` revision or input timing. After successful synchronization, the parent clears local recovery and releases the lease; backend release removes any remaining cloud recovery as a safety net. An explicit `user-state` remains separate and persistent. An unexpected exit retains automatic candidates, while a normal close does not.
+
+The iframe no longer deletes the IndexedDB local recovery record on `pagehide`. A tab close or reload without the application's normal close sequence leaves that record for a later possible-recovery offer. Unit and HTTP integration tests cover both direct close decisions and deferred-choice lease release; real browser behavior remains for the user's end-to-end check.
+
+1. A manual user-state and cloud recovery coexist; automatic capture and cleanup touch only recovery slots.
+2. Browser time is ahead/behind backend UTC; the chooser labels clock source and orders the UTC timestamps while accepting clock skew.
 3. A save contains elapsed playtime or a rotating sequence but no last-save wall clock; metadata preserves its kind and never presents it as a calendar date.
 4. A candidate is replaced while the chooser is open; revision and candidate ID checks prevent restoring or deleting the replacement accidentally.
 5. Local and remote candidates coexist; one scoped chooser replaces the double-prompt flow and state bytes remain inside the iframe.
 6. Deleting a candidate updates the chooser and manual-load availability only after persistence succeeds; sibling candidates and canonical `.sav` remain intact.
+
+### Review list for sequential decisions (2026-09-24)
+
+The canonical `.sav` and runtime snapshots are permanently separate. Snapshot selection must never replace the backend `.sav`; the iframe must load the canonical `.sav` into EmulatorJS even after applying a snapshot. See [Spec 059](059-canonical-save-and-snapshot-independence.md) for the authoritative invariant, startup order, user-visible errors, and the deferred revision-response question.
+
+The items below are review questions about the current implementation, not approved code changes. Discuss and resolve one item at a time. `user-state`, explicitly saved by the user, is outside automatic recovery cleanup; its single slot per game/profile is replaced only by another manual save or an explicit user deletion.
+
+1. **Close before startup completes — implemented, browser validation pending.** Local and database automatic recoveries are sorted by UTC capture timestamp, newest first; minute-scale browser/server skew is accepted. Both remain selectable. Close during an awaited local read or restart stops subsequent loading; automatic capture and save synchronization start only after runtime readiness. An already applied Restore followed by Close is not undone, as accepted by the user.
+2. **Consume automatic recovery after an explicit startup choice — implemented, browser validation pending.** Startup no longer deletes a legacy cloud recovery before the chooser. Whether the user chooses Continue, local, cloud, or manual state, the previously offered local candidate is deleted immediately (after its state is loaded if chosen). The previously offered cloud candidate is conditionally deleted ten seconds after runtime readiness; Close or lease loss cancels the pending timer. A normal Close removes any new automatic captures regardless of save timing, and an interrupted or unresolved launch preserves them. The user-owned `user-state` is never automatically deleted. The first periodic remote capture occurs at ready + 15 seconds, so the requested ten-second cleanup creates a five-second interval with local but no remote recovery; the timer does not prove a replacement cloud capture. Unit and backend HTTP tests pass; browser validation is outstanding.
+3. **No-choice timeout — implemented, browser validation pending.** The 30-second automatic Continue was removed. With candidates, startup pauses the pinned EmulatorJS 4.2.3 core through `EJS_emulator.pause()` and remains pending until the user explicitly chooses Restore or Continue. The core resumes through `EJS_emulator.play()` only after the choice is applied. Automatic save synchronization and recovery capture start after readiness. Closing before choosing preserves the candidates for the next launch. The eight-second deletion watchdog reports a missing response; the restore-acknowledgement timer retries the locked choice. Neither chooses Continue. The pinned runtime's [pause/play implementation](https://cdn.emulatorjs.org/4.2.3/data/src/emulator.js) calls `gameManager.toggleMainLoop` to stop/start emulation; the actual browser interaction remains for user validation.
+4. **Chooser acknowledgement/deletion races — implemented for restore choice, browser validation pending.** The first Restore or Continue action is recorded in the frontend session as `selectedCandidateId` and `choiceAttemptId`; all other choices stay disabled. If the iframe acknowledgement does not arrive within eight seconds, the same choice and attempt are resent every eight seconds. The iframe's settled-request routing is idempotent and reports which candidate it accepted; the parent dismisses the chooser only when that ID matches its locked choice. This acknowledgement is sent before `loadState` runs and is not proof that the runtime state was loaded successfully. A stale response keeps the original choice locked and instructs the user to close and reopen rather than silently selecting a different state. For deletion, the accepted timeout policy leaves the chooser available with an error when no response arrives. A timeout does not prove storage failed; the existing conditional delete and late-result checks remain, and a late storage result may still change that candidate. `user-state` is never automatically deleted by this flow.

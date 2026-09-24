@@ -2,9 +2,16 @@ export function createCloudSaveSynchronizer({ load, upload, hash, logger = () =>
   let remote = null
   let lastHash = null
   let revision = null
+  let runtimeStateSaveBytes = null
+  let runtimeSaveSyncBlocked = false
 
   return {
     getRevision() { return revision ?? 0 },
+    blockRuntimeSaveSync() { runtimeSaveSyncBlocked = true },
+    ignoreRuntimeStateSave(bytes) {
+      runtimeStateSaveBytes = bytes instanceof Uint8Array && bytes.byteLength > 0 ? new Uint8Array(bytes) : null
+      runtimeSaveSyncBlocked = false
+    },
     async load() {
       try {
         remote = await load()
@@ -48,6 +55,16 @@ export function createCloudSaveSynchronizer({ load, upload, hash, logger = () =>
         logger('save.front.sync-skipped', { traceId, reason: 'empty-payload', sizeBytes })
         return false
       }
+      if (runtimeSaveSyncBlocked) {
+        logger('save.front.runtime-state-unverified', { traceId, sizeBytes })
+        return false
+      }
+      if (runtimeStateSaveBytes) {
+        if (sameBytes(bytes, runtimeStateSaveBytes)) {
+          logger('save.front.runtime-state-ignored', { traceId, sizeBytes })
+          return false
+        }
+      }
       logger('save.front.sync-started', { traceId, sizeBytes, expectedRevision: revision })
       let stage = 'hash'
       try {
@@ -70,4 +87,10 @@ export function createCloudSaveSynchronizer({ load, upload, hash, logger = () =>
       }
     },
   }
+}
+
+function sameBytes(left, right) {
+  if (left.byteLength !== right.byteLength) return false
+  for (let index = 0; index < left.byteLength; index += 1) if (left[index] !== right[index]) return false
+  return true
 }
