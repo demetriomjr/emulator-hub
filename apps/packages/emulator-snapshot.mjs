@@ -7,7 +7,7 @@ const decoder = new TextDecoder('utf-8', { fatal: true })
 export async function encodeSnapshotBundle({ metadata, state }) {
   const stateBytes = requireBytes(state, 'Snapshot state')
   validateStateLength(stateBytes)
-  const snapshotMetadata = { ...validateMetadata(metadata) }
+  const snapshotMetadata = { ...validateMetadata(metadata), promptOnLaunch: metadata.promptOnLaunch ?? true }
   delete snapshotMetadata.saveByteLength
   delete snapshotMetadata.saveSha256
   delete snapshotMetadata.saveFile
@@ -42,7 +42,7 @@ export async function decodeSnapshotBundle(bundle) {
   validateStateLength(state)
   if (legacySaveLength > maximumSaveBytes) throw snapshotError('SNAPSHOT_ENVELOPE_INVALID', 'Legacy snapshot save length is invalid.')
   if (legacySaveLength > 0 && (!isHash(metadata.saveSha256) || await sha256(bytes.subarray(payloadStart + metadata.stateByteLength)) !== metadata.saveSha256)) throw snapshotError('SNAPSHOT_HASH_INVALID', 'Legacy snapshot bundle hash does not match its bytes.')
-  metadata = { ...metadata, saveRevision: Number.isInteger(metadata.saveRevision) ? metadata.saveRevision : 0 }
+  metadata = { ...metadata, saveRevision: Number.isInteger(metadata.saveRevision) ? metadata.saveRevision : 0, promptOnLaunch: metadata.promptOnLaunch ?? true }
   if (!isHash(metadata.sha256)) throw snapshotError('SNAPSHOT_ENVELOPE_INVALID', 'Snapshot envelope hashes are invalid.')
   if (await sha256(state) !== metadata.sha256) throw snapshotError('SNAPSHOT_HASH_INVALID', 'Snapshot state hash does not match its bytes.')
   return { metadata, state }
@@ -56,6 +56,7 @@ function validateMetadata(metadata) {
   if (!isHash(metadata.romSha256)) throw snapshotError('SNAPSHOT_METADATA_INVALID', 'Snapshot metadata ROM hash is invalid.')
   if (metadata.patchSha256 !== undefined && !isHash(metadata.patchSha256)) throw snapshotError('SNAPSHOT_METADATA_INVALID', 'Snapshot metadata patch hash is invalid.')
   if (metadata.saveRevision !== undefined && (!Number.isInteger(metadata.saveRevision) || metadata.saveRevision < 0)) throw snapshotError('SNAPSHOT_METADATA_INVALID', 'Snapshot metadata save revision is invalid.')
+  if (metadata.promptOnLaunch !== undefined && typeof metadata.promptOnLaunch !== 'boolean') throw snapshotError('SNAPSHOT_METADATA_INVALID', 'Snapshot metadata promptOnLaunch is invalid.')
   return metadata
 }
 

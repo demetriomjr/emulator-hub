@@ -1,8 +1,7 @@
-import { getCloudSave, getControlProfile, getEmulatorSnapshot, getPlayerLeaseLaunch, heartbeatPlayerLease, putCloudSave, putEmulatorSnapshot } from '../../packages/hub-client.js'
+import { deleteEmulatorSnapshot, getCloudSave, getControlProfile, getEmulatorSnapshot, getPlayerLeaseLaunch, heartbeatPlayerLease, putCloudSave, putEmulatorSnapshot } from '../../packages/hub-client.js'
 import { createCloudSaveSynchronizer } from '../../packages/cloud-save-sync.mjs'
 import { observeEmulatorSaveFiles } from '../../packages/emulator-save-events.mjs'
 import { startEmulatorSavePolling } from '../../packages/emulator-save-poller.mjs'
-import { restoreSnapshotState } from '../../packages/emulator-snapshot-restore.mjs'
 import { createEmulatorGamepadInput } from '../../packages/gamepad-input.mjs'
 import { createClientDiagnostics, getClientDiagnosticsOptions } from '../../packages/client-diagnostics.mjs'
 import { getEmulatorAudioContext, installAudioResumeOnUserGesture } from '../../packages/mobile-audio-resume.mjs'
@@ -11,7 +10,10 @@ import { instrumentEmulatorLifecycle } from '../../packages/emulator-lifecycle-d
 import { createLocalRuntimeRecoveryStore } from '../../packages/local-runtime-recovery-store.mjs'
 import { selectNewestPokemonGen3SaveCopy } from '../../packages/pokemon-gen3-save-validation.mjs'
 import { validateSaveWithRetry } from '../../packages/emulator-save-validation-retry.mjs'
-import { createRestoreRequest, resolveRestoreRequest } from '../../packages/snapshot-restore-routing.mjs'
+import { createRestoreRequest, routeRestoreChoiceResponse } from '../../packages/snapshot-restore-routing.mjs'
+import { createSnapshotOfferPolicy } from '../../packages/snapshot-offer-policy.mjs'
+import { createSnapshotTelemetry } from '../../packages/snapshot-telemetry.mjs'
+import { getInstallationIdentity, localCandidateSummary, remoteCandidateSummary, snapshotMatchesLaunch, snapshotUrlForKind, sortRestoreCandidates } from '../../packages/restore-candidate.mjs'
 import { softResetEmulator } from '../../packages/player-reset.mjs'
 import { createOddsManipulatorClock } from '../../packages/odds-manipulator-clock.mjs'
 
@@ -22,6 +24,7 @@ const sessionId = parameters.get('sessionId')
 const leaseGeneration = Number(parameters.get('leaseGeneration'))
 const restoreLocalRecovery = parameters.get('restoreRecovery') === '1'
 const localRecoveryPrompt = parameters.get('localRecoveryPrompt') === '1'
+let localRecoveryCandidateId = parameters.get('localRecoveryCandidateId')
 const game = document.getElementById('game')
 const playerLoading = document.createElement('div')
 playerLoading.textContent = 'Carregando save...'
@@ -57,34 +60,48 @@ if (!Number.isFinite(fastForwardRequest.speed) || fastForwardRequest.speed < 1.5
 let fastForwardRevision = 0
 let savedSnapshot = null
 let snapshotRevision = null
+let userSnapshot = null
+let userSnapshotRevision = null
+let userSnapshotCapture = null
+const installationIdentity = getInstallationIdentity()
+let offerPolicy = null
+let runtimeReady = false
+let closeRequested = false
+let lastGamepadBindings = new Set()
 let launchDescriptor = null
 let emulatorGameId = null
 let gamepadInput = null
 let gamepadBindings = []
 let cloudSaveSynchronizer = null
 let cloudSaveInterval = null
+let cloudRecoveryDeleteTimer = null
+let cloudRecoveryDeletion = null
 let stopBatterySavePolling = null
 let pendingSaveSync = Promise.resolve()
 let snapshotCapture = null
 let latestSaveBytes = null
 let localRecoveryInterval = null
 let localRecoveryCapture = null
-let preserveLocalRecovery = false
 let localRecovery = null
+let restoreCandidates = []
 const localRecoveryStore = createLocalRuntimeRecoveryStore()
+const snapshotTelemetry = createSnapshotTelemetry({ browser: window, source: 'player', sessionId, gameId: id, profileId })
 let removeAudioResumeGesture = null
 let stopFrameProgressMonitor = null
 let stopLifecycleDiagnostics = null
 let leaseHeartbeat = null
 let leaseLost = false
 const pendingRestoreRequests = new Map()
+const settledRestoreRequests = new Map()
 const oddsClock = createOddsManipulatorClock()
 oddsClock.install()
 
 function loseLease() {
   if (leaseLost) return
   leaseLost = true
-  preserveLocalRecovery = true
+  snapshotTelemetry.warn('lease-lost', { reason: 'heartbeat-or-session-fenced' })
+  if (cloudRecoveryDeleteTimer) window.clearTimeout(cloudRecoveryDeleteTimer)
+  cloudRecoveryDeleteTimer = null
   if (leaseHeartbeat) window.clearInterval(leaseHeartbeat)
   if (cloudSaveInterval) window.clearInterval(cloudSaveInterval)
   stopBatterySavePolling?.()
@@ -111,20 +128,29 @@ function createEmulatorGameId(gameId, profileId) {
   return `emulator-hub-${encodeURIComponent(gameId)}--profile-${encodeURIComponent(profileId)}`
 }
 
-function requestRestoreDecision(kind) {
-  const requestId = `${sessionId}:${kind}:${Date.now()}:${Math.random()}`
+function requestRestoreChoice(candidates) {
+  const requestId = `${sessionId}:candidates:${Date.now()}:${Math.random()}`
   return new Promise(resolve => {
-    const timeout = window.setTimeout(() => {
-      pendingRestoreRequests.delete(requestId)
-      window.parent.postMessage({ type: 'emulator-hub:snapshot-restore-timeout', requestId, sessionId }, location.origin)
-      resolve(false)
-    }, 30_000)
-    pendingRestoreRequests.set(requestId, { resolve, timeout, sessionId, gameId: id, profileId })
-    window.parent.postMessage(createRestoreRequest({ requestId, kind, gameId: id, profileId, sessionId }), location.origin)
+    pendingRestoreRequests.set(requestId, { resolve, sessionId, gameId: id, profileId, candidates })
+    window.parent.postMessage(createRestoreRequest({ requestId, kind: 'candidate-list', candidates, gameId: id, profileId, sessionId }), location.origin)
   })
 }
 
 function logSavePipeline(event, context = {}) {
+  if (event === 'save.front.runtime-state-ignored') {
+    snapshotTelemetry.info('runtime-state-save-ignored', { reason: 'matches-restored-state' }, { once: true })
+    return
+  }
+  if (event === 'save.front.runtime-state-unverified') {
+    snapshotTelemetry.warn('runtime-save-sync-blocked', { reason: 'state-save-unverified' }, { repeating: true })
+    return
+  }
+  if (event.endsWith('-failed') || event.includes('rejected')) {
+    const level = event.includes('rejected') ? 'warn' : 'error'
+    snapshotTelemetry[level](event.replace('save.front.', 'save-'), { phase: context.stage ?? undefined, code: context.code ?? undefined, error: context.error ?? undefined, status: context.status ?? undefined }, { repeating: event === 'save.front.sync-failed' || event === 'save.front.validation-rejected' })
+    return
+  }
+  if (['save.front.bytes-observed', 'save.front.bytes-hashed', 'save.front.sync-started', 'save.front.put-started', 'save.front.get-started', 'save.front.validation-accepted', 'save.front.deduplicated', 'save.front.sync-skipped', 'save.front.bytes-ignored', 'save.front.restore-started', 'save.front.put-response'].includes(event)) return
   const record = { timestamp: new Date().toISOString(), event, gameId: id, profileId, emulatorGameId, ...context }
   const output = event.endsWith('failed') ? console.error : context.ok === false || event.includes('rejected') ? console.warn : console.info
   output.call(console, '[save-pipeline]', record)
@@ -139,8 +165,9 @@ function setPlayerReady() {
   playerLoading.style.display = 'none'
 }
 
-async function queueCloudSave(bytes) {
+async function queueCloudSave(bytes, { onUncertain = () => {} } = {}) {
   if (leaseLost || !cloudSaveSynchronizer || !(bytes instanceof Uint8Array) || bytes.byteLength === 0) {
+    onUncertain()
     logSavePipeline('save.front.bytes-ignored', { reason: leaseLost ? 'lease-lost' : !cloudSaveSynchronizer ? 'synchronizer-unavailable' : 'invalid-or-empty-payload', sizeBytes: bytes?.byteLength ?? 0 })
     return Promise.resolve(false)
   }
@@ -161,7 +188,7 @@ async function queueCloudSave(bytes) {
         }
       },
     })
-    if (!validated) return false
+    if (!validated) { onUncertain(); return false }
     saveBytes = validated.bytes
   }
   const copy = new Uint8Array(saveBytes)
@@ -176,17 +203,32 @@ function watchBatterySaveChanges() {
   const emulator = window.EJS_emulator
   if (!emulator?.on || emulator.__hubSaveWatcher) return
   emulator.__hubSaveWatcher = true
-  observeEmulatorSaveFiles(emulator, queueCloudSave)
+  observeEmulatorSaveFiles(emulator, bytes => {
+    const token = offerPolicy?.beginLiveSave()
+    return queueCloudSave(bytes, { onUncertain: () => offerPolicy?.recordSaveUncertainty() }).then(changed => {
+      if (changed && token) offerPolicy.confirmLiveSave(token, cloudSaveSynchronizer.getRevision())
+      return changed
+    }).catch(error => {
+      offerPolicy?.recordSaveUncertainty()
+      throw error
+    })
+  })
   stopBatterySavePolling = startEmulatorSavePolling(emulator)
 }
 
 async function captureLocalRecovery() {
-  if (leaseLost || localRecoveryCapture || !launchDescriptor) return localRecoveryCapture
+  if (leaseLost || closeRequested || !runtimeReady || localRecoveryCapture || !launchDescriptor) return localRecoveryCapture
   const manager = window.EJS_emulator?.gameManager
-  if (!manager) return false
+  if (!manager) {
+    snapshotTelemetry.warn('automatic-capture-unavailable', { snapshotKind: 'local-recovery', reason: 'manager-unavailable' }, { repeating: true })
+    return false
+  }
   localRecoveryCapture = (async () => {
     const state = manager.getState?.()
-    if (!state) return false
+    if (!state) {
+      snapshotTelemetry.warn('automatic-capture-unavailable', { snapshotKind: 'local-recovery', reason: 'state-bytes-unavailable' }, { repeating: true })
+      return false
+    }
     if (leaseLost) return false
     await localRecoveryStore.put({ profileId, gameId: id, core: launchDescriptor.core, romSha256: launchDescriptor.romSha256, runtimeId: launchDescriptor.runtimeId, ...(launchDescriptor.patchSha256 ? { patchSha256: launchDescriptor.patchSha256 } : {}), state: new Uint8Array(state) })
     return true
@@ -195,13 +237,11 @@ async function captureLocalRecovery() {
 }
 
 async function clearLocalRecovery() {
-  preserveLocalRecovery = false
   if (localRecoveryInterval) window.clearInterval(localRecoveryInterval)
   await localRecoveryStore.clear(profileId, id)
 }
 
 window.emulatorHubClearLocalRecovery = clearLocalRecovery
-window.addEventListener('pagehide', () => { if (!preserveLocalRecovery) void clearLocalRecovery().catch(() => {}) })
 
 function hideContextMenuButton() {
   for (const button of game.querySelectorAll('button')) {
@@ -346,48 +386,193 @@ function applyFastForward() {
   }
 }
 
-async function saveEmulatorState() {
+async function saveEmulatorState({ kind = 'cloud-recovery', reasonCode = 'periodic-recovery', promptOnLaunch = true } = {}) {
+  if (leaseLost || closeRequested || !runtimeReady) return false
+  if (kind === 'user-state') {
+    if (userSnapshotCapture) return userSnapshotCapture
+    userSnapshotCapture = persistEmulatorState({ kind, reasonCode: 'user-request', promptOnLaunch: true }).finally(() => { userSnapshotCapture = null })
+    return userSnapshotCapture
+  }
   if (snapshotCapture) return snapshotCapture
-  snapshotCapture = persistEmulatorState().finally(() => { snapshotCapture = null })
+  snapshotCapture = persistEmulatorState({ kind, reasonCode, promptOnLaunch }).finally(() => { snapshotCapture = null })
   return snapshotCapture
 }
 
-async function persistEmulatorState() {
+async function persistEmulatorState({ kind, reasonCode, promptOnLaunch }) {
   const manager = window.EJS_emulator?.gameManager
-  if (leaseLost || !manager || !launchDescriptor) return false
+  if (leaseLost || !launchDescriptor) return false
+  if (!manager) {
+    if (kind === 'cloud-recovery') snapshotTelemetry.warn('automatic-capture-unavailable', { snapshotKind: kind, reason: 'manager-unavailable' }, { repeating: true })
+    return false
+  }
   const state = manager.getState?.()
   if (!state) throw new Error('Emulator snapshot bytes are unavailable.')
-  const accepted = await putEmulatorSnapshot(launchDescriptor.snapshotUrl, {
-    metadata: { profileId, gameId: id, core: launchDescriptor.core, romSha256: launchDescriptor.romSha256, runtimeId: launchDescriptor.runtimeId, saveRevision: cloudSaveSynchronizer.getRevision(), ...(launchDescriptor.patchSha256 ? { patchSha256: launchDescriptor.patchSha256 } : {}) },
+  const metadata = { profileId, gameId: id, core: launchDescriptor.core, romSha256: launchDescriptor.romSha256, runtimeId: launchDescriptor.runtimeId, saveRevision: cloudSaveSynchronizer.getRevision(), promptOnLaunch, kind, reasonCode, ...(installationIdentity.id ? { originInstallationId: installationIdentity.id } : {}), ...(launchDescriptor.patchSha256 ? { patchSha256: launchDescriptor.patchSha256 } : {}) }
+  const accepted = await putEmulatorSnapshot(snapshotUrlForKind(launchDescriptor.snapshotUrl, kind), {
+    metadata,
     state: new Uint8Array(state),
-  }, snapshotRevision, { sessionId, generation: leaseGeneration })
-  snapshotRevision = accepted.revision
-  savedSnapshot = { state: new Uint8Array(state), saveRevision: cloudSaveSynchronizer.getRevision() }
+  }, kind === 'user-state' ? userSnapshotRevision : snapshotRevision, { sessionId, generation: leaseGeneration })
+  const captured = { state: new Uint8Array(state), metadata: { ...metadata, capturedAt: accepted.capturedAt }, revision: accepted.revision }
+  if (kind === 'user-state') {
+    userSnapshotRevision = accepted.revision
+    userSnapshot = captured
+    announceUserStateAvailability()
+  } else {
+    snapshotRevision = accepted.revision
+    savedSnapshot = captured
+  }
   return true
 }
 
+function announceUserStateAvailability() {
+  window.parent.postMessage({ type: 'emulator-hub:user-state-availability', sessionId, gameId: id, profileId, available: Boolean(userSnapshot) }, location.origin)
+}
+
+function reportPlayerActionFailure(action) {
+  window.parent.postMessage({ type: 'emulator-hub:player-action-failed', sessionId, gameId: id, profileId, action }, location.origin)
+}
+
+async function deleteRestoreCandidate(message) {
+  const pending = pendingRestoreRequests.get(message.restoreRequestId)
+  if (!pending?.candidates?.some(candidate => candidate.kind === message.kind && candidate.candidateId === message.candidateId)) return
+  let currentCandidate = null
+  let candidateGone = false
+  let targetRevision = null
+  try {
+    if (message.kind === 'local-recovery') {
+      if (!localRecoveryCandidateId || message.candidateId !== localRecoveryCandidateId) throw Object.assign(new Error('Este estado local mudou e foi mantido.'), { code: 'LOCAL_RECOVERY_CHANGED' })
+      const deleted = await localRecoveryStore.deleteIfMatches(profileId, id, message.candidateId)
+      if (!deleted) {
+        const current = await localRecoveryStore.get(profileId, id)
+        if (!current) candidateGone = true
+        else {
+          localRecoveryCandidateId = current.candidateId
+          currentCandidate = localCandidateSummary(current, { currentSaveRevision: cloudSaveSynchronizer.getRevision() })
+          pending.candidates = pending.candidates.map(candidate => candidate.candidateId === message.candidateId ? currentCandidate : candidate)
+          restoreCandidates = pending.candidates
+          throw Object.assign(new Error('Este estado local mudou. A lista foi atualizada; confirme a exclusão do estado atual.'), { code: 'LOCAL_RECOVERY_CHANGED' })
+        }
+      }
+      localRecovery = null
+    } else if (message.kind === 'cloud-recovery' || message.kind === 'user-state') {
+      const manual = message.kind === 'user-state'
+      const stored = manual ? userSnapshot : savedSnapshot
+      targetRevision = stored?.revision ?? null
+      const expectedCandidateId = Number.isInteger(stored?.revision) ? `${manual ? 'user' : 'remote'}:${stored.revision}` : null
+      if (!expectedCandidateId || message.candidateId !== expectedCandidateId) throw Object.assign(new Error('Este snapshot mudou e foi mantido.'), { code: 'SNAPSHOT_STALE' })
+      try {
+        await deleteEmulatorSnapshot(snapshotUrlForKind(launchDescriptor.snapshotUrl, message.kind), stored.revision, { sessionId, generation: leaseGeneration })
+      } catch (error) {
+        if (error.status !== 412) throw error
+        const current = await getEmulatorSnapshot(snapshotUrlForKind(launchDescriptor.snapshotUrl, message.kind), { sessionId, generation: leaseGeneration })
+        if (current) {
+          if (manual) { userSnapshot = current; userSnapshotRevision = current.revision }
+          else { savedSnapshot = current; snapshotRevision = current.revision }
+          currentCandidate = remoteCandidateSummary(current, { currentSaveRevision: cloudSaveSynchronizer.getRevision(), installationId: installationIdentity.comparisonId })
+          pending.candidates = pending.candidates.map(candidate => candidate.candidateId === message.candidateId ? currentCandidate : candidate)
+          restoreCandidates = pending.candidates
+          throw Object.assign(new Error('O snapshot foi atualizado. Confirme a exclusão do estado atual.'), { code: 'SNAPSHOT_STALE' })
+        }
+        candidateGone = true
+      }
+      if (manual) { userSnapshot = null; userSnapshotRevision = null; announceUserStateAvailability() }
+      else { savedSnapshot = null; snapshotRevision = null }
+    } else return
+    pending.candidates = pending.candidates.filter(candidate => candidate.candidateId !== message.candidateId)
+    restoreCandidates = pending.candidates
+    snapshotTelemetry.info('candidate-deleted', { snapshotKind: message.kind, candidateId: message.candidateId, revision: targetRevision, reason: 'user-request' })
+    window.parent.postMessage({ type: 'emulator-hub:snapshot-candidate-delete-result', requestId: message.requestId, restoreRequestId: message.restoreRequestId, candidateId: message.candidateId, kind: message.kind, sessionId, gameId: id, profileId, ok: true }, location.origin)
+  } catch (error) {
+    if (candidateGone) {
+      pending.candidates = pending.candidates.filter(candidate => candidate.candidateId !== message.candidateId)
+      restoreCandidates = pending.candidates
+    }
+    snapshotTelemetry[candidateGone ? 'info' : 'warn'](candidateGone ? 'candidate-already-gone' : 'candidate-delete-failed', { snapshotKind: message.kind, candidateId: message.candidateId, revision: targetRevision, code: error.code, error: error.message, status: error.status })
+    window.parent.postMessage({ type: 'emulator-hub:snapshot-candidate-delete-result', requestId: message.requestId, restoreRequestId: message.restoreRequestId, candidateId: message.candidateId, currentCandidate, candidateGone, kind: message.kind, sessionId, gameId: id, profileId, ok: candidateGone, error: error.message, code: error.code ?? null }, location.origin)
+  }
+}
+
+function scheduleCloudRecoveryDeleteAfterChoice(revision) {
+  if (!Number.isInteger(revision) || snapshotRevision !== revision) return
+  if (cloudRecoveryDeleteTimer) window.clearTimeout(cloudRecoveryDeleteTimer)
+  snapshotTelemetry.info('cloud-delete-scheduled', { snapshotKind: 'cloud-recovery', revision, reason: 'choice-consumed' })
+  cloudRecoveryDeleteTimer = window.setTimeout(async () => {
+    cloudRecoveryDeleteTimer = null
+    if (!runtimeReady || closeRequested || leaseLost || snapshotRevision !== revision) return
+    const deletion = (async () => {
+      try {
+        await deleteEmulatorSnapshot(launchDescriptor.snapshotUrl, revision, { sessionId, generation: leaseGeneration })
+        if (snapshotRevision === revision) {
+          savedSnapshot = null
+          snapshotRevision = null
+        }
+        snapshotTelemetry.info('cloud-recovery-deleted', { snapshotKind: 'cloud-recovery', revision, reason: 'choice-consumed' })
+      } catch (error) {
+        snapshotTelemetry.warn('cloud-recovery-delete-failed', { snapshotKind: 'cloud-recovery', revision, phase: 'choice-consumed', code: error.code, error: error.message, status: error.status })
+      }
+    })()
+    cloudRecoveryDeletion = deletion
+    try { await deletion } finally { if (cloudRecoveryDeletion === deletion) cloudRecoveryDeletion = null }
+  }, 10_000)
+}
+
 async function closeEmulator() {
+  if (cloudRecoveryDeleteTimer) window.clearTimeout(cloudRecoveryDeleteTimer)
+  cloudRecoveryDeleteTimer = null
+  if (!runtimeReady) {
+    closeRequested = true
+    for (const pending of pendingRestoreRequests.values()) {
+      pending.resolve({ candidateId: null, explicit: false })
+    }
+    pendingRestoreRequests.clear()
+    snapshotTelemetry.info('close-preserved-recovery', { reason: 'startup-unresolved', candidateCount: restoreCandidates.length })
+    return { preserveRecovery: true }
+  }
   if (cloudSaveInterval) window.clearInterval(cloudSaveInterval)
   if (localRecoveryInterval) window.clearInterval(localRecoveryInterval)
   stopBatterySavePolling?.()
   stopBatterySavePolling = null
-  if (localRecoveryCapture) await localRecoveryCapture
+  if (localRecoveryCapture) await localRecoveryCapture.catch(error => snapshotTelemetry.warn('automatic-capture-failed', { snapshotKind: 'local-recovery', phase: 'close', code: error.code, error: error.message }, { repeating: true }))
   await pendingSaveSync
   const finalSaveBytes = window.EJS_emulator?.gameManager?.getSaveFile?.()
   if (finalSaveBytes instanceof Uint8Array && finalSaveBytes.byteLength > 0) await queueCloudSave(finalSaveBytes)
   else if (latestSaveBytes) await queueCloudSave(latestSaveBytes)
   await pendingSaveSync
   if (snapshotCapture) await snapshotCapture.catch(() => {})
-  await saveEmulatorState()
+  if (userSnapshotCapture) await userSnapshotCapture.catch(() => {})
+  if (cloudRecoveryDeletion) await cloudRecoveryDeletion
+  if (snapshotRevision !== null) {
+    const revision = snapshotRevision
+    try {
+      await deleteEmulatorSnapshot(launchDescriptor.snapshotUrl, snapshotRevision, { sessionId, generation: leaseGeneration })
+      savedSnapshot = null
+      snapshotRevision = null
+      snapshotTelemetry.info('cloud-recovery-deleted', { snapshotKind: 'cloud-recovery', revision, reason: 'normal-close' })
+    } catch (error) {
+      snapshotTelemetry.warn('cloud-recovery-delete-failed', { snapshotKind: 'cloud-recovery', revision, phase: 'close', code: error.code, error: error.message, status: error.status })
+    }
+  }
+  snapshotTelemetry.info('close-completed', { reason: 'normal-close', saveRevision: cloudSaveSynchronizer.getRevision() })
+  return { preserveRecovery: false }
 }
 
 window.emulatorHubClose = closeEmulator
 
 function loadEmulatorState() {
-  if (!savedSnapshot) return false
+  if (!userSnapshot || !snapshotMatchesLaunch(userSnapshot, launchDescriptor)) return false
   const manager = window.EJS_emulator?.gameManager
   if (!manager) return false
-  manager.loadState(new Uint8Array(savedSnapshot.state))
+  let loaded = true
+  try { manager.loadState(new Uint8Array(userSnapshot.state)) }
+  catch (error) { console.error('[emulator-snapshot] manual state load failed', error); loaded = false }
+  try { cloudSaveSynchronizer.ignoreRuntimeStateSave(manager.getSaveFile?.()) }
+  catch (error) {
+    cloudSaveSynchronizer.blockRuntimeSaveSync()
+    console.error('[emulator-snapshot] runtime save bytes could not be inspected after state load', error)
+    loaded = false
+  }
+  if (!loaded) return false
+  offerPolicy?.recordRuntimeRestore()
   return true
 }
 
@@ -397,15 +582,31 @@ window.addEventListener('message', event => {
   if (!isClosePlayerMessage && event.source !== window.parent) return
   if (event.data?.type === 'emulator-hub:gamepad') {
     if (!Array.isArray(event.data.bindings) || !event.data.bindings.every(value => typeof value === 'string')) return
+    if (gamepadInput && event.data.bindings.some(binding => !lastGamepadBindings.has(binding))) offerPolicy?.recordInput()
+    lastGamepadBindings = new Set(event.data.bindings)
     gamepadBindings = event.data.bindings
     gamepadInput?.update(gamepadBindings)
     return
   }
   if (event.data?.type === 'emulator-hub:snapshot-restore-response') {
-    const pending = resolveRestoreRequest(pendingRestoreRequests, event.data)
-    if (!pending) return
-    window.clearTimeout(pending.timeout)
-    pending.resolve(pending.restore)
+    const choice = routeRestoreChoiceResponse(pendingRestoreRequests, settledRestoreRequests, event.data)
+    if (!choice) return
+    const reply = { requestId: event.data.requestId, choiceAttemptId: event.data.choiceAttemptId, candidateId: event.data.candidateId, sessionId, gameId: id, profileId }
+    if (choice.status === 'stale') {
+      window.parent.postMessage({ type: 'emulator-hub:snapshot-restore-stale', ...reply, candidates: choice.candidates }, location.origin)
+      return
+    }
+    window.parent.postMessage({ type: 'emulator-hub:snapshot-restore-settled', ...reply, appliedCandidateId: choice.appliedCandidateId }, location.origin)
+    if (settledRestoreRequests.size > 32) settledRestoreRequests.delete(settledRestoreRequests.keys().next().value)
+    if (choice.request) {
+      choice.request.resolve({ candidateId: choice.request.candidateId, explicit: true })
+    }
+    return
+  }
+  if (event.data?.type === 'emulator-hub:snapshot-candidate-delete') {
+    if (typeof event.data.requestId !== 'string' || typeof event.data.restoreRequestId !== 'string' || typeof event.data.candidateId !== 'string') return
+    if (event.data.sessionId !== sessionId || event.data.gameId !== id || event.data.profileId !== profileId) return
+    void deleteRestoreCandidate(event.data)
     return
   }
   if (event.data?.type === 'emulator-hub:control-profile') {
@@ -446,11 +647,19 @@ window.addEventListener('message', event => {
     return
   }
   if (event.data?.type === 'emulator-hub:save-state') {
-    saveEmulatorState().catch(() => {})
+    offerPolicy?.recordManualStateSave()
+    void saveEmulatorState({ kind: 'user-state', reasonCode: 'user-request' }).then(
+      saved => {
+        if (saved) snapshotTelemetry.info('user-state-saved', { snapshotKind: 'user-state', revision: userSnapshotRevision, saveRevision: cloudSaveSynchronizer?.getRevision() })
+        else { snapshotTelemetry.warn('user-state-save-unavailable', { snapshotKind: 'user-state' }); reportPlayerActionFailure('manual-save') }
+      },
+      error => { snapshotTelemetry.error('user-state-save-failed', { snapshotKind: 'user-state', code: error.code, error: error.message, status: error.status }); reportPlayerActionFailure('manual-save') },
+    )
     return
   }
   if (event.data?.type === 'emulator-hub:load-state') {
-    loadEmulatorState()
+    if (loadEmulatorState()) snapshotTelemetry.info('user-state-loaded', { snapshotKind: 'user-state', revision: userSnapshotRevision })
+    else { snapshotTelemetry.warn('user-state-load-unavailable', { snapshotKind: 'user-state', revision: userSnapshotRevision }); reportPlayerActionFailure('manual-load') }
     return
   }
   if (event.data?.type === 'emulator-hub:fast-forward') {
@@ -467,7 +676,7 @@ window.addEventListener('message', event => {
   }
   if (event.data?.type === 'emulator-hub:close-player') {
     closeEmulator().then(
-      () => window.parent.postMessage({ type: 'emulator-hub:save-synced', requestId: event.data.requestId, ok: true }, location.origin),
+      result => window.parent.postMessage({ type: 'emulator-hub:save-synced', requestId: event.data.requestId, ok: true, preserveRecovery: result.preserveRecovery }, location.origin),
       error => window.parent.postMessage({ type: 'emulator-hub:save-synced', requestId: event.data.requestId, ok: false, error: error.message }, location.origin),
     )
   }
@@ -482,26 +691,30 @@ async function start() {
   if (!launch.romUrl || !launch.core) throw new Error('Incomplete launch configuration')
   launchDescriptor = launch
   emulatorGameId = createEmulatorGameId(launch.gameId, profileId)
-  if (restoreLocalRecovery) {
+  if (restoreLocalRecovery || localRecoveryPrompt) {
     const candidate = await localRecoveryStore.get(profileId, id)
-    if (!candidate) throw new Error('Local recovery is no longer available.')
-    if (candidate.core !== launch.core || candidate.romSha256 !== launch.romSha256 || candidate.runtimeId !== launch.runtimeId || candidate.patchSha256 !== launch.patchSha256) throw new Error('Local recovery is incompatible with this launch.')
-    localRecovery = candidate
+    if (restoreLocalRecovery && !candidate) throw new Error('Local recovery is no longer available.')
+    if (candidate && candidate.core === launch.core && candidate.romSha256 === launch.romSha256 && candidate.runtimeId === launch.runtimeId && candidate.patchSha256 === launch.patchSha256) localRecovery = candidate
+    else if (restoreLocalRecovery) throw new Error('Local recovery is incompatible with this launch.')
   }
   cloudSaveSynchronizer = createCloudSaveSynchronizer({
     load: () => {
       const traceId = crypto.randomUUID()
       logSavePipeline('save.front.get-started', { traceId, profileId, gameId: id })
-      return getCloudSave(launch.saveUrl, { sessionId, generation: leaseGeneration }, traceId, logSavePipeline)
+      return getCloudSave(launch.saveUrl, { sessionId, generation: leaseGeneration }, traceId, logSavePipeline).catch(error => {
+        reportPlayerActionFailure('game-save-load')
+        throw error
+      })
     },
     upload: (bytes, revision, traceId) => putCloudSave(launch.saveUrl, bytes, revision, { sessionId, generation: leaseGeneration }, traceId, logSavePipeline),
     hash: hashSave,
     logger: logSavePipeline,
   })
   if (Boolean(launch.patchUrl) !== Boolean(launch.patchSha256)) throw new Error('Incomplete patch configuration.')
-  const [_, snapshot, romResponse, initialPatchResponse] = await Promise.all([
+  const [_, receivedSnapshot, receivedUserSnapshot, romResponse, initialPatchResponse] = await Promise.all([
     cloudSaveSynchronizer.load(),
     getEmulatorSnapshot(launch.snapshotUrl, { sessionId, generation: leaseGeneration }),
+    getEmulatorSnapshot(snapshotUrlForKind(launch.snapshotUrl, 'user-state'), { sessionId, generation: leaseGeneration }),
     fetch(launch.romUrl, { cache: 'no-store' }),
     launch.patchUrl ? fetch(launch.patchUrl, { cache: 'no-store' }).catch(error => ({ ok: false, status: 0, error })) : Promise.resolve(null),
   ])
@@ -525,10 +738,20 @@ async function start() {
       launch.patchSha256 = undefined
     }
   }
-  const snapshotCompatible = snapshot && snapshot.metadata.profileId === profileId && snapshot.metadata.gameId === id && snapshot.metadata.core === launch.core && snapshot.metadata.romSha256 === launch.romSha256 && snapshot.metadata.runtimeId === launch.runtimeId && snapshot.metadata.patchSha256 === launch.patchSha256
-  if (snapshot && !snapshotCompatible) console.warn('[emulator-snapshot] stored snapshot is incompatible with this launch; starting without it')
-  savedSnapshot = snapshotCompatible ? { state: snapshot.state, saveRevision: snapshot.metadata.saveRevision } : null
+  let snapshot = receivedSnapshot
+  let snapshotCompatible = snapshot && snapshot.metadata.profileId === profileId && snapshot.metadata.gameId === id && snapshotMatchesLaunch(snapshot, launch)
+  const userCompatible = receivedUserSnapshot && receivedUserSnapshot.metadata.profileId === profileId && receivedUserSnapshot.metadata.gameId === id && snapshotMatchesLaunch(receivedUserSnapshot, launch)
+  if (snapshot && !snapshotCompatible) {
+    console.warn('[emulator-snapshot] stored snapshot is incompatible with this launch; starting without it')
+    snapshotTelemetry.warn('candidate-incompatible', { snapshotKind: 'cloud-recovery', revision: snapshot.revision, reason: 'launch-mismatch' })
+  }
+  if (receivedUserSnapshot && !userCompatible) snapshotTelemetry.warn('candidate-incompatible', { snapshotKind: 'user-state', revision: receivedUserSnapshot.revision, reason: 'launch-mismatch' })
+  savedSnapshot = snapshotCompatible ? snapshot : null
   snapshotRevision = snapshot?.revision ?? null
+  userSnapshot = userCompatible ? receivedUserSnapshot : null
+  userSnapshotRevision = receivedUserSnapshot?.revision ?? null
+  announceUserStateAvailability()
+  offerPolicy = createSnapshotOfferPolicy()
   window.EJS_player = '#game'
   window.EJS_core = launch.core
   window.EJS_gameUrl = URL.createObjectURL(new Blob([romBytes]))
@@ -590,6 +813,7 @@ async function start() {
     applyFastForward()
   }
   window.EJS_onGameStart = async () => {
+    if (closeRequested) return
     setPlayerLoading('Carregando save...')
     // EJS_ready fires before EmulatorJS creates its gameManager. Reapply here
     // because earlier setting changes can be ignored during loader startup.
@@ -601,32 +825,90 @@ async function start() {
       getAudioContext: () => getEmulatorAudioContext(window.EJS_emulator),
     })
     gamepadInput = createEmulatorGamepadInput(window.EJS_emulator, controlProfile.bindings)
+    if (gamepadBindings.length > 0) offerPolicy.recordInput()
     gamepadInput.update(gamepadBindings)
-    let selectedLocalRecovery = localRecovery
-    if (localRecoveryPrompt) {
-      if (await requestRestoreDecision('local-recovery')) {
-        const candidate = await localRecoveryStore.get(profileId, id)
-        if (candidate && candidate.core === launchDescriptor.core && candidate.romSha256 === launchDescriptor.romSha256 && candidate.runtimeId === launchDescriptor.runtimeId && candidate.patchSha256 === launchDescriptor.patchSha256) selectedLocalRecovery = candidate
-      } else {
-        await localRecoveryStore.clear(profileId, id)
-      }
+    const focusPlayer = () => window.parent.postMessage({ type: 'emulator-hub:player-focused', sessionId, gameId: id, profileId }, location.origin)
+    window.addEventListener('keydown', event => { if (event.isTrusted) { offerPolicy.recordInput(); focusPlayer() } }, { capture: true })
+    game.addEventListener('pointerdown', event => { if (event.isTrusted) { offerPolicy.recordInput(); focusPlayer() } }, { capture: true })
+    game.addEventListener('touchstart', event => { if (event.isTrusted) { offerPolicy.recordInput(); focusPlayer() } }, { capture: true, passive: true })
+    restoreCandidates = sortRestoreCandidates([
+      ...(localRecoveryPrompt && localRecovery?.candidateId === localRecoveryCandidateId ? [localCandidateSummary(localRecovery, { currentSaveRevision: cloudSaveSynchronizer.getRevision() })] : []),
+      ...(savedSnapshot ? [remoteCandidateSummary(savedSnapshot, { currentSaveRevision: cloudSaveSynchronizer.getRevision(), installationId: installationIdentity.comparisonId })] : []),
+      ...(userSnapshot ? [remoteCandidateSummary(userSnapshot, { currentSaveRevision: cloudSaveSynchronizer.getRevision(), installationId: installationIdentity.comparisonId })] : []),
+    ])
+    if (restoreCandidates.length) snapshotTelemetry.info('candidates-offered', { candidateCount: restoreCandidates.length, saveRevision: cloudSaveSynchronizer.getRevision() })
+    if (restoreCandidates.length) window.EJS_emulator.pause()
+    const restoreChoice = restoreCandidates.length ? await requestRestoreChoice(restoreCandidates) : null
+    if (closeRequested) return
+    const selectedCandidateId = restoreChoice?.candidateId ?? (restoreLocalRecovery ? localRecovery?.candidateId : null)
+    if (restoreChoice?.explicit && localRecoveryPrompt && localRecoveryCandidateId && selectedCandidateId !== localRecoveryCandidateId) {
+      try {
+        const deleted = await localRecoveryStore.deleteIfMatches(profileId, id, localRecoveryCandidateId)
+        snapshotTelemetry[deleted ? 'info' : 'warn'](deleted ? 'local-recovery-deleted' : 'local-recovery-changed', { snapshotKind: 'local-recovery', candidateId: localRecoveryCandidateId, reason: 'choice-declined' })
+      } catch (error) { snapshotTelemetry.warn('local-recovery-delete-failed', { snapshotKind: 'local-recovery', candidateId: localRecoveryCandidateId, phase: 'choice-declined', code: error.code, error: error.message }) }
+      if (closeRequested) return
+      localRecovery = null
     }
-    const restoreCloudSnapshot = savedSnapshot ? await requestRestoreDecision('cloud-snapshot') : false
     let restoredRuntimeState = false
-    if (selectedLocalRecovery) {
-      window.EJS_emulator.gameManager.loadState(new Uint8Array(selectedLocalRecovery.state))
-      restoredRuntimeState = true
-    } else {
-      restoredRuntimeState = restoreSnapshotState(savedSnapshot, window.EJS_emulator.gameManager, () => restoreCloudSnapshot)
+    const selected = restoreCandidates.find(candidate => candidate.candidateId === selectedCandidateId)
+    const selectedRevision = selected?.kind === 'user-state' ? userSnapshot?.revision : selected?.kind === 'cloud-recovery' ? savedSnapshot?.revision : undefined
+    if (restoreChoice?.explicit) snapshotTelemetry.info('restore-choice', { candidateId: selectedCandidateId ?? undefined, snapshotKind: selected?.kind, revision: selectedRevision, reason: selectedCandidateId ? 'user-selected' : 'continue' })
+    let restoreError = null
+    try {
+      if (selected?.kind === 'local-recovery' || (restoreLocalRecovery && selectedCandidateId === localRecovery?.candidateId)) {
+        const current = await localRecoveryStore.get(profileId, id)
+        if (closeRequested) return
+        if (current?.candidateId === selectedCandidateId && current.core === launchDescriptor.core && current.romSha256 === launchDescriptor.romSha256 && current.runtimeId === launchDescriptor.runtimeId && current.patchSha256 === launchDescriptor.patchSha256) {
+          window.EJS_emulator.gameManager.loadState(new Uint8Array(current.state))
+          restoredRuntimeState = true
+          try {
+            const deleted = await localRecoveryStore.deleteIfMatches(profileId, id, current.candidateId)
+            snapshotTelemetry[deleted ? 'info' : 'warn'](deleted ? 'local-recovery-deleted' : 'local-recovery-changed', { snapshotKind: 'local-recovery', candidateId: current.candidateId, reason: 'choice-restored' })
+          } catch (error) { snapshotTelemetry.warn('local-recovery-delete-failed', { snapshotKind: 'local-recovery', candidateId: current.candidateId, phase: 'choice-restored', code: error.code, error: error.message }) }
+          if (closeRequested) return
+        }
+      } else if (selected && (selected.kind === 'cloud-recovery' || selected.kind === 'user-state')) {
+        const current = selected.kind === 'user-state' ? userSnapshot : savedSnapshot
+        if (current && remoteCandidateSummary(current, { currentSaveRevision: cloudSaveSynchronizer.getRevision(), installationId: installationIdentity.comparisonId }).candidateId === selectedCandidateId && snapshotMatchesLaunch(current, launchDescriptor)) {
+          window.EJS_emulator.gameManager.loadState(new Uint8Array(current.state))
+          restoredRuntimeState = true
+        }
+      }
+    } catch (error) {
+      restoreError = error
+      console.error('[emulator-snapshot] selected state could not be loaded', error)
     }
-    if (!restoredRuntimeState) {
-      await Promise.resolve(window.EJS_emulator.gameManager.restart?.())
-      await cloudSaveSynchronizer.restore(window.EJS_emulator.gameManager)
+    if (selectedCandidateId && restoredRuntimeState) snapshotTelemetry.info('restore-applied', { candidateId: selectedCandidateId, snapshotKind: selected?.kind, revision: selectedRevision })
+    if (selectedCandidateId && !restoredRuntimeState) {
+      snapshotTelemetry.error('restore-load-failed', { candidateId: selectedCandidateId, snapshotKind: selected?.kind, code: restoreError?.code ?? 'STATE_UNAVAILABLE', error: restoreError?.message ?? 'Selected state was unavailable or incompatible.' })
+      reportPlayerActionFailure('restore-state')
     }
+    try {
+      if (!restoredRuntimeState) {
+        await Promise.resolve(window.EJS_emulator.gameManager.restart?.())
+        if (closeRequested) return
+      }
+      const saveLoaded = await cloudSaveSynchronizer.restore(window.EJS_emulator.gameManager)
+      if (selectedCandidateId) snapshotTelemetry[saveLoaded ? 'info' : 'warn'](saveLoaded ? 'canonical-save-loaded' : 'canonical-save-missing', { candidateId: selectedCandidateId, snapshotKind: selected?.kind, saveRevision: cloudSaveSynchronizer.getRevision() })
+      if (saveLoaded === false && selectedCandidateId) {
+        cloudSaveSynchronizer.ignoreRuntimeStateSave(window.EJS_emulator.gameManager.getSaveFile?.())
+      }
+      if (saveLoaded === false && Math.max(savedSnapshot?.metadata?.saveRevision ?? 0, userSnapshot?.metadata?.saveRevision ?? 0) > 0) reportPlayerActionFailure('game-save-missing')
+    } catch (error) {
+      console.error('[save-pipeline] canonical game save could not be loaded', error)
+      reportPlayerActionFailure('game-save-load')
+      return
+    }
+    if (restoredRuntimeState) offerPolicy.recordRuntimeRestore()
+    if (closeRequested) return
+    setPlayerReady()
+    runtimeReady = true
+    if (restoreCandidates.length) window.EJS_emulator.play()
+    if (restoreChoice?.explicit && savedSnapshot && (!selectedCandidateId || restoredRuntimeState)) scheduleCloudRecoveryDeleteAfterChoice(savedSnapshot.revision)
     watchBatterySaveChanges()
-    cloudSaveInterval = window.setInterval(() => saveEmulatorState().catch(() => {}), 15000)
-    localRecoveryInterval = window.setInterval(() => void captureLocalRecovery(), 2_500)
-    void captureLocalRecovery()
+    cloudSaveInterval = window.setInterval(() => saveEmulatorState({ reasonCode: 'periodic-recovery' }).catch(error => snapshotTelemetry.error('automatic-capture-failed', { snapshotKind: 'cloud-recovery', code: error.code, error: error.message, status: error.status }, { repeating: true })), 15000)
+    localRecoveryInterval = window.setInterval(() => void captureLocalRecovery().catch(error => snapshotTelemetry.warn('automatic-capture-failed', { snapshotKind: 'local-recovery', code: error.code, error: error.message }, { repeating: true })), 2_500)
+    void captureLocalRecovery().catch(error => snapshotTelemetry.warn('automatic-capture-failed', { snapshotKind: 'local-recovery', code: error.code, error: error.message }, { repeating: true }))
     stopFrameProgressMonitor?.()
     if (clientDiagnostics) {
       stopFrameProgressMonitor = monitorEmulatorFrameProgress({
@@ -634,7 +916,6 @@ async function start() {
         report: clientDiagnostics.capture,
       })
     }
-    setPlayerReady()
   }
   const loader = document.createElement('script')
   loader.src = `${dataUrl}loader.js`
@@ -647,6 +928,7 @@ async function start() {
 }
 
 start().catch(error => {
+  snapshotTelemetry.error('startup-failed', { phase: 'initialization', code: error.code, error: error.message, status: error.status })
   loseLease()
   clientDiagnostics?.capture({ kind: 'emulator-failure', message: error.message, name: error.name, stack: error.stack })
   game.textContent = error.message

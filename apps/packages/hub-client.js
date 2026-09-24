@@ -387,6 +387,23 @@ export async function putEmulatorSnapshot(url, bundle, revision, lease) {
   return body
 }
 
+export async function deleteEmulatorSnapshot(url, revision, lease) {
+  if (!Number.isInteger(revision) || revision < 1) return false
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: { 'If-Match': `"${revision}"`, ...leaseHeaders(lease) },
+  })
+  if (response.status === 404) return false
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    const error = new Error(body.error || `Snapshot deletion failed (${response.status})`)
+    error.code = body.code
+    error.status = response.status
+    throw error
+  }
+  return true
+}
+
 function leaseHeaders(lease) {
   if (!lease) return {}
   return { 'X-Player-Session-Id': lease.sessionId, 'X-Player-Lease-Generation': String(lease.generation) }

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createCloudSaveSynchronizer } from './cloud-save-sync.mjs'
+import { observeEmulatorSaveFiles } from './emulator-save-events.mjs'
 
 test('uploads only when observed battery-save bytes change and exposes the acknowledged revision', async () => {
   const uploads = []
@@ -49,4 +50,65 @@ test('restores cloud bytes into the core save path before sync', async () => {
     { event: 'save.front.restore-started', context: { traceId: 'restore-trace-1', revision: 4, sizeBytes: 2 } },
     { event: 'save.front.restore-completed', context: { traceId: 'restore-trace-1', revision: 4, sizeBytes: 2 } },
   ])
+})
+
+test('runtime state bytes never replace the canonical save through polling or close flush', async () => {
+  const uploads = []
+  const synchronizer = createCloudSaveSynchronizer({
+    load: async () => ({ bytes: new Uint8Array([9]), revision: 4 }),
+    upload: async (bytes, expectedRevision) => { uploads.push({ bytes: [...bytes], expectedRevision }); return { revision: 5 } },
+    hash: async bytes => [...bytes].join(','),
+  })
+  await synchronizer.load()
+  synchronizer.ignoreRuntimeStateSave(new Uint8Array([2]))
+  assert.equal(await synchronizer.syncBytes(new Uint8Array([2])), false)
+  assert.equal(await synchronizer.syncBytes(new Uint8Array([2])), false)
+  assert.deepEqual(uploads, [])
+  assert.equal(synchronizer.getRevision(), 4)
+  assert.equal(await synchronizer.syncBytes(new Uint8Array([3])), true)
+  assert.deepEqual(uploads, [{ bytes: [3], expectedRevision: 4 }])
+  assert.equal(await synchronizer.syncBytes(new Uint8Array([2])), false)
+  assert.deepEqual(uploads, [{ bytes: [3], expectedRevision: 4 }])
+})
+
+test('save observation after a runtime restore does not upload until game save bytes change', async () => {
+  const uploads = []
+  const synchronizer = createCloudSaveSynchronizer({
+    load: async () => ({ bytes: new Uint8Array([9]), revision: 4 }),
+    upload: async bytes => { uploads.push([...bytes]); return { revision: 5 } },
+    hash: async bytes => [...bytes].join(','),
+  })
+  await synchronizer.load()
+  let onSave
+  const emulator = { on(name, listener) { assert.equal(name, 'saveSaveFiles'); onSave = listener } }
+  observeEmulatorSaveFiles(emulator, bytes => synchronizer.syncBytes(bytes))
+  const snapshotBytes = new Uint8Array([2])
+  onSave(snapshotBytes)
+  synchronizer.ignoreRuntimeStateSave(snapshotBytes)
+  await new Promise(resolve => setImmediate(resolve))
+  onSave(new Uint8Array([2]))
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(uploads, [])
+  onSave(new Uint8Array([3]))
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(uploads, [[3]])
+  onSave(new Uint8Array([2]))
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(uploads, [[3]])
+})
+
+test('an unreadable runtime save blocks upload after an uncertain state load', async () => {
+  const uploads = []
+  const synchronizer = createCloudSaveSynchronizer({
+    load: async () => ({ bytes: new Uint8Array([9]), revision: 4 }),
+    upload: async bytes => { uploads.push([...bytes]); return { revision: 5 } },
+    hash: async bytes => [...bytes].join(','),
+  })
+  await synchronizer.load()
+  synchronizer.blockRuntimeSaveSync()
+  assert.equal(await synchronizer.syncBytes(new Uint8Array([2])), false)
+  assert.deepEqual(uploads, [])
+  synchronizer.ignoreRuntimeStateSave(new Uint8Array([2]))
+  assert.equal(await synchronizer.syncBytes(new Uint8Array([3])), true)
+  assert.deepEqual(uploads, [[3]])
 })

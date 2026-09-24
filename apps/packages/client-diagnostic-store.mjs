@@ -1,5 +1,6 @@
 const sources = new Set(['hub', 'player'])
-const kinds = new Set(['uncaught-error', 'unhandled-rejection', 'network-error', 'emulator-failure', 'emulator-frame-stall', 'emulator-lifecycle', 'odds-manipulator'])
+const kinds = new Set(['uncaught-error', 'unhandled-rejection', 'network-error', 'emulator-failure', 'emulator-frame-stall', 'emulator-lifecycle', 'odds-manipulator', 'snapshot-flow'])
+const snapshotKinds = new Set(['local-recovery', 'cloud-recovery', 'user-state'])
 const maximumMessageLength = 512
 const maximumStackLength = 2_048
 const maximumUserAgentLength = 512
@@ -48,6 +49,22 @@ export function normalizeClientDiagnostic(input, now = () => new Date().toISOStr
   addOptionalBoolean(event, 'managerReady', input.managerReady)
   addOptionalBoolean(event, 'pending', input.pending)
   addActiveProfiles(event, input.activeProfiles)
+  if (kind === 'snapshot-flow') {
+    if (typeof input.message !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(input.message)) throw invalidDiagnostic()
+    if (input.level !== undefined && !['info', 'warn', 'error'].includes(input.level)) throw invalidDiagnostic()
+    addString(event, 'level', input.level, 5)
+    if (input.snapshotKind !== undefined && !snapshotKinds.has(input.snapshotKind)) throw invalidDiagnostic()
+    addString(event, 'snapshotKind', input.snapshotKind, 32)
+    addString(event, 'candidateId', input.candidateId, 128)
+    addString(event, 'reason', input.reason, 128)
+    addString(event, 'phase', input.phase, 64)
+    addString(event, 'code', input.code, 128)
+    addString(event, 'error', input.error, 512)
+    addOptionalNonNegativeInteger(event, 'revision', input.revision)
+    addOptionalNonNegativeInteger(event, 'saveRevision', input.saveRevision)
+    addOptionalNonNegativeInteger(event, 'candidateCount', input.candidateCount)
+    addOptionalNonNegativeInteger(event, 'status', input.status)
+  }
   return event
 }
 

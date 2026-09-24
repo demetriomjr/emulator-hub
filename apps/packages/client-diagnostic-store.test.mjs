@@ -37,3 +37,20 @@ test('rejects diagnostics outside the narrow public contract', () => {
   assert.throws(() => store.append({ sessionId: 'x', source: 'unknown', kind: 'error' }), { code: 'CLIENT_DIAGNOSTIC_INVALID' })
   assert.throws(() => store.append({ sessionId: 'x', source: 'hub', kind: 'error', message: 'x'.repeat(513) }), { code: 'CLIENT_DIAGNOSTIC_INVALID' })
 })
+
+test('stores allowlisted snapshot decisions without accepting state or save contents', () => {
+  const store = createClientDiagnosticStore({ now: () => '2026-09-24T00:00:00.000Z' })
+  assert.deepEqual(store.append({
+    sessionId: 'session-1', source: 'player', kind: 'snapshot-flow', level: 'warn', message: 'restore-choice',
+    gameId: 'game', profileId: 'profile', snapshotKind: 'cloud-recovery', candidateId: 'remote:3',
+    revision: 3, saveRevision: 2, candidateCount: 2, reason: 'user-selected', phase: 'startup',
+    code: 'LOAD_FAILED', error: 'invalid state', status: 409,
+    state: [1, 2], save: [3, 4], originInstallationId: 'secret',
+  }), {
+    at: '2026-09-24T00:00:00.000Z', sessionId: 'session-1', source: 'player', kind: 'snapshot-flow', level: 'warn', message: 'restore-choice',
+    gameId: 'game', profileId: 'profile', snapshotKind: 'cloud-recovery', candidateId: 'remote:3',
+    revision: 3, saveRevision: 2, candidateCount: 2, reason: 'user-selected', phase: 'startup',
+    code: 'LOAD_FAILED', error: 'invalid state', status: 409,
+  })
+  assert.throws(() => store.append({ sessionId: 'session-1', source: 'player', kind: 'snapshot-flow', message: 'x', snapshotKind: 'wrong' }), { code: 'CLIENT_DIAGNOSTIC_INVALID' })
+})

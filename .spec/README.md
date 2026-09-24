@@ -1,5 +1,7 @@
 # Specifications
 
+- [Spec 058 — Current snapshot system audit and save-then-close plan](058-current-snapshot-system-audit.md): current frontend/backend restore decisions, condition matrix, observed gaps, and the technical plan for suppressing unnecessary restore prompts after a confirmed save.
+
 - [Spec 057 — Player picker and runtime preferences](057-player-picker-and-runtime-preferences.md): show ordered ROM cover tiles and profiles when adding an emulator, persist Fast Forward enabled state, reorder L2/R2 actions, and reset the odds manipulator on each emulator start.
 
 - [Spec 050 — Authentic GBA RTC clock provider](050-authentic-gba-rtc-clock.md): make the host-clock RTC path explicit, testable, and extensible without changing game RNG semantics.
@@ -52,6 +54,8 @@
 - [Spec 018 — Pokemon Hub save Box layout](018-pokemon-hub-save-box-layout.md): read-only Generation III Party and PC Box rendering through title-specific JSON layout profiles.
 
 This directory holds the project's specifications. Define the architecture, shared package contracts, application responsibilities, and feature acceptance criteria here before implementing them.
+
+- [Spec 059 — Canonical game save and snapshot independence](059-canonical-save-and-snapshot-independence.md): permanent `.sav` versus runtime-snapshot invariant, load order, and player-visible failure boundary.
 
 The initial direction is recorded in the root `AGENTS.md`.
 

@@ -79,10 +79,13 @@ test('replaces gamepad bindings without restarting a running emulator', () => {
 })
 
 test('player boot keeps backend controls authoritative and applies pre-start parent input', async () => {
-  const source = (await readFile(new URL('../frontend/src/player.js', import.meta.url), 'utf8')).replace(/^import .+\r?\n/gm, '')
+  const source = (await readFile(new URL('../frontend/src/player.js', import.meta.url), 'utf8'))
+    .replace(/^import .+\r?\n/gm, '')
+    .replace('import.meta.env.VITE_DEBUG', "'0'")
   const listeners = new Map()
   const calls = []
-  const parent = {}
+  const startupErrors = []
+  const parent = { postMessage() {} }
   const origin = 'http://localhost:5173'
   const bindings = { 8: { keyboard: 'z', gamepad: 'BUTTON_1' } }
   const window = {
@@ -98,10 +101,10 @@ test('player boot keeps backend controls authoritative and applies pre-start par
   }
   let loaded
   const loaderAdded = new Promise(resolve => { loaded = resolve })
-  const game = { querySelectorAll: () => [] }
+  const game = { querySelectorAll: () => [], addEventListener() {} }
   vm.runInNewContext(source, {
     window, location: { origin, search: '?id=game&profileId=profile&sessionId=session&leaseGeneration=1' }, URLSearchParams, URL, Blob, Uint8Array,
-    document: { getElementById: () => game, createElement: () => ({}), body: { appendChild: loaded } },
+    document: { getElementById: () => game, createElement: () => ({ style: {} }), body: { append() {}, appendChild: loaded } },
     MutationObserver: class { observe() {} },
     crypto: { subtle: { digest: async () => Uint8Array.from([227, 176, 196, 66, 152, 252, 28, 20, 154, 251, 244, 200, 153, 111, 185, 36, 39, 174, 65, 228, 100, 155, 147, 76, 164, 149, 153, 27, 120, 82, 184, 85]).buffer } },
     fetch: async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) }),
@@ -115,6 +118,12 @@ test('player boot keeps backend controls authoritative and applies pre-start par
     createCloudSaveSynchronizer: () => ({ load: async () => null, restore: () => false, sync: async () => false }),
     restoreSnapshotState: () => false,
     getClientDiagnosticsOptions: () => ({ enabled: false, sessionId: null }),
+    getInstallationIdentity: () => ({ comparisonId: 'test-installation' }),
+    createSnapshotTelemetry: () => ({ info() {}, warn() {}, error: (...args) => startupErrors.push(args) }),
+    createSnapshotOfferPolicy: () => ({ recordInput() {}, recordRuntimeRestore() {} }),
+    snapshotUrlForKind: url => url,
+    sortRestoreCandidates: candidates => candidates,
+    createOddsManipulatorClock: () => ({ install() {} }),
     createLocalRuntimeRecoveryStore: () => ({ markRuntimeBreak() {}, get: async () => null, put: async () => {}, clear() {} }),
     getEmulatorAudioContext: () => null,
     installAudioResumeOnUserGesture: () => () => {},
@@ -122,13 +131,14 @@ test('player boot keeps backend controls authoritative and applies pre-start par
     instrumentEmulatorLifecycle: () => () => {},
     createEmulatorGamepadInput,
   })
-  await loaderAdded
+  await Promise.race([loaderAdded, new Promise((_, reject) => setTimeout(() => reject(new Error(`Player loader not attached: ${JSON.stringify(startupErrors)}`)), 100))])
+  assert.deepEqual(startupErrors, [])
   assert.equal(window.EJS_disableLocalStorage, true)
   assert.equal(window.EJS_defaultControls[0], bindings)
   const receive = (source, eventOrigin, labels) => listeners.get('message')({ source, origin: eventOrigin, data: { type: 'emulator-hub:gamepad', bindings: labels } })
   receive(parent, origin, ['BUTTON_1'])
   assert.deepEqual(calls, [])
-  window.EJS_onGameStart()
+  await window.EJS_onGameStart()
   assert.deepEqual(calls, ['stop', [0, 8, 0], [0, 8, 1]])
   calls.length = 0
   receive({}, origin, [])

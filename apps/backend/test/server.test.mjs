@@ -271,6 +271,181 @@ describe('hub backend HTTP contract', () => {
     assert.equal('save' in decoded, false)
   })
 
+  test('deletes a remote restore candidate only with its revision and active lease, preserving the game save', async () => {
+    const rom = Buffer.from('delete snapshot game')
+    const { baseUrl } = await startFixture([{ id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom) }], { 'pokemon-red.gb': rom })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Red' }) }))
+    const lease = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'delete-session')
+    const headers = { Cookie: lease.cookie, 'X-Player-Session-Id': 'delete-session', 'X-Player-Lease-Generation': String(lease.body.leaseGeneration) }
+    const snapshotUrl = `${baseUrl}${lease.body.snapshotUrl}`
+    const saveUrl = `${baseUrl}${lease.body.saveUrl}`
+    const saveBytes = new Uint8Array([4, 5, 6])
+    assert.equal((await fetch(saveUrl, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/octet-stream', 'If-Match': '*' }, body: saveBytes })).status, 201)
+    const snapshot = await encodeSnapshotBundle({ metadata: { profileId: profile.id, gameId: 'pokemon-red', core: 'gambatte', romSha256: sha256(rom), runtimeId: lease.body.runtimeId, saveRevision: 1 }, state: new Uint8Array([7, 8]) })
+    assert.equal((await fetch(snapshotUrl, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/vnd.emulator-hub.snapshot', 'If-Match': '*' }, body: snapshot })).status, 201)
+    assert.equal((await fetch(snapshotUrl, { method: 'DELETE', headers })).status, 428)
+    assert.equal((await fetch(snapshotUrl, { method: 'DELETE', headers: { ...headers, 'If-Match': '"2"' } })).status, 412)
+    assert.equal((await fetch(snapshotUrl, { method: 'DELETE', headers: { ...headers, 'If-Match': '"1"', 'X-Player-Lease-Generation': String(lease.body.leaseGeneration + 1) } })).status, 410)
+    assert.equal((await fetch(snapshotUrl, { headers })).status, 200)
+    assert.equal((await fetch(snapshotUrl, { method: 'DELETE', headers: { ...headers, 'If-Match': '"1"' } })).status, 204)
+    assert.equal((await fetch(snapshotUrl, { headers })).status, 404)
+    assert.deepEqual([...new Uint8Array(await (await fetch(saveUrl, { headers })).arrayBuffer())], [...saveBytes])
+  })
+
+  test('keeps user states separate from cloud recovery across capture, deletion and lease release', async () => {
+    const rom = Buffer.from('typed state fixture')
+    const { baseUrl } = await startFixture([{ id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom) }], { 'pokemon-red.gb': rom })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Red' }) }))
+    const lease = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'typed-session')
+    const headers = { Cookie: lease.cookie, 'X-Player-Session-Id': 'typed-session', 'X-Player-Lease-Generation': String(lease.body.leaseGeneration) }
+    const cloudUrl = `${baseUrl}${lease.body.snapshotUrl}`
+    const userUrl = `${cloudUrl}?kind=user-state`
+    const body = (kind, reasonCode, value) => encodeSnapshotBundle({ metadata: { profileId: profile.id, gameId: 'pokemon-red', core: 'gambatte', romSha256: sha256(rom), runtimeId: lease.body.runtimeId, saveRevision: 0, kind, reasonCode, originInstallationId: 'installation-123', capturedAt: '2000-01-01T00:00:00.000Z' }, state: new Uint8Array([value]) })
+    const put = (url, bytes) => fetch(url, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/vnd.emulator-hub.snapshot', 'If-Match': '*' }, body: bytes })
+    assert.equal((await put(userUrl, await body('user-state', 'user-request', 7))).status, 201)
+    assert.equal((await put(cloudUrl, await body('cloud-recovery', 'periodic-recovery', 9))).status, 201)
+    const userRead = await fetch(userUrl, { headers })
+    assert.equal(userRead.status, 200)
+    const decoded = await decodeSnapshotBundle(new Uint8Array(await userRead.arrayBuffer()))
+    assert.equal(decoded.metadata.kind, 'user-state')
+    assert.equal(decoded.metadata.reasonCode, 'user-request')
+    assert.equal(decoded.metadata.originInstallationId, 'installation-123')
+    assert.ok(Number.isFinite(Date.parse(decoded.metadata.capturedAt)))
+    assert.notEqual(decoded.metadata.capturedAt, '2000-01-01T00:00:00.000Z')
+    assert.deepEqual([...decoded.state], [7])
+    assert.equal((await fetch(cloudUrl, { method: 'DELETE', headers: { ...headers, 'If-Match': '"1"' } })).status, 204)
+    assert.equal((await fetch(userUrl, { headers })).status, 200)
+    assert.equal((await put(cloudUrl, await body('cloud-recovery', 'periodic-recovery', 8))).status, 201)
+    const replacementRead = await fetch(cloudUrl, { headers })
+    assert.equal(replacementRead.headers.get('etag'), '"2"')
+    assert.equal((await fetch(cloudUrl, { method: 'DELETE', headers: { ...headers, 'If-Match': '"1"' } })).status, 412)
+    assert.deepEqual([...(await decodeSnapshotBundle(new Uint8Array(await (await fetch(cloudUrl, { headers })).arrayBuffer()))).state], [8])
+    assert.equal((await fetch(`${baseUrl}${lease.body.saveUrl}`, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/octet-stream', 'If-Match': '*' }, body: new Uint8Array([4]) })).status, 201)
+    assert.equal((await fetch(`${baseUrl}/api/player-leases/typed-session`, { method: 'DELETE', headers: { Cookie: lease.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: profile.id, gameId: 'pokemon-red', generation: lease.body.leaseGeneration }) })).status, 200)
+    const next = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'typed-next', lease.cookie)
+    const nextHeaders = { Cookie: lease.cookie, 'X-Player-Session-Id': 'typed-next', 'X-Player-Lease-Generation': String(next.body.leaseGeneration) }
+    assert.equal((await fetch(userUrl, { headers: nextHeaders })).status, 200)
+    assert.equal((await fetch(cloudUrl, { headers: nextHeaders })).status, 404)
+    assert.equal((await fetch(`${cloudUrl}?kind=unknown`, { headers: nextHeaders })).status, 400)
+  })
+
+  test('logs snapshot decisions and failures without logging every periodic capture', async () => {
+    const rom = Buffer.from('snapshot observability fixture')
+    const events = []
+    const logger = Object.fromEntries(['info', 'warn', 'error'].map(level => [level, (event, context) => events.push({ level, event, context })]))
+    const { baseUrl } = await startFixture([{ id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom) }], { 'pokemon-red.gb': rom }, {}, { savePipelineLogger: logger })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Red' }) }))
+    const lease = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'snapshot-observe')
+    const headers = { Cookie: lease.cookie, 'X-Player-Session-Id': 'snapshot-observe', 'X-Player-Lease-Generation': String(lease.body.leaseGeneration) }
+    const cloudUrl = `${baseUrl}${lease.body.snapshotUrl}`
+    const userUrl = `${cloudUrl}?kind=user-state`
+    const bundle = (kind, value) => encodeSnapshotBundle({ metadata: { profileId: profile.id, gameId: 'pokemon-red', core: 'gambatte', romSha256: sha256(rom), runtimeId: lease.body.runtimeId, saveRevision: 0, kind, reasonCode: kind === 'user-state' ? 'user-request' : 'periodic-recovery' }, state: new Uint8Array([value]) })
+    assert.equal((await fetch(cloudUrl, { headers })).status, 404)
+    assert.equal((await fetch(cloudUrl, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/vnd.emulator-hub.snapshot', 'If-Match': '*' }, body: await bundle('cloud-recovery', 1) })).status, 201)
+    assert.equal((await fetch(cloudUrl, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/vnd.emulator-hub.snapshot', 'If-Match': '"1"' }, body: await bundle('cloud-recovery', 2) })).status, 200)
+    assert.equal((await fetch(userUrl, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/vnd.emulator-hub.snapshot', 'If-Match': '*' }, body: await bundle('cloud-recovery', 8) })).status, 400)
+    assert.equal((await fetch(userUrl, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/vnd.emulator-hub.snapshot', 'If-Match': '*' }, body: await bundle('user-state', 3) })).status, 201)
+    assert.equal((await fetch(cloudUrl, { headers })).status, 200)
+    assert.equal((await fetch(cloudUrl, { method: 'DELETE', headers: { ...headers, 'If-Match': '"1"' } })).status, 412)
+    assert.equal((await fetch(cloudUrl, { method: 'DELETE', headers: { ...headers, 'If-Match': '"2"' } })).status, 204)
+    assert.equal((await fetch(cloudUrl, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/vnd.emulator-hub.snapshot', 'If-Match': '*' }, body: await bundle('cloud-recovery', 4) })).status, 201)
+    assert.equal((await fetch(`${baseUrl}/api/player-leases/snapshot-observe`, { method: 'DELETE', headers: { Cookie: lease.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: profile.id, gameId: 'pokemon-red', generation: lease.body.leaseGeneration }) })).status, 200)
+    assert.deepEqual(events.filter(item => item.event.startsWith('snapshot.backend.')).map(({ level, event }) => [level, event]), [
+      ['warn', 'snapshot.backend.put-rejected'],
+      ['info', 'snapshot.backend.user-state-persisted'],
+      ['info', 'snapshot.backend.candidate-available'],
+      ['warn', 'snapshot.backend.delete-rejected'],
+      ['info', 'snapshot.backend.deleted'],
+      ['info', 'snapshot.backend.release-deleted'],
+    ])
+    assert.ok(events.every(item => !('state' in item.context) && !('save' in item.context)))
+  })
+
+  test('a failing snapshot logger never changes snapshot HTTP or lease outcomes', async () => {
+    const rom = Buffer.from('logger failure fixture')
+    const throwLog = () => { throw new Error('logger unavailable') }
+    const { baseUrl } = await startFixture([{ id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom) }], { 'pokemon-red.gb': rom }, {}, { savePipelineLogger: { info: throwLog, warn: throwLog, error: throwLog } })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Red' }) }))
+    const lease = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'logger-failure')
+    const headers = { Cookie: lease.cookie, 'X-Player-Session-Id': 'logger-failure', 'X-Player-Lease-Generation': String(lease.body.leaseGeneration) }
+    const url = `${baseUrl}${lease.body.snapshotUrl}`
+    const bundle = await encodeSnapshotBundle({ metadata: { profileId: profile.id, gameId: 'pokemon-red', core: 'gambatte', romSha256: sha256(rom), runtimeId: lease.body.runtimeId, saveRevision: 0, kind: 'cloud-recovery', reasonCode: 'periodic-recovery' }, state: new Uint8Array([3]) })
+    assert.equal((await fetch(url, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/vnd.emulator-hub.snapshot', 'If-Match': '*' }, body: bundle })).status, 201)
+    assert.equal((await fetch(url, { headers })).status, 200)
+    assert.equal((await fetch(`${baseUrl}/api/player-leases/logger-failure`, { method: 'DELETE', headers: { Cookie: lease.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: profile.id, gameId: 'pokemon-red', generation: lease.body.leaseGeneration }) })).status, 200)
+  })
+
+  test('releasing an unopened restore chooser preserves older cloud recovery for later selection', async () => {
+    const rom = Buffer.from('deferred restore fixture')
+    const { baseUrl } = await startFixture([{ id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom) }], { 'pokemon-red.gb': rom })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Red' }) }))
+    const lease = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'deferred-restore')
+    const headers = { Cookie: lease.cookie, 'X-Player-Session-Id': 'deferred-restore', 'X-Player-Lease-Generation': String(lease.body.leaseGeneration) }
+    const snapshotUrl = `${baseUrl}${lease.body.snapshotUrl}`
+    const saveUrl = `${baseUrl}${lease.body.saveUrl}`
+    const snapshot = await encodeSnapshotBundle({ metadata: { profileId: profile.id, gameId: 'pokemon-red', core: 'gambatte', romSha256: sha256(rom), runtimeId: lease.body.runtimeId, saveRevision: 0, kind: 'cloud-recovery', reasonCode: 'periodic-recovery' }, state: new Uint8Array([7]) })
+    assert.equal((await fetch(snapshotUrl, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/vnd.emulator-hub.snapshot', 'If-Match': '*' }, body: snapshot })).status, 201)
+    assert.equal((await fetch(saveUrl, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/octet-stream', 'If-Match': '*' }, body: new Uint8Array([3]) })).status, 201)
+    assert.equal((await fetch(`${baseUrl}/api/player-leases/deferred-restore`, { method: 'DELETE', headers: { Cookie: lease.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: profile.id, gameId: 'pokemon-red', generation: lease.body.leaseGeneration, preserveRecovery: true }) })).status, 200)
+    const later = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'deferred-later', lease.cookie)
+    const laterHeaders = { Cookie: lease.cookie, 'X-Player-Session-Id': 'deferred-later', 'X-Player-Lease-Generation': String(later.body.leaseGeneration) }
+    assert.deepEqual([...(await decodeSnapshotBundle(new Uint8Array(await (await fetch(snapshotUrl, { headers: laterHeaders })).arrayBuffer()))).state], [7])
+    assert.deepEqual([...new Uint8Array(await (await fetch(saveUrl, { headers: laterHeaders })).arrayBuffer())], [3])
+  })
+
+  test('normal lease release removes automatic cloud recovery even at the current save revision', async () => {
+    const rom = Buffer.from('suppressed snapshot fixture')
+    const { baseUrl } = await startFixture([{ id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom) }], { 'pokemon-red.gb': rom })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Red' }) }))
+    const first = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'suppressed-one')
+    const headers = { Cookie: first.cookie, 'X-Player-Session-Id': 'suppressed-one', 'X-Player-Lease-Generation': String(first.body.leaseGeneration) }
+    const snapshotUrl = `${baseUrl}${first.body.snapshotUrl}`
+    const snapshotBody = saveRevision => encodeSnapshotBundle({
+      metadata: { profileId: profile.id, gameId: 'pokemon-red', core: 'gambatte', romSha256: sha256(rom), runtimeId: first.body.runtimeId, saveRevision, promptOnLaunch: false },
+      state: new Uint8Array([7, 8]),
+    })
+    const putSnapshot = async (saveRevision, ifMatch = '*') => fetch(snapshotUrl, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/vnd.emulator-hub.snapshot', 'If-Match': ifMatch }, body: await snapshotBody(saveRevision) })
+
+    const missingSave = await putSnapshot(0)
+    assert.equal(missingSave.status, 409)
+    assert.equal((await missingSave.json()).code, 'SNAPSHOT_SAVE_REVISION_MISMATCH')
+    const saveBytes = new Uint8Array([4, 5, 6])
+    const saveWrite = await fetch(`${baseUrl}${first.body.saveUrl}`, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/octet-stream', 'If-Match': '*' }, body: saveBytes })
+    assert.equal(saveWrite.status, 201)
+    assert.equal((await putSnapshot(0)).status, 409)
+    assert.equal((await putSnapshot(1)).status, 201)
+    const release = await fetch(`${baseUrl}/api/player-leases/suppressed-one`, { method: 'DELETE', headers: { Cookie: first.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: profile.id, gameId: 'pokemon-red', generation: first.body.leaseGeneration }) })
+    assert.equal(release.status, 200)
+
+    const second = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'suppressed-two', first.cookie)
+    const secondHeaders = { Cookie: first.cookie, 'X-Player-Session-Id': 'suppressed-two', 'X-Player-Lease-Generation': String(second.body.leaseGeneration) }
+    const read = await fetch(snapshotUrl, { headers: secondHeaders })
+    assert.equal(read.status, 404)
+    const save = await fetch(`${baseUrl}${second.body.saveUrl}`, { headers: secondHeaders })
+    assert.deepEqual([...new Uint8Array(await save.arrayBuffer())], [...saveBytes])
+  })
+
+  test('lease release succeeds when automatic cloud recovery cleanup fails', async () => {
+    const rom = Buffer.from('cleanup failure fixture')
+    const warnings = []
+    const snapshotStore = {
+      async get() { return { metadata: { revision: 1, fenceGeneration: 1 } } },
+      async advanceFence() {},
+      async delete() { throw new Error('snapshot cleanup unavailable') },
+    }
+    const { baseUrl } = await startFixture([{ id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom) }], { 'pokemon-red.gb': rom }, {}, {
+      snapshotStore,
+      savePipelineLogger: { info() {}, warn: (event, context) => warnings.push({ event, context }), error() {} },
+    })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Red' }) }))
+    const first = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'cleanup-one')
+    const release = await fetch(`${baseUrl}/api/player-leases/cleanup-one`, { method: 'DELETE', headers: { Cookie: first.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: profile.id, gameId: 'pokemon-red', generation: first.body.leaseGeneration }) })
+    assert.equal(release.status, 200)
+    const second = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'cleanup-two', first.cookie)
+    assert.equal(second.response.status, 200)
+    assert.equal(warnings.length, 1)
+  })
+
   test('simulates save events, snapshot upload, and close-time revision reconciliation across HTTP endpoints', async () => {
     const rom = Buffer.from('save and snapshot flow fixture')
     const backendEvents = []
@@ -360,11 +535,7 @@ describe('hub backend HTTP contract', () => {
     thirdLease.cookie = firstLease.cookie
     headers = leaseHeaders(thirdLease)
     const retainedSnapshotResponse = await fetch(`${baseUrl}${thirdLease.body.snapshotUrl}`, { headers })
-    assert.equal(retainedSnapshotResponse.status, 200, 'close must retain a snapshot at the current save revision')
-    const retainedSnapshot = await decodeSnapshotBundle(new Uint8Array(await retainedSnapshotResponse.arrayBuffer()))
-    assert.deepEqual([...retainedSnapshot.state], [71, 72, 73])
-    assert.equal(retainedSnapshot.metadata.saveRevision, 2)
-    assert.equal('save' in retainedSnapshot, false)
+    assert.equal(retainedSnapshotResponse.status, 404, 'normal close removes automatic recovery even at the current save revision')
   })
 
   test('fences a stale player session and rejects a foreign device while the lease is alive', async () => {
@@ -1131,6 +1302,20 @@ describe('hub backend HTTP contract', () => {
     })
     assert.equal(updated.status, 200)
     assert.deepEqual(await jsonResponse(updated), { revision: 2, sha256: sha256(changedSave) })
+  })
+
+  test('forwards scoped frontend snapshot failures to the backend container logger', async () => {
+    const logged = []
+    const logger = Object.fromEntries(['info', 'warn', 'error'].map(level => [level, (event, context) => logged.push({ level, event, context })]))
+    const { baseUrl } = await startFixture([], {}, {}, { savePipelineLogger: logger })
+    const response = await fetch(`${baseUrl}/api/debug/client-events`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: 'session-1', source: 'player', kind: 'snapshot-flow', level: 'error', message: 'restore-load-failed', gameId: 'game', profileId: 'profile', snapshotKind: 'cloud-recovery', candidateId: 'remote:4', revision: 4, code: 'LOAD_FAILED', error: 'invalid state', state: [7, 8] }),
+    })
+    assert.equal(response.status, 204)
+    assert.deepEqual(logged.map(({ level, event }) => [level, event]), [['error', 'snapshot.front.restore-load-failed']])
+    assert.equal(logged[0].context.candidateId, 'remote:4')
+    assert.equal('state' in logged[0].context, false)
   })
 
   test('traces a binary save PUT from ingress through persistence and response without logging save bytes', async () => {

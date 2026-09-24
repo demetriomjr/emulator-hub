@@ -8,13 +8,15 @@ import { groupGamesByLayout } from '../../packages/hub-layout.mjs'
 import { getProfilePickerPlacement } from '../../packages/profile-picker-placement.mjs'
 import { appendClientDiagnosticsParameters, createClientDiagnostics, getClientDiagnosticsOptions } from '../../packages/client-diagnostics.mjs'
 import { createMultiSaveCloseCoordinator } from '../../packages/multi-save-close-coordinator.mjs'
-import { closePlayerAfterSaveAttempts } from '../../packages/player-close.mjs'
 import { isMobileLandscapeViewport, isNarrowPortraitViewport } from '../../packages/mobile-viewport.mjs'
 import { shouldReloadForFrontendRevision } from '../../packages/frontend-revision.mjs'
 import { readFastForwardSpeed } from '../../packages/fast-forward-preference.mjs'
 import { createLocalRuntimeRecoveryStore } from '../../packages/local-runtime-recovery-store.mjs'
+import { canReconcileLateSnapshotDelete, createSnapshotDeleteWatchdog, restorePromptAfterChoiceTimeout, restorePromptAfterDeleteTimeout } from '../../packages/snapshot-restore-routing.mjs'
 import { createPlayerTriggerActions, playerTriggerActionOptions } from '../../packages/player-trigger-actions.mjs'
 import { createOddsManipulatorSync } from '../../packages/odds-manipulator-sync.mjs'
+import { describeRestoreCandidate } from './restore-candidate-view.mjs'
+import { createSnapshotTelemetry } from '../../packages/snapshot-telemetry.mjs'
 import hubLayout from './hub-layout.json'
 import './styles.css'
 
@@ -49,9 +51,21 @@ const triggerControls = Object.freeze({
 })
 
 const fastForwardSpeeds = Object.freeze([1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5])
+const playerActionFailureMessages = Object.freeze({
+  'manual-save': 'Não foi possível salvar o estado.',
+  'manual-load': 'Não foi possível carregar o estado salvo.',
+  'restore-state': 'Não foi possível restaurar o estado escolhido.',
+  'game-save-load': 'Não foi possível carregar o save do jogo.',
+  'game-save-missing': 'O save do jogo esperado para este perfil não foi encontrado.',
+})
 const MAX_PLAYER_INSTANCES = 6
 const configuredPlayerFrames = new WeakSet()
 const localRecoveryStore = createLocalRuntimeRecoveryStore()
+
+function reportHubSnapshot(session, level, event, details = {}) {
+  if (!session) return
+  createSnapshotTelemetry({ browser: window, source: 'hub', sessionId: session.sessionId, gameId: session.gameId, profileId: session.profileId })[level](event, details)
+}
 const antTheme = {
   token: {
     colorPrimary: '#22b36f',
@@ -96,6 +110,7 @@ function playerFrameUrl(session) {
     fastForwardSpeed: String(session.initialFastForwardSpeed),
     restoreRecovery: session.restoreRecovery ? '1' : '0',
     localRecoveryPrompt: session.localRecoveryPrompt ? '1' : '0',
+    ...(session.localRecoveryPrompt?.candidateId ? { localRecoveryCandidateId: session.localRecoveryPrompt.candidateId } : {}),
   }), clientDiagnosticsOptions)
   return `/player.html?${parameters}`
 }
@@ -128,18 +143,33 @@ function TriggerBinding({ trigger, profile, captureTarget, onCapture }) {
   </div>
 }
 
-function SnapshotRestorePrompt({ request, onRestore, onContinue }) {
-  const local = request.kind === 'local-recovery'
+function SnapshotRestorePrompt({ request, onRestore, onContinue, onDelete }) {
   const ready = Boolean(request.requestId)
+  const [confirmingDelete, setConfirmingDelete] = useState(null)
+  const candidates = request.candidates ?? []
   return <div className="snapshot-restore-overlay" role="dialog" aria-modal="true" aria-labelledby={`snapshot-restore-title-${request.sessionId}`}>
     <div className="snapshot-restore-card">
-      <h2 id={`snapshot-restore-title-${request.sessionId}`}>{local ? 'Recuperação local' : 'Snapshot salvo'}</h2>
-      <p>{local
-        ? (request.reason === 'runtime-break' ? 'O emulador foi interrompido. Restaurar a recuperação local?' : 'Há uma possível recuperação local. Restaurar?')
-        : 'Há um snapshot salvo para este perfil. Deseja restaurá-lo?'}</p>
+      <h2 id={`snapshot-restore-title-${request.sessionId}`}>Estados disponíveis</h2>
+      <p>Escolha um estado para restaurar ou continue pelo save do jogo.</p>
+      <div className="snapshot-restore-list">
+        {candidates.map(candidate => { const view = describeRestoreCandidate(candidate); return <section className="snapshot-restore-candidate" key={candidate.candidateId}>
+          <h3>{view.title}</h3>
+          <p>{view.reason} · {view.origin}</p>
+          <p>{view.capture}</p>
+          {view.saveFreshness && <p>{view.saveFreshness}</p>}
+          {view.gameTime && <p>{view.gameTime}</p>}
+          {confirmingDelete === candidate.candidateId && <p className="snapshot-restore-delete-confirmation">Excluir {view.title.toLowerCase()}? Esta ação não pode ser desfeita.</p>}
+          <div className="snapshot-restore-actions">
+            <button type="button" className="snapshot-restore-primary" disabled={!ready || request.deleting || request.resolving} onClick={() => onRestore(candidate.candidateId)}>Restaurar este estado</button>
+            <button type="button" className="snapshot-restore-delete" disabled={!ready || request.deleting || request.resolving} onClick={() => confirmingDelete === candidate.candidateId ? onDelete(candidate) : setConfirmingDelete(candidate.candidateId)}>{request.deleting && request.candidateId === candidate.candidateId ? 'Excluindo…' : confirmingDelete === candidate.candidateId ? 'Confirmar exclusão' : 'Excluir estado'}</button>
+            {confirmingDelete === candidate.candidateId && <button type="button" className="snapshot-restore-secondary" disabled={request.deleting || request.resolving} onClick={() => setConfirmingDelete(null)}>Cancelar</button>}
+          </div>
+        </section> })}
+      </div>
+      {request.deleteError && <p className="snapshot-restore-error" role="alert">{request.deleteError}</p>}
+      {request.choiceError && <p className="snapshot-restore-error" role="alert">{request.choiceError}</p>}
       <div className="snapshot-restore-actions">
-        <button type="button" className="snapshot-restore-secondary" disabled={!ready} onClick={onContinue}>Continuar sem restaurar</button>
-        <button type="button" className="snapshot-restore-primary" disabled={!ready} onClick={onRestore}>Restaurar</button>
+        <button type="button" className="snapshot-restore-secondary" disabled={!ready || request.deleting || request.resolving} onClick={onContinue}>{request.resolving ? 'Carregando…' : 'Continuar pelo save do jogo'}</button>
       </div>
     </div>
   </div>
@@ -194,6 +224,9 @@ function App() {
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [catalogError, setCatalogError] = useState('')
   const [activeSessions, setActiveSessions] = useState([])
+  const [focusedSessionId, setFocusedSessionId] = useState(null)
+  const [userStateAvailable, setUserStateAvailable] = useState({})
+  const [playerActionErrors, setPlayerActionErrors] = useState({})
   const [instancePicker, setInstancePicker] = useState(false)
   const [controlPanelOpen, setControlPanelOpen] = useState(false)
   const [controlDraft, setControlDraft] = useState(null)
@@ -222,6 +255,19 @@ function App() {
   const [profileError, setProfileError] = useState('')
   const [profileBusy, setProfileBusy] = useState(false)
   const [snapshotRestoreRequests, setSnapshotRestoreRequests] = useState({})
+  const snapshotRestoreRequestsRef = useRef(snapshotRestoreRequests)
+  const restoreChoiceTimersRef = useRef(new Map())
+  const snapshotDeleteWatchdogRef = useRef(null)
+  if (!snapshotDeleteWatchdogRef.current) snapshotDeleteWatchdogRef.current = createSnapshotDeleteWatchdog({
+    onTimeout: pending => {
+      const request = snapshotRestoreRequestsRef.current[pending.sessionId]
+      reportHubSnapshot(request && { ...request, sessionId: pending.sessionId }, 'warn', 'candidate-delete-timeout', { candidateId: pending.candidateId, snapshotKind: pending.kind, reason: 'iframe-no-response' })
+      const next = restorePromptAfterDeleteTimeout(snapshotRestoreRequestsRef.current, pending)
+      snapshotRestoreRequestsRef.current = next
+      setSnapshotRestoreRequests(next)
+    },
+  })
+  useEffect(() => { snapshotRestoreRequestsRef.current = snapshotRestoreRequests }, [snapshotRestoreRequests])
   const [error, setError] = useState('')
   const [installHelpOpen, setInstallHelpOpen] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
@@ -296,28 +342,96 @@ function App() {
     const receive = event => {
       if (event.origin !== window.location.origin) return
       if (event.data?.type === 'emulator-hub:snapshot-restore-request') {
-        if (typeof event.data.requestId !== 'string' || !['cloud-snapshot', 'local-recovery'].includes(event.data.kind)) return
+        if (typeof event.data.requestId !== 'string' || event.data.kind !== 'candidate-list' || !Array.isArray(event.data.candidates) || event.data.candidates.length === 0) return
         const frame = [...document.querySelectorAll('.player-cell iframe')].find(candidate => candidate.contentWindow === event.source)
         const session = activeSessions.find(candidate => frame?.closest('.player-cell')?.dataset.sessionId === candidate.sessionId)
         if (!session) return
         if (event.data.sessionId !== session.sessionId || event.data.gameId !== session.gameId || event.data.profileId !== session.profileId) return
+        clearRestoreChoiceTimer(session.sessionId)
         setSnapshotRestoreRequests(current => ({ ...current, [session.sessionId]: {
-          ...(current[session.sessionId] ?? {}),
           sessionId: session.sessionId,
           gameId: session.gameId,
           profileId: session.profileId,
           requestId: event.data.requestId,
-          kind: event.data.kind,
-          reason: current[session.sessionId]?.reason ?? session.localRecoveryPrompt?.reason,
+          candidates: event.data.candidates,
+          candidateId: null,
         } }))
         return
       }
-      if (event.data?.type === 'emulator-hub:snapshot-restore-timeout') {
-        setSnapshotRestoreRequests(current => {
-          const request = current[event.data.sessionId]
-          if (!request || request.requestId !== event.data.requestId) return current
-          const next = { ...current }; delete next[event.data.sessionId]; return next
-        })
+      if (event.data?.type === 'emulator-hub:user-state-availability') {
+        const frame = [...document.querySelectorAll('.player-cell iframe')].find(candidate => candidate.contentWindow === event.source)
+        const session = activeSessions.find(candidate => frame?.closest('.player-cell')?.dataset.sessionId === candidate.sessionId)
+        if (!session || event.data.sessionId !== session.sessionId || event.data.gameId !== session.gameId || event.data.profileId !== session.profileId || typeof event.data.available !== 'boolean') return
+        setUserStateAvailable(current => ({ ...current, [session.sessionId]: event.data.available }))
+        return
+      }
+      if (event.data?.type === 'emulator-hub:player-action-failed') {
+        const frame = [...document.querySelectorAll('.player-cell iframe')].find(candidate => candidate.contentWindow === event.source)
+        const session = activeSessions.find(candidate => frame?.closest('.player-cell')?.dataset.sessionId === candidate.sessionId)
+        if (!session || event.data.sessionId !== session.sessionId || event.data.gameId !== session.gameId || event.data.profileId !== session.profileId) return
+        const message = playerActionFailureMessages[event.data.action]
+        if (!message) return
+        setPlayerActionErrors(current => ({ ...current, [session.sessionId]: [...(current[session.sessionId] ?? []), message].slice(-3) }))
+        return
+      }
+      if (event.data?.type === 'emulator-hub:player-focused') {
+        const frame = [...document.querySelectorAll('.player-cell iframe')].find(candidate => candidate.contentWindow === event.source)
+        const session = activeSessions.find(candidate => frame?.closest('.player-cell')?.dataset.sessionId === candidate.sessionId)
+        if (session && event.data.sessionId === session.sessionId && event.data.gameId === session.gameId && event.data.profileId === session.profileId) setFocusedSessionId(session.sessionId)
+        return
+      }
+      if (event.data?.type === 'emulator-hub:snapshot-restore-settled' || event.data?.type === 'emulator-hub:snapshot-restore-stale') {
+        const frame = [...document.querySelectorAll('.player-cell iframe')].find(candidate => candidate.contentWindow === event.source)
+        const session = activeSessions.find(candidate => frame?.closest('.player-cell')?.dataset.sessionId === candidate.sessionId)
+        if (!session || event.data.sessionId !== session.sessionId || event.data.gameId !== session.gameId || event.data.profileId !== session.profileId) return
+        const timer = restoreChoiceTimersRef.current.get(session.sessionId)
+        const request = snapshotRestoreRequestsRef.current[session.sessionId]
+        if (!timer || !request || timer.requestId !== event.data.requestId || timer.choiceAttemptId !== event.data.choiceAttemptId || request.selectedCandidateId !== event.data.candidateId || (event.data.type === 'emulator-hub:snapshot-restore-stale' && !Array.isArray(event.data.candidates))) return
+        if (event.data.type === 'emulator-hub:snapshot-restore-settled' && event.data.appliedCandidateId !== request.selectedCandidateId) return
+        window.clearTimeout(timer.timer)
+        restoreChoiceTimersRef.current.delete(session.sessionId)
+        if (event.data.type === 'emulator-hub:snapshot-restore-settled') {
+          const next = { ...snapshotRestoreRequestsRef.current }; delete next[session.sessionId]; snapshotRestoreRequestsRef.current = next
+          setSnapshotRestoreRequests(current => { const updated = { ...current }; delete updated[session.sessionId]; return updated })
+        } else {
+          reportHubSnapshot(session, 'warn', 'restore-choice-stale', { candidateId: request.selectedCandidateId, reason: 'candidate-changed' })
+          const updated = { ...request, candidates: event.data.candidates, choiceError: 'O estado escolhido mudou ou foi excluído antes da restauração. Feche o emulador e abra novamente para escolher.' }
+          snapshotRestoreRequestsRef.current = { ...snapshotRestoreRequestsRef.current, [session.sessionId]: updated }
+          setSnapshotRestoreRequests(current => ({ ...current, [session.sessionId]: updated }))
+        }
+        return
+      }
+      if (event.data?.type === 'emulator-hub:snapshot-candidate-delete-result') {
+        if (typeof event.data.requestId !== 'string' || typeof event.data.restoreRequestId !== 'string') return
+        const frame = [...document.querySelectorAll('.player-cell iframe')].find(candidate => candidate.contentWindow === event.source)
+        const session = activeSessions.find(candidate => frame?.closest('.player-cell')?.dataset.sessionId === candidate.sessionId)
+        if (!session || event.data.sessionId !== session.sessionId || event.data.gameId !== session.gameId || event.data.profileId !== session.profileId) return
+        const settled = snapshotDeleteWatchdogRef.current.settle(event.data)
+        const request = snapshotRestoreRequestsRef.current[session.sessionId]
+        if (!request || request.requestId !== event.data.restoreRequestId) return
+        const late = !settled && canReconcileLateSnapshotDelete(request, event.data)
+        if (!late && (!settled || request.deleteRequestId !== event.data.requestId)) return
+        if (event.data.ok) {
+          const candidates = request.candidates.filter(candidate => candidate.candidateId !== event.data.candidateId)
+          if (candidates.length === 0) respondToRestore(session.sessionId, request.requestId, null, true)
+          else {
+            const updated = { ...request, candidates, deleting: false, deleteRequestId: null, timedOutDeleteRequestId: null, candidateId: null, deleteError: null }
+            snapshotRestoreRequestsRef.current = { ...snapshotRestoreRequestsRef.current, [session.sessionId]: updated }
+            setSnapshotRestoreRequests(current => ({ ...current, [session.sessionId]: updated }))
+          }
+          return
+        }
+        const updated = {
+          ...request,
+          deleting: false,
+          deleteRequestId: null,
+          timedOutDeleteRequestId: null,
+          candidateId: null,
+          candidates: event.data.currentCandidate ? request.candidates.map(candidate => candidate.candidateId === event.data.candidateId ? event.data.currentCandidate : candidate) : request.candidates,
+          deleteError: event.data.error || 'Não foi possível excluir este estado. Ele continua disponível.',
+        }
+        snapshotRestoreRequestsRef.current = { ...snapshotRestoreRequestsRef.current, [session.sessionId]: updated }
+        setSnapshotRestoreRequests(current => ({ ...current, [session.sessionId]: updated }))
         return
       }
       if (event.data?.type === 'emulator-hub:odds-manipulator-ready') {
@@ -330,16 +444,29 @@ function App() {
       }
       if (event.data?.type !== 'emulator-hub:lease-lost') return
       if (!event.data.unavailable && event.data.sessionId && event.data.profileId && event.data.gameId && Number.isInteger(event.data.generation)) {
-        void releasePlayerLease(event.data.sessionId, { profileId: event.data.profileId, gameId: event.data.gameId, generation: event.data.generation }).catch(() => {})
+        void releasePlayerLease(event.data.sessionId, { profileId: event.data.profileId, gameId: event.data.gameId, generation: event.data.generation, preserveRecovery: true }).catch(() => {})
       }
       oddsSyncRef.current.get(event.data.sessionId)?.stop()
       oddsSyncRef.current.delete(event.data.sessionId)
+      snapshotDeleteWatchdogRef.current.cancel(event.data.sessionId)
+      clearRestoreChoiceTimer(event.data.sessionId)
       setActiveSessions(current => current.filter(session => session.sessionId !== event.data.sessionId))
       setSnapshotRestoreRequests(current => { const next = { ...current }; delete next[event.data.sessionId]; return next })
       setError('A sessão do emulador foi substituída ou expirou.')
     }
     window.addEventListener('message', receive)
     return () => window.removeEventListener('message', receive)
+  }, [activeSessions])
+
+  useEffect(() => () => {
+    snapshotDeleteWatchdogRef.current?.clear()
+    for (const pending of restoreChoiceTimersRef.current.values()) window.clearTimeout(pending.timer)
+    restoreChoiceTimersRef.current.clear()
+  }, [])
+
+  useEffect(() => {
+    const live = new Set(activeSessions.map(session => session.sessionId))
+    for (const sessionId of restoreChoiceTimersRef.current.keys()) if (!live.has(sessionId)) clearRestoreChoiceTimer(sessionId)
   }, [activeSessions])
 
   useEffect(() => {
@@ -642,9 +769,12 @@ function App() {
         const frame = document.querySelectorAll('.player-grid iframe')[index]
         if (!frame) throw new Error('iframe do emulador não encontrado')
         await oddsSyncRef.current.get(session.sessionId)?.flush()
-        await flushPlayerSave(frame)
-        await clearPlayerRecovery(frame)
-        await releasePlayerLease(session.sessionId, { profileId: session.profileId, gameId: session.gameId, generation: session.leaseGeneration })
+        const closeResult = await flushPlayerSave(frame)
+        if (!closeResult.preserveRecovery) {
+          try { await clearPlayerRecovery(frame) }
+          catch (error) { reportHubSnapshot(session, 'warn', 'local-recovery-delete-failed', { snapshotKind: 'local-recovery', phase: 'close', code: error.code, error: error.message }) }
+        }
+        await releasePlayerLease(session.sessionId, { profileId: session.profileId, gameId: session.gameId, generation: session.leaseGeneration, preserveRecovery: closeResult.preserveRecovery })
         oddsSyncRef.current.get(session.sessionId)?.stop()
         oddsSyncRef.current.delete(session.sessionId)
       },
@@ -654,25 +784,6 @@ function App() {
     const result = await coordinator.run()
     if (result.every(row => row.status === 'saved')) await finishPlayerClose()
     return
-  }
-
-  async function legacyClosePlayer() {
-    const result = await closePlayerAfterSaveAttempts({
-      saveAttempts: activeSessions.map((session, index) => {
-        const frame = document.querySelectorAll('.player-grid iframe')[index]
-        return Promise.resolve(frame ? flushPlayerSave(frame).then(() => clearPlayerRecovery(frame)) : undefined).finally(() => releasePlayerLease(session.sessionId, { profileId: session.profileId, gameId: session.gameId, generation: session.leaseGeneration }).catch(() => {}))
-      }),
-      close: async () => {
-        try {
-          if (document.fullscreenElement === playerShellRef.current) await document.exitFullscreen()
-        } catch {
-          // The player still needs to close if the browser rejects leaving fullscreen.
-        }
-        setActiveSessions([])
-        setFullscreen(false)
-      },
-    })
-    if (result.failures.length > 0) setError('O emulador foi fechado, mas alguns saves não puderam ser sincronizados.')
   }
 
   async function retryFailedSaves() {
@@ -701,18 +812,18 @@ function App() {
       let timeout = null
       const receive = event => {
         if (event.origin !== window.location.origin || event.source !== frame.contentWindow || event.data?.type !== 'emulator-hub:save-synced' || event.data.requestId !== requestId) return
-        finish(event.data.ok ? null : new Error(event.data.error || 'upload falhou'))
+        finish(event.data.ok ? null : new Error(event.data.error || 'upload falhou'), { preserveRecovery: event.data.preserveRecovery === true })
       }
-      const finish = error => {
+      const finish = (error, result) => {
         if (timeout) window.clearTimeout(timeout)
         window.removeEventListener('message', receive)
         if (error) { error.transient = true; reject(error) }
-        else resolve()
+        else resolve({ preserveRecovery: result?.preserveRecovery === true })
       }
       try {
         const directSync = frame.contentWindow?.emulatorHubClose
         if (typeof directSync === 'function') {
-          Promise.resolve(directSync()).then(() => finish(), finish)
+          Promise.resolve(directSync()).then(result => finish(null, result), finish)
           return
         }
       } catch {
@@ -768,7 +879,7 @@ function App() {
     let candidate = null
     try { candidate = await localRecoveryStore.get(profile.id, game.id) } catch {}
     if (candidate) {
-      return startPlayerWithProfile(profile, false, { reason: candidate.reason })
+      return startPlayerWithProfile(profile, false, { reason: candidate.reason, candidateId: candidate.candidateId })
     }
     return startPlayerWithProfile(profile, false)
   }
@@ -806,7 +917,7 @@ function App() {
       } else {
         setActiveSessions([session])
       }
-      if (localRecoveryPrompt) setSnapshotRestoreRequests(current => ({ ...current, [session.sessionId]: { sessionId: session.sessionId, kind: 'local-recovery', reason: localRecoveryPrompt.reason } }))
+      setFocusedSessionId(sessionId)
     } catch (cause) {
       setProfileError(cause.message)
     } finally {
@@ -814,12 +925,66 @@ function App() {
     }
   }
 
-  function respondToRestore(sessionId, requestId, restore) {
+  function respondToRestore(sessionId, requestId, candidateId, force = false) {
+    snapshotDeleteWatchdogRef.current.cancel(sessionId)
     const cell = [...document.querySelectorAll('.player-cell')].find(candidate => candidate.dataset.sessionId === sessionId)
     const session = activeSessions.find(candidate => candidate.sessionId === sessionId)
-    if (!session) return
-    cell?.querySelector('iframe')?.contentWindow?.postMessage({ type: 'emulator-hub:snapshot-restore-response', requestId, sessionId, gameId: session.gameId, profileId: session.profileId, restore }, window.location.origin)
-    setSnapshotRestoreRequests(current => { const next = { ...current }; delete next[sessionId]; return next })
+    const request = snapshotRestoreRequestsRef.current[sessionId]
+    const frame = cell?.querySelector('iframe')
+    if (!session || !frame?.contentWindow || request?.requestId !== requestId || (request.deleting && !force) || request.resolving) return
+    const choiceAttemptId = crypto.randomUUID()
+    const updated = { ...request, deleting: false, resolving: true, selectedCandidateId: candidateId, choiceAttemptId, deleteRequestId: null, choiceError: null }
+    snapshotRestoreRequestsRef.current = { ...snapshotRestoreRequestsRef.current, [sessionId]: updated }
+    setSnapshotRestoreRequests(current => ({ ...current, [sessionId]: updated }))
+    const prior = restoreChoiceTimersRef.current.get(sessionId)
+    if (prior) window.clearTimeout(prior.timer)
+    const choiceMessage = { type: 'emulator-hub:snapshot-restore-response', requestId, choiceAttemptId, sessionId, gameId: session.gameId, profileId: session.profileId, candidateId }
+    const retryChoice = () => {
+      const pending = restoreChoiceTimersRef.current.get(sessionId)
+      const request = snapshotRestoreRequestsRef.current[sessionId]
+      if (pending?.choiceAttemptId !== choiceAttemptId || !request?.resolving || request.requestId !== requestId || request.selectedCandidateId !== candidateId) return
+      if (!request.choiceError) reportHubSnapshot(session, 'warn', 'restore-ack-timeout', { candidateId: candidateId ?? undefined, reason: 'iframe-no-response' })
+      const next = restorePromptAfterChoiceTimeout(snapshotRestoreRequestsRef.current, { sessionId, requestId, candidateId, choiceAttemptId })
+      snapshotRestoreRequestsRef.current = next
+      setSnapshotRestoreRequests(next)
+      frame.contentWindow?.postMessage(choiceMessage, window.location.origin)
+      pending.timer = window.setTimeout(retryChoice, 8_000)
+    }
+    const timer = window.setTimeout(retryChoice, 8_000)
+    restoreChoiceTimersRef.current.set(sessionId, { requestId, choiceAttemptId, timer })
+    frame.contentWindow.postMessage(choiceMessage, window.location.origin)
+  }
+
+  function clearRestoreChoiceTimer(sessionId) {
+    const pending = restoreChoiceTimersRef.current.get(sessionId)
+    if (pending) window.clearTimeout(pending.timer)
+    restoreChoiceTimersRef.current.delete(sessionId)
+  }
+
+  function requestSnapshotCandidateDelete(sessionId, candidate) {
+    const request = snapshotRestoreRequests[sessionId]
+    const session = activeSessions.find(candidate => candidate.sessionId === sessionId)
+    if (!request?.requestId || !request.candidates?.some(current => current.candidateId === candidate.candidateId && current.kind === candidate.kind) || !session || request.deleting) return
+    const frame = [...document.querySelectorAll('.player-cell')].find(candidate => candidate.dataset.sessionId === sessionId)?.querySelector('iframe')
+    if (!frame?.contentWindow) {
+      setSnapshotRestoreRequests(current => ({ ...current, [sessionId]: { ...current[sessionId], deleteError: 'O emulador não está disponível para excluir este estado.' } }))
+      return
+    }
+    const deleteRequestId = crypto.randomUUID()
+    if (!snapshotDeleteWatchdogRef.current.begin({ sessionId, requestId: deleteRequestId, restoreRequestId: request.requestId, candidateId: candidate.candidateId, kind: candidate.kind })) return
+    const updated = { ...request, candidateId: candidate.candidateId, deleting: true, deleteRequestId, timedOutDeleteRequestId: null, deleteError: null }
+    snapshotRestoreRequestsRef.current = { ...snapshotRestoreRequestsRef.current, [sessionId]: updated }
+    setSnapshotRestoreRequests(current => ({ ...current, [sessionId]: updated }))
+    frame.contentWindow.postMessage({
+      type: 'emulator-hub:snapshot-candidate-delete',
+      requestId: deleteRequestId,
+      restoreRequestId: request.requestId,
+      candidateId: candidate.candidateId,
+      kind: candidate.kind,
+      sessionId,
+      gameId: session.gameId,
+      profileId: session.profileId,
+    }, window.location.origin)
   }
 
   async function submitProfile(event) {
@@ -932,7 +1097,16 @@ function App() {
     }
   }
 
+  function sendSelectedPlayerMessage(type) {
+    const sessionId = activeSessions.some(session => session.sessionId === focusedSessionId) ? focusedSessionId : activeSessions[0]?.sessionId
+    if (!sessionId) return
+    setPlayerActionErrors(current => { const next = { ...current }; delete next[sessionId]; return next })
+    const frame = [...document.querySelectorAll('.player-cell')].find(cell => cell.dataset.sessionId === sessionId)?.querySelector('iframe')
+    frame?.contentWindow?.postMessage({ type, sessionId }, window.location.origin)
+  }
+
   const activeProfileIds = new Set(activeSessions.map(session => `${session.gameId}:${session.profileId}`))
+  const selectedPlayerSessionId = activeSessions.some(session => session.sessionId === focusedSessionId) ? focusedSessionId : activeSessions[0]?.sessionId
   const gameSections = groupGamesByLayout(games, hubLayout)
   const isStandalone = window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true
   const isNarrowPortrait = isNarrowPortraitViewport(viewport)
@@ -1111,10 +1285,10 @@ function App() {
             </div>
             <span className="player-header-separator" aria-hidden="true" />
             <div className="player-header-group">
-              <button className="player-control-button" type="button" aria-label="Salvar estado" title="Salvar estado" onClick={() => broadcastPlayerMessage('emulator-hub:save-state')}>
+              <button className="player-control-button" type="button" aria-label="Salvar estado" title="Salvar estado" disabled={Boolean(snapshotRestoreRequests[selectedPlayerSessionId])} onClick={() => sendSelectedPlayerMessage('emulator-hub:save-state')}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5zM8 4v6h8V4M8 20v-6h8v6" /></svg>
               </button>
-              <button className="player-control-button" type="button" aria-label="Carregar estado" title="Carregar estado" onClick={() => broadcastPlayerMessage('emulator-hub:load-state')}>
+              <button className="player-control-button" type="button" aria-label="Carregar estado" title="Carregar estado" disabled={!userStateAvailable[selectedPlayerSessionId] || Boolean(snapshotRestoreRequests[selectedPlayerSessionId])} onClick={() => sendSelectedPlayerMessage('emulator-hub:load-state')}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7 9m5-5 5 5M5 14v5h14v-5" /></svg>
               </button>
             </div>
@@ -1167,9 +1341,10 @@ function App() {
         </header>
         <div className={`player-panel player-panel-${activeSessions.length}`}>
           <div className="player-grid">
-            {activeSessions.map(session => <div className="player-cell" data-session-id={session.sessionId} key={`${session.gameId}:${session.profileId}`}>
+            {activeSessions.map(session => <div className={`player-cell${selectedPlayerSessionId === session.sessionId && activeSessions.length > 1 ? ' is-selected' : ''}`} data-session-id={session.sessionId} key={`${session.gameId}:${session.profileId}`} onPointerDown={() => setFocusedSessionId(session.sessionId)}>
               <iframe src={playerFrameUrl(session)} title="EmulatorJS" allow="fullscreen; gamepad" onLoad={event => configurePlayerFrame(event.currentTarget, { type: 'emulator-hub:fast-forward', enabled: fastForwardEnabled, speed: fastForwardSpeed })} />
-              {snapshotRestoreRequests[session.sessionId] && <SnapshotRestorePrompt request={snapshotRestoreRequests[session.sessionId]} onRestore={() => snapshotRestoreRequests[session.sessionId].requestId && respondToRestore(session.sessionId, snapshotRestoreRequests[session.sessionId].requestId, true)} onContinue={() => snapshotRestoreRequests[session.sessionId].requestId && respondToRestore(session.sessionId, snapshotRestoreRequests[session.sessionId].requestId, false)} />}
+              {snapshotRestoreRequests[session.sessionId] && <SnapshotRestorePrompt key={snapshotRestoreRequests[session.sessionId].requestId ?? 'pending'} request={snapshotRestoreRequests[session.sessionId]} onRestore={candidateId => snapshotRestoreRequests[session.sessionId].requestId && respondToRestore(session.sessionId, snapshotRestoreRequests[session.sessionId].requestId, candidateId)} onContinue={() => snapshotRestoreRequests[session.sessionId].requestId && respondToRestore(session.sessionId, snapshotRestoreRequests[session.sessionId].requestId, null)} onDelete={candidate => requestSnapshotCandidateDelete(session.sessionId, candidate)} />}
+              {playerActionErrors[session.sessionId]?.length > 0 && <div className="player-action-errors" role="alert">{playerActionErrors[session.sessionId].map((message, index) => <p key={`${index}:${message}`}>{message}</p>)}</div>}
             </div>)}
           </div>
         </div>

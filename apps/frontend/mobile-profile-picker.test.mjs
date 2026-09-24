@@ -9,7 +9,7 @@ test('uses the full mobile landscape viewport for the profile picker', async () 
   const css = await readFile(new URL('./src/styles.css', frontend), 'utf8')
 
   assert.match(source, /profile-overlay\$\{profilePickerPlacement \? ' profile-picker-overlay' : ''\} profile-picker-mobile/)
-  assert.match(source, /style=\{profilePickerPlacement \? profilePickerPlacement : undefined\}/)
+  assert.match(source, /style=\{profilePurpose === 'add-instance' \? [^\n]+ : profilePickerPlacement \? profilePickerPlacement : undefined\}/)
   assert.match(source, /className="profile-picker-content"/)
   assert.match(source, /className="profile-picker-profiles"/)
   assert.match(source, /className="profile-picker-create"/)

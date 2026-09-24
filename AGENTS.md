@@ -19,7 +19,8 @@
 
 ## Working rules
 
-- Do not run project builds unless the user explicitly asks.
+- Run a project build only when the user explicitly requests a build in the current prompt for the current task. A build request from an earlier prompt never authorizes a later build.
+- Create a Git commit only when the user explicitly requests a commit in the current prompt for the current task. A commit request from an earlier prompt never authorizes a later commit.
 - Keep the project literally minimal. Implement only behavior and UI elements the user explicitly directs. Do not add decorative sections, extra pages, controls, or features on your own.
 - The current web hub contains square boxes with cover artwork when available, a green button with a white Play icon, and a readable title and ROM metadata strip. Keep the dark green theme: minimalism applies to elements, not color or finish. Opening a game shows a proportional floating emulator container over the same screen, blocking the hub behind it; the container can close or enter fullscreen. There is no game details page.
 - A game launch requires a selected backend-owned profile. A profile scopes the current browser-managed EmulatorJS save namespace; cloud save synchronization remains a separate later feature.

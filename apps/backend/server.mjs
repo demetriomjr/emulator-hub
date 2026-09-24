@@ -13,6 +13,7 @@ import { createRedisControlProfileStore } from '../packages/control-profile-stor
 import { createRedisUserPreferencesStore } from '../packages/user-preferences-store.mjs'
 import { createSaveStore } from '../packages/save-store.mjs'
 import { createSnapshotStore } from '../packages/snapshot-store.mjs'
+import { createContainerPipelineLogger } from '../packages/snapshot-telemetry.mjs'
 import { decodeSnapshotBundle, encodeSnapshotBundle } from '../packages/emulator-snapshot.mjs'
 import { createRedisPokemonHubStore } from '../packages/pokemon-hub-store.mjs'
 import { createRedisPokemonHubProfileStore } from '../packages/pokemon-hub-profile-store.mjs'
@@ -262,6 +263,7 @@ async function handleRequest(request, response, config) {
     || (request.method === 'POST' && pokemonHubProfilesRoute)
     || ((request.method === 'PATCH' || request.method === 'DELETE') && pokemonHubProfileRoute)
     || (request.method === 'PUT' && (isControlProfileRoute || saveRoute || snapshotRoute))
+    || (request.method === 'DELETE' && snapshotRoute)
     || (request.method === 'PATCH' && isUserPreferencesRoute)
     || (playerLeaseRoute && ((request.method === 'POST' && ['acquire', 'heartbeat'].includes(playerLeaseRoute.kind)) || (request.method === 'DELETE' && playerLeaseRoute.kind === 'release') || (request.method === 'GET' && playerLeaseRoute.kind === 'launch')))
     || (request.method === 'POST' && ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute?.kind))
@@ -272,7 +274,7 @@ async function handleRequest(request, response, config) {
     || (isClientDiagnosticsRoute && request.method === 'POST')
     || (isBackupRoute && request.method === 'POST')
   if (!supportedMethod) {
-    response.setHeader('Allow', isClientDiagnosticsRoute ? 'GET, POST' : isUserPreferencesRoute ? 'GET, PATCH' : pokemonHubSessionRoute ? pokemonHubSessionRoute.kind === 'detach' || pokemonHubSessionRoute.kind === 'close' ? 'DELETE' : 'POST' : pokemonHubRoute ? ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute.kind) ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'PATCH, DELETE' : pokemonHubProfilesRoute || gameProfilesRoute ? 'GET, POST' : snapshotRoute || saveRoute || isControlProfileRoute ? 'GET, PUT' : gameProfileRoute ? 'PATCH, DELETE' : patchRoute ? 'GET' : isRomRoute ? 'GET, HEAD' : 'GET')
+    response.setHeader('Allow', isClientDiagnosticsRoute ? 'GET, POST' : isUserPreferencesRoute ? 'GET, PATCH' : pokemonHubSessionRoute ? pokemonHubSessionRoute.kind === 'detach' || pokemonHubSessionRoute.kind === 'close' ? 'DELETE' : 'POST' : pokemonHubRoute ? ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute.kind) ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'PATCH, DELETE' : pokemonHubProfilesRoute || gameProfilesRoute ? 'GET, POST' : snapshotRoute ? 'GET, PUT, DELETE' : saveRoute || isControlProfileRoute ? 'GET, PUT' : gameProfileRoute ? 'PATCH, DELETE' : patchRoute ? 'GET' : isRomRoute ? 'GET, HEAD' : 'GET')
     json(response, 405, { error: 'Method is not supported for this route.' })
     return
   }
@@ -324,7 +326,7 @@ async function handleRequest(request, response, config) {
   }
 
   if (snapshotRoute) {
-    await handleSnapshot(request, response, config, snapshotRoute)
+    await handleSnapshot(request, response, config, snapshotRoute, route.searchParams)
     return
   }
 
@@ -1158,36 +1160,102 @@ function jsonPokemonHubError(response, error) {
   json(response, status, { error: error.message, ...(typeof error.code === 'string' ? { code: error.code } : {}) })
 }
 
-async function handleSnapshot(request, response, config, { profileId, gameId }) {
+async function handleSnapshot(request, response, config, { profileId, gameId }, searchParams) {
+  const kind = searchParams.get('kind') ?? 'cloud-recovery'
+  const log = (level, event, details = {}) => emitSnapshotLog(config, level, `snapshot.backend.${event}`, { profileId, gameId, kind, ...details })
+  if (!['cloud-recovery', 'user-state'].includes(kind)) {
+    log('warn', 'request-rejected', { reason: 'invalid-kind' })
+    return json(response, 400, { error: 'Snapshot kind is invalid.' })
+  }
   const entry = await findEntry(config, gameId)
-  if (entry === null) return json(response, 404, { error: 'Game was not found.' })
-  if (await config.profileStore.get(entry.id, profileId) === null) return json(response, 404, { error: 'Profile was not found.' })
+  if (entry === null) {
+    log('warn', 'request-rejected', { reason: 'game-not-found' })
+    return json(response, 404, { error: 'Game was not found.' })
+  }
+  if (await config.profileStore.get(entry.id, profileId) === null) {
+    log('warn', 'request-rejected', { reason: 'profile-not-found' })
+    return json(response, 404, { error: 'Profile was not found.' })
+  }
   let lease
   try {
     lease = playerLeaseHeaders(request)
     await config.playerLeases.assertWrite({ profileId, gameId, ...lease })
-  } catch (error) { return json(response, 410, { error: error.message, ...(error.code ? { code: error.code } : {}) }) }
+  } catch (error) {
+    log('warn', 'lease-rejected', { code: error.code ?? null, error: error.message })
+    return json(response, 410, { error: error.message, ...(error.code ? { code: error.code } : {}) })
+  }
   if (request.method === 'GET') {
-    const snapshot = await config.snapshotStore.get(profileId, gameId)
+    let snapshot
+    try { snapshot = await config.snapshotStore.get(profileId, gameId, { kind }) }
+    catch (error) { log('error', 'read-failed', { code: error.code ?? null, error: error.message }); throw error }
     if (!snapshot) return json(response, 404, { error: 'Snapshot was not found.' })
+    log('info', 'candidate-available', { revision: snapshot.metadata.revision, reason: snapshot.metadata.reasonCode, saveRevision: snapshot.metadata.saveRevision })
     const bytes = await encodeSnapshotBundle({ metadata: { ...snapshot.metadata, profileId, gameId }, state: snapshot.state })
     response.writeHead(200, { 'Cache-Control': 'no-store', 'Content-Length': bytes.length, 'Content-Type': 'application/vnd.emulator-hub.snapshot', ETag: `"${snapshot.metadata.revision}"`, 'X-Snapshot-Sha256': snapshot.metadata.sha256, 'X-Content-Type-Options': 'nosniff' })
     response.end(bytes)
     return
   }
+  if (request.method === 'DELETE') {
+    const expectedRevision = parseExpectedRevision(request.headers['if-match'])
+    if (!Number.isInteger(expectedRevision)) {
+      log('warn', 'delete-rejected', { reason: 'missing-revision' })
+      return json(response, 428, { error: 'A specific If-Match snapshot revision is required.' })
+    }
+    try {
+      await config.snapshotStore.delete(profileId, gameId, { expectedRevision, fenceGeneration: lease.generation, kind })
+      log('info', 'deleted', { revision: expectedRevision, leaseGeneration: lease.generation })
+      response.writeHead(204, { 'Cache-Control': 'no-store' })
+      response.end()
+    } catch (error) {
+      const status = error.code === 'SNAPSHOT_REVISION_CONFLICT' ? 412 : error.code === 'SNAPSHOT_FENCE_CONFLICT' ? 409 : 400
+      log(status === 400 ? 'error' : 'warn', 'delete-rejected', { revision: expectedRevision, status, code: error.code ?? null, error: error.message })
+      json(response, status, { error: error.message, ...(error.code ? { code: error.code } : {}) })
+    }
+    return
+  }
   let decoded
-  try { decoded = await decodeSnapshotBundle(await readBinaryBody(request, 'application/vnd.emulator-hub.snapshot', 35 * 1024 * 1024)) } catch (error) { return json(response, error.code === 'REQUEST_BODY_TOO_LARGE' ? 413 : 400, { error: error.message, ...(error.code ? { code: error.code } : {}) }) }
+  try { decoded = await decodeSnapshotBundle(await readBinaryBody(request, 'application/vnd.emulator-hub.snapshot', 35 * 1024 * 1024)) }
+  catch (error) {
+    log('warn', 'put-rejected', { phase: 'decode', code: error.code ?? null, error: error.message })
+    return json(response, error.code === 'REQUEST_BODY_TOO_LARGE' ? 413 : 400, { error: error.message, ...(error.code ? { code: error.code } : {}) })
+  }
   const expectedRevision = parseExpectedRevision(request.headers['if-match'])
-  if (expectedRevision === undefined) return json(response, 428, { error: 'If-Match is required.' })
+  if (expectedRevision === undefined) {
+    log('warn', 'put-rejected', { reason: 'missing-revision' })
+    return json(response, 428, { error: 'If-Match is required.' })
+  }
   const patchVerification = await verifyGamePatch(entry, config)
-  if (!patchVerification.ok) return json(response, 409, { error: patchVerification.reason })
+  if (!patchVerification.ok) {
+    log('warn', 'put-rejected', { reason: 'patch-incompatible' })
+    return json(response, 409, { error: patchVerification.reason })
+  }
   const runtimeId = 'emulatorjs-4.2.3'
-  if (decoded.metadata.profileId !== profileId || decoded.metadata.gameId !== gameId || decoded.metadata.core !== entry.core || decoded.metadata.romSha256 !== entry.sha256 || decoded.metadata.runtimeId !== runtimeId || decoded.metadata.patchSha256 !== patchVerification.patch?.sha256) return json(response, 400, { error: 'Snapshot metadata is incompatible with this launch.' })
+  if (decoded.metadata.profileId !== profileId || decoded.metadata.gameId !== gameId || decoded.metadata.core !== entry.core || decoded.metadata.romSha256 !== entry.sha256 || decoded.metadata.runtimeId !== runtimeId || decoded.metadata.patchSha256 !== patchVerification.patch?.sha256) {
+    log('warn', 'put-rejected', { reason: 'launch-incompatible' })
+    return json(response, 400, { error: 'Snapshot metadata is incompatible with this launch.' })
+  }
+  if (decoded.metadata.kind !== undefined && decoded.metadata.kind !== kind) {
+    log('warn', 'put-rejected', { reason: 'kind-mismatch' })
+    return json(response, 400, { error: 'Snapshot kind does not match its route.' })
+  }
+  if (kind === 'user-state' && decoded.metadata.promptOnLaunch === false) {
+    log('warn', 'put-rejected', { reason: 'manual-suppression-forbidden' })
+    return json(response, 400, { error: 'User state cannot suppress the restore offer.' })
+  }
+  if (decoded.metadata.promptOnLaunch === false) {
+    const save = await config.saveStore.get(profileId, gameId)
+    if (!save || save.revision !== decoded.metadata.saveRevision) {
+      log('warn', 'put-rejected', { reason: 'save-revision-mismatch', saveRevision: decoded.metadata.saveRevision, currentSaveRevision: save?.revision ?? null })
+      return json(response, 409, { error: 'Snapshot suppression requires the current canonical save revision.', code: 'SNAPSHOT_SAVE_REVISION_MISMATCH' })
+    }
+  }
   try {
-    const saved = await config.snapshotStore.put(profileId, gameId, decoded, expectedRevision, { fenceGeneration: lease.generation })
+    const saved = await config.snapshotStore.put(profileId, gameId, decoded, expectedRevision, { fenceGeneration: lease.generation, kind })
+    if (kind === 'user-state') log('info', 'user-state-persisted', { revision: saved.revision, saveRevision: decoded.metadata.saveRevision, reason: decoded.metadata.reasonCode })
     json(response, expectedRevision === null ? 201 : 200, saved)
   } catch (error) {
     const status = error.code === 'SNAPSHOT_REVISION_CONFLICT' ? 412 : error.code === 'SNAPSHOT_FENCE_CONFLICT' ? 409 : 400
+    log(status === 400 ? 'error' : 'warn', 'put-rejected', { status, code: error.code ?? null, error: error.message, expectedRevision })
     json(response, status, { error: error.message, ...(error.code ? { code: error.code } : {}) })
   }
 }
@@ -1640,6 +1708,7 @@ async function handlePlayerLease(request, response, config, route, searchParams)
       const lease = await config.playerLeases.acquire({ profileId: body.profileId, gameId: entry.id, deviceId, sessionId: body.sessionId, minimumGeneration })
       try { await config.saveStore.advanceFence(body.profileId, entry.id, lease.generation) } catch (error) { if (error.code !== 'SAVE_MISSING') throw error }
       try { await config.snapshotStore.advanceFence(body.profileId, entry.id, lease.generation) } catch (error) { if (error.code !== 'SNAPSHOT_MISSING') throw error }
+      try { await config.snapshotStore.advanceFence(body.profileId, entry.id, lease.generation, { kind: 'user-state' }) } catch (error) { if (error.code !== 'SNAPSHOT_MISSING') throw error }
       return json(response, 200, { ...launchDescriptor(entry, body.profileId, patchVerification.patch), leaseGeneration: lease.generation })
     } catch (error) { return json(response, error.code === 'PLAYER_LEASE_HELD' ? 409 : 400, { error: error.message, code: error.code }) }
   }
@@ -1650,11 +1719,19 @@ async function handlePlayerLease(request, response, config, route, searchParams)
     if (route.kind === 'heartbeat') return json(response, 200, await config.playerLeases.renew(input))
     if (route.kind === 'release') {
       await config.playerLeases.assertWrite(input)
-      const [save, snapshot] = await Promise.all([
-        config.saveStore.get(input.profileId, input.gameId),
-        config.snapshotStore.get(input.profileId, input.gameId),
-      ])
-      if (snapshot && snapshot.metadata.saveRevision < (save?.revision ?? 0)) await config.snapshotStore.delete(input.profileId, input.gameId)
+      if (body.preserveRecovery === true) {
+        emitSnapshotLog(config, 'info', 'snapshot.backend.release-preserved', { profileId: input.profileId, gameId: input.gameId, kind: 'cloud-recovery', sessionId: input.sessionId, leaseGeneration: input.generation, reason: 'startup-unresolved-or-interrupted' })
+      } else {
+        try {
+          const snapshot = await config.snapshotStore.get(input.profileId, input.gameId)
+          if (snapshot) {
+            await config.snapshotStore.delete(input.profileId, input.gameId, { expectedRevision: snapshot.metadata.revision, fenceGeneration: input.generation })
+            emitSnapshotLog(config, 'info', 'snapshot.backend.release-deleted', { profileId: input.profileId, gameId: input.gameId, kind: 'cloud-recovery', sessionId: input.sessionId, leaseGeneration: input.generation, revision: snapshot.metadata.revision, reason: 'normal-close' })
+          }
+        } catch (error) {
+          emitSnapshotLog(config, 'warn', 'snapshot.backend.release-cleanup-failed', { profileId: input.profileId, gameId: input.gameId, kind: 'cloud-recovery', sessionId: input.sessionId, leaseGeneration: input.generation, code: error.code ?? null, error: error.message })
+        }
+      }
       return json(response, 200, await config.playerLeases.release(input))
     }
     const entry = await findEntry(config, input.gameId)
@@ -1669,11 +1746,12 @@ async function handlePlayerLease(request, response, config, route, searchParams)
 }
 
 async function nextPlayerLeaseGeneration(config, profileId, gameId) {
-  const [save, snapshot] = await Promise.all([
+  const [save, snapshot, userSnapshot] = await Promise.all([
     config.saveStore.get(profileId, gameId),
     config.snapshotStore.get(profileId, gameId),
+    config.snapshotStore.get(profileId, gameId, { kind: 'user-state' }),
   ])
-  return Math.max(save?.fenceGeneration ?? 0, snapshot?.metadata?.fenceGeneration ?? 0) + 1
+  return Math.max(save?.fenceGeneration ?? 0, snapshot?.metadata?.fenceGeneration ?? 0, userSnapshot?.metadata?.fenceGeneration ?? 0) + 1
 }
 
 async function isGameSaveLeased(config, identity) {
@@ -1716,7 +1794,8 @@ async function handleClientDiagnostics(request, response, config, searchParams) 
   }
   try {
     const event = config.clientDiagnosticStore.append(await readJsonBody(request))
-    config.clientDiagnosticLogger.info('mobile.client-diagnostic', event)
+    if (event.kind === 'snapshot-flow') emitSnapshotLog(config, event.level ?? 'info', `snapshot.front.${event.message}`, event)
+    else config.clientDiagnosticLogger.info('mobile.client-diagnostic', event)
     empty(response, 204)
   } catch (error) {
     if (error.code === 'CLIENT_DIAGNOSTIC_INVALID' || error.code === 'UNSUPPORTED_CONTENT_TYPE' || error.code === 'REQUEST_BODY_TOO_LARGE' || error.code === 'INVALID_JSON_BODY') {
@@ -1882,11 +1961,11 @@ function normalizePokemonHubLogger(logger) {
 
 function normalizeSavePipelineLogger(logger) {
   if (logger && ['info', 'warn', 'error'].every(level => typeof logger[level] === 'function')) return logger
-  return {
-    info(event, context = {}) { console.info('[save-pipeline]', { timestamp: new Date().toISOString(), level: 'info', event, ...context }) },
-    warn(event, context = {}) { console.warn('[save-pipeline]', { timestamp: new Date().toISOString(), level: 'warn', event, ...context }) },
-    error(event, context = {}) { console.error('[save-pipeline]', { timestamp: new Date().toISOString(), level: 'error', event, ...context }) },
-  }
+  return createContainerPipelineLogger()
+}
+
+function emitSnapshotLog(config, level, event, context) {
+  try { config.savePipelineLogger[level](event, context) } catch {}
 }
 
 function parseContentLength(value) {
