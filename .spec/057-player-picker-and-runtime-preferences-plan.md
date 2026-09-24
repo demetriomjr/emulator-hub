@@ -23,7 +23,7 @@
 - Load Fast Forward enabled state from global preferences and include it in confirmed-preference rollback.
 - Persist header and trigger-based toggles; preserve the selected speed and other fields.
 - Apply the preference to all active and newly initialized player frames.
-- When starting either the first or an additional emulator, clear the odds toggle and explicitly disable the odds clock in active iframes before initializing the new session.
+- Clear the hub-wide odds toggle only when opening the first emulator in a new player wrapper. Preserve it when adding another emulator, and configure the new iframe after load when the wrapper toggle is enabled.
 
 ## Change map
 
@@ -42,4 +42,4 @@
 - An add-picker profile request finishing late cannot replace profiles for a subsequently selected ROM.
 - Legacy global preferences remain readable and default Fast Forward to disabled.
 - A rejected Fast Forward write restores the confirmed enabled state.
-- Disabling odds on an additional launch reaches already active iframes as well as the new session.
+- Adding another emulator preserves the current odds toggle and existing iframe clocks; closing the whole wrapper resets the toggle before the next first launch.

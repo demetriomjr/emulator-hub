@@ -725,6 +725,11 @@ function App() {
     })
   }
 
+  function configurePlayerFrameOnLoad(frame, session) {
+    configurePlayerFrame(frame, { type: 'emulator-hub:fast-forward', enabled: fastForwardEnabled, speed: fastForwardSpeed })
+    if (oddsManipulatorEnabled) void configureOddsClock(frame, session, session.oddsResetCount ?? 0, (session.oddsResetCount ?? 0) * 60_000)
+  }
+
   function toggleOddsManipulator() {
     const enabled = !oddsManipulatorEnabled
     setOddsManipulatorEnabled(enabled)
@@ -885,7 +890,7 @@ function App() {
       const game = profileGame
       const sessionId = crypto.randomUUID()
       const lease = await acquirePlayerLease(game.id, profile.id, sessionId)
-      disableOddsManipulator()
+      if (activeSessions.length === 0) disableOddsManipulator()
       setProfileGame(null)
       setInstancePicker(false)
       setProfilePickerPlacement(null)
@@ -1309,7 +1314,7 @@ function App() {
         <div className={`player-panel player-panel-${activeSessions.length}`}>
           <div className="player-grid">
             {activeSessions.map(session => <div className="player-cell" data-session-id={session.sessionId} key={`${session.gameId}:${session.profileId}`} onPointerDown={() => setFocusedSessionId(session.sessionId)}>
-              <iframe src={playerFrameUrl(session)} title="EmulatorJS" allow="fullscreen; gamepad" onLoad={event => configurePlayerFrame(event.currentTarget, { type: 'emulator-hub:fast-forward', enabled: fastForwardEnabled, speed: fastForwardSpeed })} />
+              <iframe src={playerFrameUrl(session)} title="EmulatorJS" allow="fullscreen; gamepad" onLoad={event => configurePlayerFrameOnLoad(event.currentTarget, session)} />
               {snapshotRestoreRequests[session.sessionId] && <SnapshotRestorePrompt key={snapshotRestoreRequests[session.sessionId].requestId ?? 'pending'} request={snapshotRestoreRequests[session.sessionId]} onRestore={candidateId => snapshotRestoreRequests[session.sessionId].requestId && respondToRestore(session.sessionId, snapshotRestoreRequests[session.sessionId].requestId, candidateId)} onContinue={() => snapshotRestoreRequests[session.sessionId].requestId && respondToRestore(session.sessionId, snapshotRestoreRequests[session.sessionId].requestId, null)} />}
               {playerActionErrors[session.sessionId]?.length > 0 && <div className="player-action-errors" role="alert">{playerActionErrors[session.sessionId].map((message, index) => <p key={`${index}:${message}`}>{message}</p>)}</div>}
             </div>)}

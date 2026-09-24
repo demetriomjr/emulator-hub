@@ -12,7 +12,7 @@ Improve the existing multi-emulator flow and make player runtime preferences con
 - ROM cover art is already available through `game.coverUrl` and rendered as a square home-screen cover.
 - L2/R2 action options are defined in `apps/packages/player-trigger-actions.mjs`; the current order is Do nothing, Soft Reset, Hard Reset, Save state, Load state, Fast Forward. `apps/packages/user-preferences-store.mjs` already persists the action values and speed in the global preference document.
 - The global preference document currently stores `fastForwardSpeed` but not whether Fast Forward is enabled. The hub initializes `fastForwardEnabled` to false on page load and does not persist later toggles.
-- The odds manipulator is hub-wide runtime state. It is reset when the player closes, but starting another emulator while a player is already open does not first clear the toggle or explicitly disable the manipulator in active iframes. This can leave the UI and iframe clocks out of sync.
+- The odds manipulator is hub-wide runtime state. The player wrapper owns its enabled flag; adding an emulator must preserve that flag and apply it to the new iframe. Closing the entire wrapper resets it.
 
 ## Requirements
 
@@ -43,8 +43,9 @@ Improve the existing multi-emulator flow and make player runtime preferences con
 
 ### Odds manipulator startup state
 
-- Every time a new emulator is started, set the hub-wide odds-manipulator state to disabled regardless of its prior value.
-- Send the disabled configuration to all active player iframes so the UI toggle and each iframe's virtual clock agree. The newly started iframe must also start disabled.
+- Set the hub-wide odds-manipulator state to disabled only when the player wrapper opens its first emulator (the transition from zero active sessions to one).
+- Adding another emulator to an open wrapper preserves the enabled state and the configuration of existing iframes. When enabled, configure the newly loaded iframe with its profile's reset count and virtual timestamp.
+- Closing the entire wrapper resets the enabled state. A later first launch starts disabled, with the UI toggle and iframe clock in agreement.
 - Do not persist the odds-manipulator enabled state. Preserve each profile's reset count and all existing behavior when the user enables the control after startup.
 
 ## Boundaries
@@ -60,7 +61,7 @@ Improve the existing multi-emulator flow and make player runtime preferences con
 4. Fast Forward enabled state is read from and written to the backend-global preference document and survives reloads and newly launched player sessions.
 5. Old stored preference documents without `fastForwardEnabled` resolve to `false`; invalid enabled-state values are rejected.
 6. Preference read/write failures do not prevent game launch; failed writes do not replace the last confirmed state.
-7. Starting any additional emulator disables odds manipulation in the hub and all active iframes, and the newly launched iframe remains disabled until the user enables it.
+7. The first emulator in a newly opened wrapper starts with odds manipulation disabled. Adding another emulator preserves the current hub-wide toggle and configures the new iframe accordingly. Closing and reopening the wrapper starts disabled again.
 8. No project build is run.
 
 ## Implementation map
@@ -68,6 +69,6 @@ Improve the existing multi-emulator flow and make player runtime preferences con
 - `apps/packages/player-trigger-actions.mjs`: reorder the existing action option list.
 - `apps/packages/user-preferences-store.mjs` and its unit tests: add and normalize the boolean preference, including legacy stored documents and Redis transitions.
 - `apps/backend/test/server.test.mjs`: update expected preference documents for the new field.
-- `apps/frontend/src/main.jsx`: derive add-picker order from the home layout, maintain selected ROM and profiles in the add modal, load/persist enabled Fast Forward, and disable odds state on every emulator start.
+- `apps/frontend/src/main.jsx`: derive add-picker order from the home layout, maintain selected ROM and profiles in the add modal, load/persist enabled Fast Forward, reset odds state only on the first wrapper launch, and configure new iframes with the current wrapper odds state.
 - `apps/frontend/src/styles.css`: horizontal ROM tiles, selected/fallback artwork, modal width/height, and responsive horizontal overflow.
-- Relevant frontend and package tests: cover option order, ordered picker, preference persistence/fallback, and odds reset on additional launch.
+- Relevant frontend and package tests: cover option order, ordered picker, preference persistence/fallback, first-launch odds reset, additional-launch preservation, and new-iframe configuration.

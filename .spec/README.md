@@ -2,7 +2,7 @@
 
 - [Spec 058 — Current snapshot system audit and save-then-close plan](058-current-snapshot-system-audit.md): current frontend/backend restore decisions, condition matrix, observed gaps, and the technical plan for suppressing unnecessary restore prompts after a confirmed save.
 
-- [Spec 057 — Player picker and runtime preferences](057-player-picker-and-runtime-preferences.md): show ordered ROM cover tiles and profiles when adding an emulator, persist Fast Forward enabled state, reorder L2/R2 actions, and reset the odds manipulator on each emulator start.
+- [Spec 057 — Player picker and runtime preferences](057-player-picker-and-runtime-preferences.md): show ordered ROM cover tiles and profiles when adding an emulator, persist Fast Forward enabled state, reorder L2/R2 actions, and reset the odds manipulator when the player wrapper first opens.
 
 - [Spec 050 — Authentic GBA RTC clock provider](050-authentic-gba-rtc-clock.md): make the host-clock RTC path explicit, testable, and extensible without changing game RNG semantics.
 
