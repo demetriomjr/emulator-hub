@@ -39,10 +39,10 @@ button { font: inherit; }
 .instance-rom-cover { display: grid; place-items: center; width: 84px; aspect-ratio: 1; overflow: hidden; border: 1px solid #397c67; border-radius: 9px; color: #effff5; text-align: center; background: radial-gradient(circle at 50% 46%, #357c64 0, #1a5149 55%, #10333b 100%); }
 .instance-rom-cover img { width: 100%; height: 100%; object-fit: cover; }
 .instance-rom-cover > span { padding: 5px; font-size: 10px; line-height: 1.25; }
-.instance-picker-body .profile-picker-content { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px; min-height: 0; overflow: hidden; }
+.instance-picker-body .profile-picker-content { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 12px; min-height: 0; overflow: hidden; }
 .instance-picker-body .profile-picker-profiles { min-height: 0; overflow: auto; }
 .instance-picker-body .profile-list { max-height: min(34dvh, 300px); }
-.instance-picker-body .profile-picker-create { align-self: start; }
+.instance-picker-body .profile-picker-create { width: 100%; align-self: stretch; }
 .profile-picker-overlay { display: block; padding: 0; }
 .profile-picker-panel { position: fixed; overflow: hidden; }
 .profile-picker-content { display: contents; }
@@ -226,7 +226,6 @@ button { font: inherit; }
 .player-panel-5 .player-grid { grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(2, 1fr); }
 .player-panel-6 .player-grid { grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(2, 1fr); }
 .player-cell { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #000; }
-.player-cell.is-selected { outline: 2px solid #69d99e; outline-offset: -2px; }
 .player-action-errors { position: absolute; z-index: 4; right: 8px; bottom: 8px; left: 8px; display: grid; gap: 4px; padding: 8px 10px; border: 1px solid #b9787e; border-radius: 8px; color: #ffe5e7; background: #532d32f2; font-size: 12px; pointer-events: none; }
 .player-action-errors p { margin: 0; }
 .player-grid iframe { display: block; min-width: 0; width: 100%; height: 100%; border: 0; background: #000; }
@@ -310,6 +309,8 @@ button { font: inherit; }
   .profile-picker-mobile .profile-body { display: flex; min-height: 0; flex: 1; padding: 18px; }
   .profile-picker-mobile .instance-picker-body { flex: 1; }
   .profile-picker-mobile .profile-picker-content { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; width: 100%; min-height: 0; }
+  .profile-picker-mobile .instance-picker-body .profile-picker-content { grid-template-columns: minmax(0, 1fr); }
+  .profile-picker-mobile .instance-picker-body .profile-list { max-height: min(34dvh, 300px); }
   .profile-picker-mobile .profile-picker-profiles, .profile-picker-mobile .profile-picker-create { display: flex; min-height: 0; flex-direction: column; }
   .profile-picker-mobile .profile-list { width: 100%; border: 0; align-self: start; display: grid; max-height: 100%; flex: none; gap: 8px; padding: 0; overflow-y: auto; }
   .profile-picker-mobile .profile-row { border: 1px solid #397c67; }

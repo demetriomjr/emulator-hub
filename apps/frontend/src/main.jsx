@@ -580,10 +580,10 @@ function App() {
         frame.contentWindow?.postMessage({ type: 'emulator-hub:gamepad', bindings }, window.location.origin)
       }
     }
-    // Poll the parent document so header clicks and focus in another emulator
-    // do not silence controllers. A full snapshot also reaches newly loaded frames.
+    // Poll the parent document so changing window focus does not silence
+    // controllers. A full snapshot also reaches newly loaded frames.
     const poll = () => {
-      const bindings = controlPanelOpen || profileGame || instancePicker || document.hidden
+      const bindings = controlPanelOpen || profileGame || instancePicker
         ? []
         : activeGamepadBindings(readGamepadSnapshot())
       triggerActions.update(bindings, { l2: l2TriggerAction, r2: r2TriggerAction }, triggerBindings)
@@ -1308,7 +1308,7 @@ function App() {
         </header>
         <div className={`player-panel player-panel-${activeSessions.length}`}>
           <div className="player-grid">
-            {activeSessions.map(session => <div className={`player-cell${selectedPlayerSessionId === session.sessionId && activeSessions.length > 1 ? ' is-selected' : ''}`} data-session-id={session.sessionId} key={`${session.gameId}:${session.profileId}`} onPointerDown={() => setFocusedSessionId(session.sessionId)}>
+            {activeSessions.map(session => <div className="player-cell" data-session-id={session.sessionId} key={`${session.gameId}:${session.profileId}`} onPointerDown={() => setFocusedSessionId(session.sessionId)}>
               <iframe src={playerFrameUrl(session)} title="EmulatorJS" allow="fullscreen; gamepad" onLoad={event => configurePlayerFrame(event.currentTarget, { type: 'emulator-hub:fast-forward', enabled: fastForwardEnabled, speed: fastForwardSpeed })} />
               {snapshotRestoreRequests[session.sessionId] && <SnapshotRestorePrompt key={snapshotRestoreRequests[session.sessionId].requestId ?? 'pending'} request={snapshotRestoreRequests[session.sessionId]} onRestore={candidateId => snapshotRestoreRequests[session.sessionId].requestId && respondToRestore(session.sessionId, snapshotRestoreRequests[session.sessionId].requestId, candidateId)} onContinue={() => snapshotRestoreRequests[session.sessionId].requestId && respondToRestore(session.sessionId, snapshotRestoreRequests[session.sessionId].requestId, null)} />}
               {playerActionErrors[session.sessionId]?.length > 0 && <div className="player-action-errors" role="alert">{playerActionErrors[session.sessionId].map((message, index) => <p key={`${index}:${message}`}>{message}</p>)}</div>}
