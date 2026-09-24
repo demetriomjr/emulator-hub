@@ -2,7 +2,7 @@
 title: Current snapshot system audit
 date: 2026-09-24
 tags: [spec, audit, snapshots, recovery, frontend, backend]
-status: corrected-discard-implemented
+status: snapshot-types-architecture-proposed
 ---
 
 # Spec 058 — Current snapshot system audit
@@ -15,7 +15,7 @@ The audit sections record the implementation before the first fix on 2026-09-24;
 
 | Artifact | Owner/key | Contents | Creation | Restore or use |
 | --- | --- | --- | --- | --- |
-| Remote runtime snapshot | Backend file store, one slot per `(profileId, gameId)` | EmulatorJS `getState()` bytes (nonempty, at most 32 MiB), core, ROM hash, runtime ID, optional patch hash in the wire envelope, associated canonical `saveRevision`, state hash, snapshot revision, fence generation | Every 15 s, manual **Salvar estado**, and close when state remains useful | Offered on launch if compatible; accepted state goes to `gameManager.loadState()` only. Manual **Carregar estado** loads a retained in-memory copy without a prompt. A snapshot classified as redundant is deleted and cannot be manually loaded next launch. |
+| Remote runtime snapshot | Backend file store, currently one slot per `(profileId, gameId)` | EmulatorJS `getState()` bytes (nonempty, at most 32 MiB), core, ROM hash, runtime ID, optional patch hash, associated canonical `saveRevision`, state hash, revision and fence generation | Every 15 s, manual **Salvar estado**, and close when state remains useful | Current automatic/manual writes share one slot. The proposed typed design separates user saves from cloud recovery. |
 | Local recovery | Browser IndexedDB `emulator-hub-local-recovery/bundles`, one record per `(profileId, gameId)` | Copied state bytes (nonempty, at most 32 MiB), core, ROM hash, runtime ID, optional patch hash, reason | Immediately after game start, then every 2.5 s | Surviving record is offered when that profile is selected; accepted state goes to `loadState()` after a new lease and compatibility check. |
 | Canonical battery save | Backend save store, same profile/game identity but independent revision | Game `.sav` bytes | EmulatorJS save events/polling and final close flush, with hash deduplication | Loaded into EmulatorJS only when no runtime state was accepted; `FS.writeFile()` then `loadSaveFiles()`. |
 
@@ -214,3 +214,137 @@ The automatic-save case is a destructive discard, not a hidden or unoffered snap
 All other cases preserve runtime state: gameplay or a manual state save after the `.sav` save, an uncertain/failed save, a close outside the 10-second window, or a session that only loaded a remote snapshot without making a new live save. Manual Save state therefore stays available, as does runtime recovery from another device unless the current session itself produces the redundant-save condition. Legacy bundles carrying `promptOnLaunch: false` are deleted on launch only when compatible and tied to the current canonical save revision; if deletion fails, the snapshot remains offered for recovery.
 
 The previous verification counts apply to the superseded marker-based behavior. The corrected deletion path has not yet been tested in a browser or through the project test suite. Project builds remain prohibited unless explicitly requested.
+
+## Architecture proposal: typed restore candidates with provenance
+
+### Goal and current gap
+
+The restore experience must tell the user what state is available, why it exists, when it was captured, and whether the game's own save indicates newer progress. Today the backend has one remote snapshot slot per profile/game. Automatic 15-second captures and the user's **Salvar estado** overwrite the same slot; metadata does not say which action produced it. Local recovery is a separate IndexedDB record, but only a confirmed lease loss changes its reason to `runtime-break`; a surviving `active` record is described as possible recovery in UI copy. The modal receives only `kind`, session/profile/game, and optional local reason. It receives no capture time or remote snapshot details. The backend already stores remote `createdAt`, but the frontend does not present it.
+
+The system therefore has three restore purposes, though only two runtime-state stores:
+
+| Type | Purpose and writer | Storage and retention | User-facing explanation |
+| --- | --- | --- | --- |
+| `user-state` | Explicit **Salvar estado** action | Separate remote slot per profile/game; retained until replaced by another manual save or explicit deletion | “Estado salvo por você”; show capture time. **Carregar estado** targets this type only. |
+| `cloud-recovery` | Periodic and useful close-time runtime capture, including recovery fetched by another browser/device | Separate remote slot per profile/game, shared across installations; latest successful recovery replaces the previous recovery. The 10-second save-then-close rule deletes only this type when proven redundant. | “Recuperação automática”; show whether it came from this installation, another installation, or unknown origin, why it exists, and when it was captured. |
+| `local-recovery` | Frequent local capture and recovery after an abnormal interruption | IndexedDB on the current browser installation; cleared after normal close or explicit dismissal, retained after interruption | “Recuperação local”; explain `runtime-break` or possible unclean close and show local capture time. |
+
+The canonical `.sav` remains a distinct fourth artifact, not a runtime snapshot. Pokémon Hub placement snapshots also remain unrelated.
+
+### Shared candidate contract
+
+The iframe owns state bytes; the parent modal receives metadata only. Add a shared summary contract in `apps/packages/`:
+
+```ts
+type RestoreCandidateKind = 'user-state' | 'cloud-recovery' | 'local-recovery'
+type CaptureClock = 'server' | 'browser'
+type GameTimeKind = 'wall-clock' | 'playtime-counter' | 'save-sequence'
+
+type RestoreCandidateSummary = {
+  candidateId: string
+  kind: RestoreCandidateKind
+  reasonCode: string
+  capturedAt: string                 // ISO-8601 instant
+  captureClock: CaptureClock
+  origin: 'this-installation' | 'other-installation' | 'unknown'
+  saveRevision?: number
+  currentSaveRevision?: number
+  gameTime?: { value: string | number; kind: GameTimeKind; adapterId: string }
+}
+```
+
+`capturedAt` is required for every candidate. Remote types use backend-generated UTC time; local recovery uses the time recorded by the browser and labels it as local-clock time. `gameTime` is optional and must preserve the underlying meaning. Only a verified absolute in-game wall-clock save timestamp may be shown as a date/time or compared as one. A playtime counter or rotating-save sequence is shown with that label and is never converted to a calendar time. The current Gen III adapter exposes `saveIndex`, a sequence used to choose the newest valid save copy; it does not currently expose a wall-clock last-save time.
+
+For snapshot-vs-save freshness, compare the snapshot's `saveRevision` with the current canonical save revision. If the canonical revision advanced after the snapshot, show “O save do jogo foi atualizado depois deste estado.” Do not call that revision a timestamp. Sort remote candidates by server `capturedAt`. Show local capture time with its browser-clock source; do not assert cross-device ordering between server and browser clocks. Display a verified internal game time separately; it does not replace capture time or revision checks.
+
+Use an opaque per-installation UUID stored with browser metadata to label a remote candidate as this or another installation. It is presentation provenance, not authentication or a device name. If unavailable after storage reset, show “origem desconhecida.” Do not expose state bytes or the raw UUID in the parent UI.
+
+### Capture, retention, and restore behavior
+
+- Manual **Salvar estado** writes only the `user-state` slot with reason `user-request`. Periodic capture cannot overwrite it.
+- The 15-second timer writes only the `cloud-recovery` slot with reason `periodic-recovery`. A useful close capture uses `session-close`.
+- The confirmed-save/no-play policy applies only to `cloud-recovery`. When it qualifies, delete that candidate; never delete `user-state` or `local-recovery` through this path.
+- Local recovery continues every 2.5 seconds. Lease loss persists `runtime-break`; a surviving `active` record after an unclean page exit is presented as `possible-recovery`. Normal close and explicit dismissal clear it.
+- The parent combines available summaries into one chooser per player session. For several candidates, show a selectable card for each with type, reason, origin, capture time, and save-revision relationship. The user restores the selected candidate or continues from the canonical `.sav`. This replaces today's sequential local then remote prompts.
+- The iframe retains candidate state bytes and resolves the opaque `candidateId` only within that iframe. The parent sends the selected ID or `continue` to the requesting session. Recheck compatibility immediately before `loadState()`.
+- **Carregar estado** loads only `user-state`; it does not silently load the latest automatic recovery. Disable the action when no compatible user-state candidate exists. Startup recovery remains in the chooser.
+
+### Persistence and migration
+
+Extend remote slot identity from `(profileId, gameId)` to `(profileId, gameId, kind)`, with remote kinds `user-state` and `cloud-recovery`. Keep ETags, revisions, save revisions, and lease fences independent per kind. Add a kind-specific snapshot URL or query parameter and reject unknown kinds. Preserve a legacy route during migration, mapping the existing untyped slot to `cloud-recovery`: old periodic, close, and manual captures share the slot and cannot be reliably separated. Preserve existing bytes, revision, server creation time, save revision, and compatibility metadata. Do not infer that an old snapshot was user-requested.
+
+Add `reasonCode`, `originInstallationId`, and authoritative `capturedAt` to new remote metadata. Stamp capture time on the backend when state is accepted, not from an untrusted client clock. Persist and verify `patchSha256` so compatibility remains complete. Add capture time and reason to local records; present legacy `active` records as `possible-recovery` without rewriting their capture history.
+
+### Internal save-time extraction
+
+Add an optional save-adapter capability such as `readSaveMetadata(bytes, layout)`. It returns verified semantic metadata and returns no internal time when unsupported. The frontend and backend use the same package contract. The first slice must verify the actual timestamp semantics of one supported format using an authoritative format description or fixture before displaying an in-game wall-clock value. If no supported format embeds an absolute last-save time, ship capture-time and revision comparison only. A parse failure never rejects, modifies, or blocks canonical `.sav` validation or upload.
+
+### Restore chooser contents
+
+For every candidate, show its type, why it exists, origin, capture time with timezone and clock source, and whether its associated canonical save revision is older/newer/equal. Show an internal game save time only when an adapter verifies its semantics, with a distinct “hora interna do jogo” label. Keep the same card when only one candidate exists. Offer **Restaurar este estado** per candidate and **Continuar pelo save do jogo**. Show no modal when there are no candidates. Bind the request and answer to session, game, profile and request ID. In multi-instance view, restoration and manual load remain scoped to the selected iframe.
+
+### Implementation plan
+
+#### Task 1: Shared candidate contract and save metadata adapter
+
+**Files:** Create `apps/packages/restore-candidate.mjs`; extend `apps/packages/pokemon-gen3-adapter.mjs` only after timestamp semantics are verified; add package tests beside these modules.
+
+- [ ] Define and validate candidate kinds, reason codes, capture-time source, origin values, and game-time semantic kinds.
+- [ ] Add optional `readSaveMetadata(saveBytes, layout)` to the adapter contract. Unsupported formats return no internal time. Preserve Gen III `saveIndex` as a sequence and reject it as a wall-clock timestamp.
+- [ ] Verify one supported format's last-save timestamp using an authoritative format description or deterministic fixture; if it has no absolute timestamp, document that the modal uses capture time and save revision for that format.
+- [ ] Test malformed values, unknown adapters, no-time fallback and byte immutability during inspection.
+
+#### Task 2: Separate remote slots and migrate existing data
+
+**Files:** Modify `apps/packages/snapshot-store.mjs`, `apps/packages/hub-client.js`, `apps/backend/server.mjs`, backend/store tests, and launch descriptor generation where necessary.
+
+- [ ] Add remote kind to store keys, metadata validation, GET/PUT/DELETE and ETags. Keep `user-state` and `cloud-recovery` revisions and fences independent.
+- [ ] On first typed access, migrate an old untyped slot atomically to `cloud-recovery`, preserving its bytes, revision, creation time and save revision. Never infer `user-state` from legacy data.
+- [ ] Stamp remote capture time on the backend; persist reason, origin installation ID, save revision and patch identity. Require the active lease and generation for writes and deletes.
+- [ ] Test legacy migration, isolated replacement/deletion, stale ETag, lease/fence rejection, and unchanged canonical `.sav` bytes.
+
+#### Task 3: Local recovery metadata and candidate collection
+
+**Files:** Modify `apps/packages/local-runtime-recovery-store.mjs`, `apps/frontend/src/player.js`, `apps/packages/snapshot-restore-routing.mjs`, and related tests.
+
+- [ ] Store local `capturedAt` and stable reason metadata on each recovery write. Persist `runtime-break` on lease loss; map a surviving `active` record to `possible-recovery` for display.
+- [ ] Give each browser installation an opaque stable ID in browser metadata; compare it with remote `originInstallationId` only to produce this/other/unknown labels.
+- [ ] In the iframe, collect compatible user-state, cloud-recovery and local-recovery summaries. Keep all bytes in the iframe and post only metadata summaries to the parent.
+- [ ] Test clock source labels, missing installation IDs, local reason mapping, incompatible candidates and absence of state bytes in messages.
+
+#### Task 4: Selection protocol and typed player actions
+
+**Files:** Modify `apps/frontend/src/player.js`, `apps/packages/hub-client.js`, `apps/packages/snapshot-restore-routing.mjs`, and player protocol tests.
+
+- [ ] Route explicit **Salvar estado** only to `user-state`; route 15-second and useful close captures only to `cloud-recovery`.
+- [ ] Apply the existing save-then-close redundant-state deletion only to `cloud-recovery`; prove `user-state` and local recovery remain untouched.
+- [ ] Replace boolean restore answers with `{ candidateId }` or `continue`, scoped to the requesting session/game/profile. Revalidate the candidate ID and compatibility before `loadState()`.
+- [ ] Make **Carregar estado** select only the compatible `user-state` candidate and report its availability to the parent. Target one iframe rather than broadcasting to automatic recoveries.
+- [ ] Test coexistence of both remote types, candidate replacement during a prompt, invalid/stale IDs, two simultaneous sessions and manual save/load isolation.
+
+#### Task 5: Informative single restore chooser
+
+**Files:** Modify `SnapshotRestorePrompt` and player header controls in `apps/frontend/src/main.jsx`; update existing frontend UI tests and only the styles needed by this chooser.
+
+- [ ] Render one chooser per player with candidate cards for type, reason, origin, capture time/timezone, verified internal game time and save-revision relationship.
+- [ ] Sort remote candidates by server capture time; label browser-clock local time and avoid claiming cross-clock order when synchronization is unknown.
+- [ ] Offer restore per candidate and **Continuar pelo save do jogo**. Keep identical metadata layout when there is a single candidate.
+- [ ] Verify local and remote candidates no longer produce sequential prompts; metadata crosses to the parent but state bytes and installation UUID do not.
+
+#### Task 6: Migration and end-to-end verification
+
+**Files:** Update this spec with verified per-format time capabilities and migration outcome.
+
+- [ ] Verify legacy remote data migrates as cloud recovery, legacy local records are explained conservatively, and candidate inspection leaves `.sav` bytes/revision unchanged.
+- [ ] Verify manual user-state survives periodic recovery writes and the save-then-close discard rule.
+- [ ] Verify recovery from another installation shows its source and server capture time; show a newer canonical save through revision comparison.
+- [ ] Verify redundant cloud recovery is deleted without deleting user-state or local recovery.
+- [ ] Run package, backend, and frontend tests and exercise manual save/load, local interruption recovery, other-installation recovery and save-then-close in a browser. Do not run project builds unless explicitly requested.
+
+### Review focus
+
+1. A manual user-state and cloud recovery coexist; automatic capture and redundant deletion touch only cloud recovery.
+2. Browser time is ahead/behind backend UTC; the chooser labels clock source and avoids false cross-installation ordering.
+3. A save contains elapsed playtime or a rotating sequence but no last-save wall clock; metadata preserves its kind and never presents it as a calendar date.
+4. A candidate is replaced while the chooser is open; revision and candidate ID checks prevent restoring or deleting the replacement accidentally.
+5. Local and remote candidates coexist; one scoped chooser replaces the double-prompt flow and state bytes remain inside the iframe.
