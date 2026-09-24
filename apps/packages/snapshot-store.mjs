@@ -69,12 +69,14 @@ export function createSnapshotStore({ dataPath, lockTimeoutMs = 5_000, lockRetry
     })
   }
 
-  async function remove(profileId, gameId) {
+  async function remove(profileId, gameId, { expectedRevision, fenceGeneration } = {}) {
     return serialize(snapshotKey(profileId, gameId), async () => {
       const paths = snapshotPaths(dataPath, profileId, gameId)
       return withLock(paths.lock, async () => {
         const current = await get(profileId, gameId)
         if (!current) return false
+        if (expectedRevision !== undefined && current.metadata.revision !== expectedRevision) throw snapshotError('SNAPSHOT_REVISION_CONFLICT', 'Snapshot revision does not match the current snapshot.')
+        if (fenceGeneration !== undefined && current.metadata.fenceGeneration !== fenceGeneration) throw snapshotError('SNAPSHOT_FENCE_CONFLICT', 'Snapshot fence generation does not match the current snapshot.')
         await unlink(paths.metadata).catch(error => { if (error.code !== 'ENOENT') throw error })
         await Promise.all([current.metadata.stateFile, current.metadata.saveFile].filter(Boolean).map(name => unlink(join(paths.directory, name)).catch(error => { if (error.code !== 'ENOENT') throw error })))
         return true

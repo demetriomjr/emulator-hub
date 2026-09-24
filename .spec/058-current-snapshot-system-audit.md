@@ -2,7 +2,7 @@
 title: Current snapshot system audit
 date: 2026-09-24
 tags: [spec, audit, snapshots, recovery, frontend, backend]
-status: first-fix-implemented
+status: corrected-discard-implemented
 ---
 
 # Spec 058 — Current snapshot system audit
@@ -15,7 +15,7 @@ The audit sections record the implementation before the first fix on 2026-09-24;
 
 | Artifact | Owner/key | Contents | Creation | Restore or use |
 | --- | --- | --- | --- | --- |
-| Remote runtime snapshot | Backend file store, one slot per `(profileId, gameId)` | EmulatorJS `getState()` bytes (nonempty, at most 32 MiB), core, ROM hash, runtime ID, optional patch hash in the wire envelope, associated canonical `saveRevision`, state hash, snapshot revision, fence generation | Every 15 s, manual **Salvar estado**, and normal close | Offered on launch if compatible; accepted state goes to `gameManager.loadState()` only. Manual **Carregar estado** loads the in-memory copy without a prompt. |
+| Remote runtime snapshot | Backend file store, one slot per `(profileId, gameId)` | EmulatorJS `getState()` bytes (nonempty, at most 32 MiB), core, ROM hash, runtime ID, optional patch hash in the wire envelope, associated canonical `saveRevision`, state hash, snapshot revision, fence generation | Every 15 s, manual **Salvar estado**, and close when state remains useful | Offered on launch if compatible; accepted state goes to `gameManager.loadState()` only. Manual **Carregar estado** loads a retained in-memory copy without a prompt. A snapshot classified as redundant is deleted and cannot be manually loaded next launch. |
 | Local recovery | Browser IndexedDB `emulator-hub-local-recovery/bundles`, one record per `(profileId, gameId)` | Copied state bytes (nonempty, at most 32 MiB), core, ROM hash, runtime ID, optional patch hash, reason | Immediately after game start, then every 2.5 s | Surviving record is offered when that profile is selected; accepted state goes to `loadState()` after a new lease and compatibility check. |
 | Canonical battery save | Backend save store, same profile/game identity but independent revision | Game `.sav` bytes | EmulatorJS save events/polling and final close flush, with hash deduplication | Loaded into EmulatorJS only when no runtime state was accepted; `FS.writeFile()` then `loadSaveFiles()`. |
 
@@ -173,7 +173,7 @@ await saveEmulatorState({ promptOnLaunch: policy.shouldPromptAtClose(cloudSaveSy
 
 **Files:** Modify `apps/backend/server.mjs` and `apps/backend/test/server.test.mjs`.
 
-**Interface:** Existing snapshot GET/PUT URL, lease headers, and ETag remain. On PUT with `promptOnLaunch: false`, read `saveStore.get(profileId, gameId)` and require `save?.revision === decoded.metadata.saveRevision`; return a typed 409 on mismatch or missing save. PUT with true remains allowed under existing checks. GET includes the stored flag. Release still deletes snapshots whose save revision is older than canonical.
+**Interface:** Existing snapshot GET/PUT remains; add lease-protected DELETE with `If-Match` snapshot revision and current lease generation. Legacy PUT with `promptOnLaunch: false` still requires an equal canonical save revision. Release still deletes snapshots whose save revision is older than canonical.
 
 - [ ] Add an HTTP test that writes a canonical save, writes a matching suppressed snapshot, releases the lease, reacquires from a fresh session/device, GETs it, verifies state bytes and `promptOnLaunch: false`, and confirms the save bytes were untouched.
 - [ ] Add HTTP cases for absent/mismatched canonical save, invalid flag, legacy true, optimistic revision conflict, and a newer canonical save deleting an older suppressed snapshot at release. Run `rtk node --test apps/backend/test/server.test.mjs` and observe the new cases fail first.
@@ -184,7 +184,7 @@ await saveEmulatorState({ promptOnLaunch: policy.shouldPromptAtClose(cloudSaveSy
 
 **Files:** Modify `apps/frontend/src/player.js` and `apps/frontend/mobile-player-save-sync.test.mjs`; change `apps/frontend/src/main.jsx` only if an existing event hook cannot relay an actual input transition.
 
-**Interface:** `putEmulatorSnapshot()` already accepts arbitrary validated metadata, so the player adds `promptOnLaunch` to its existing bundle. `savedSnapshot` retains the state for manual Load even when its offer flag is false. A restored local or remote runtime state calls `recordRuntimeRestore()` so close cannot misclassify it as an unchanged canonical-save session.
+**Interface:** When the policy classifies a just-saved, untouched session as redundant, close deletes the remote snapshot using its revision and lease fence instead of writing final state. Manual Save state and useful remote recovery remain retained. A restored local or remote runtime state calls `recordRuntimeRestore()` so close cannot misclassify it as an unchanged canonical-save session.
 
 - [ ] Add focused tests for: confirmed live save then immediate close with no input writes `promptOnLaunch: false`; input or manual Save state after observation writes true; a save upload failure/unchanged poll does not suppress; final close read alone does not suppress; suppressed launch makes no prompt and still restores `.sav`; manual Load remains possible; periodic capture skips during an untouched suppressed launch, then resumes after input or manual Save state; close waits for in-flight capture/save before its final PUT.
 - [ ] Run `rtk node --test apps/frontend/mobile-player-save-sync.test.mjs`; verify new cases fail. Prefer a small injected player-policy harness for behavioral assertions over additional source-text regexes.
@@ -199,10 +199,18 @@ await saveEmulatorState({ promptOnLaunch: policy.shouldPromptAtClose(cloudSaveSy
 - [x] Confirm canonical `.sav` bytes and revisions are unchanged by snapshot GET/PUT, and local recovery/lease-release behavior remains covered.
 - [x] Do not claim the heuristic proves that a player did not play; document that a save event is byte-change evidence, and uncertainty keeps the prompt.
 
-## First fix implementation (2026-09-24)
+## Initial implementation — superseded by discard behavior
 
 The preceding audit records the behavior before this change; the implementation below supersedes its launch-offer description. The remote snapshot now carries `promptOnLaunch`, defaulting to `true` for legacy bundles and stored records. The backend accepts `false` only when the bundle's `saveRevision` equals the existing canonical `.sav` revision. Snapshot bytes remain available for manual **Carregar estado**, and the normal close still uploads the final `.sav` and state. The frontend skips the launch prompt for a compatible suppressed snapshot, restores the canonical `.sav`, and avoids periodic remote captures while that session has no new input. Local recovery continues independently.
 
 The player records a live save checkpoint only when a changed `.sav` upload is acknowledged. It timestamps observation before the asynchronous upload and records input, manual state-save, and uncertain-save sequence numbers at that point. A later input or manual Save state, including one during the upload, makes the close snapshot promptable. Close within 10 seconds of the acknowledged live save with no later input writes `promptOnLaunch: false`; final close-time `.sav` reads do not create checkpoints. An untouched suppressed launch can close again without reintroducing an offer. Failed validation or upload invalidates that quiet baseline and any earlier checkpoint; an identical-byte poll does not. Any runtime-state restore, changed canonical revision, missing save, or uncertain observation preserves the prompt. This is a conservative input/save heuristic, not proof of zero game progress.
 
 Verification: 30 focused package/frontend tests and 59 backend tests pass, covering policy timing and races, metadata round trips and legacy defaults, backend revision authority and a new lease, and the player wiring. A live browser/device save-close-reopen cycle remains to be checked. The project build was not run, as instructed. The repository-wide Node test run passed 497 of 504 tests, skipped 2, and exposed five existing unrelated assertions against unchanged UI or preexisting player syntax assumptions in a VM harness; those do not exercise this new behavior.
+
+## Corrected behavior: delete redundant runtime snapshots
+
+The automatic-save case is a destructive discard, not a hidden or unoffered snapshot. If a confirmed live `.sav` save is followed by close within 10 seconds with no subsequent gameplay input, manual **Salvar estado**, or runtime restore, the player drains save work and any in-flight capture, then deletes the current remote snapshot with a lease-protected, revision- and fence-checked DELETE. It does not upload another snapshot on that close. The state is removed from the backend slot, so a later launch cannot restore it or load it through **Carregar estado**. The canonical `.sav` flush remains first and is not deleted.
+
+All other cases preserve runtime state: gameplay or a manual state save after the `.sav` save, an uncertain/failed save, a close outside the 10-second window, or a session that only loaded a remote snapshot without making a new live save. Manual Save state therefore stays available, as does runtime recovery from another device unless the current session itself produces the redundant-save condition. Legacy bundles carrying `promptOnLaunch: false` are deleted on launch only when compatible and tied to the current canonical save revision; if deletion fails, the snapshot remains offered for recovery.
+
+The previous verification counts apply to the superseded marker-based behavior. The corrected deletion path has not yet been tested in a browser or through the project test suite. Project builds remain prohibited unless explicitly requested.

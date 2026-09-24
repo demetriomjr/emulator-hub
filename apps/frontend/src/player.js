@@ -1,4 +1,4 @@
-import { getCloudSave, getControlProfile, getEmulatorSnapshot, getPlayerLeaseLaunch, heartbeatPlayerLease, putCloudSave, putEmulatorSnapshot } from '../../packages/hub-client.js'
+import { deleteEmulatorSnapshot, getCloudSave, getControlProfile, getEmulatorSnapshot, getPlayerLeaseLaunch, heartbeatPlayerLease, putCloudSave, putEmulatorSnapshot } from '../../packages/hub-client.js'
 import { createCloudSaveSynchronizer } from '../../packages/cloud-save-sync.mjs'
 import { observeEmulatorSaveFiles } from '../../packages/emulator-save-events.mjs'
 import { startEmulatorSavePolling } from '../../packages/emulator-save-poller.mjs'
@@ -58,7 +58,6 @@ if (!Number.isFinite(fastForwardRequest.speed) || fastForwardRequest.speed < 1.5
 let fastForwardRevision = 0
 let savedSnapshot = null
 let snapshotRevision = null
-let snapshotPromptOnLaunch = true
 let offerPolicy = null
 let lastGamepadBindings = new Set()
 let launchDescriptor = null
@@ -392,7 +391,13 @@ async function closeEmulator() {
   else if (latestSaveBytes) await queueCloudSave(latestSaveBytes)
   await pendingSaveSync
   if (snapshotCapture) await snapshotCapture.catch(() => {})
-  await saveEmulatorState({ promptOnLaunch: offerPolicy?.shouldPromptAtClose(cloudSaveSynchronizer.getRevision()) ?? true })
+  if (offerPolicy?.shouldPromptAtClose(cloudSaveSynchronizer.getRevision()) === false) {
+    if (snapshotRevision !== null) await deleteEmulatorSnapshot(launchDescriptor.snapshotUrl, snapshotRevision, { sessionId, generation: leaseGeneration })
+    savedSnapshot = null
+    snapshotRevision = null
+    return
+  }
+  await saveEmulatorState()
 }
 
 window.emulatorHubClose = closeEmulator
@@ -517,7 +522,7 @@ async function start() {
     logger: logSavePipeline,
   })
   if (Boolean(launch.patchUrl) !== Boolean(launch.patchSha256)) throw new Error('Incomplete patch configuration.')
-  const [_, snapshot, romResponse, initialPatchResponse] = await Promise.all([
+  const [_, receivedSnapshot, romResponse, initialPatchResponse] = await Promise.all([
     cloudSaveSynchronizer.load(),
     getEmulatorSnapshot(launch.snapshotUrl, { sessionId, generation: leaseGeneration }),
     fetch(launch.romUrl, { cache: 'no-store' }),
@@ -543,12 +548,21 @@ async function start() {
       launch.patchSha256 = undefined
     }
   }
-  const snapshotCompatible = snapshot && snapshot.metadata.profileId === profileId && snapshot.metadata.gameId === id && snapshot.metadata.core === launch.core && snapshot.metadata.romSha256 === launch.romSha256 && snapshot.metadata.runtimeId === launch.runtimeId && snapshot.metadata.patchSha256 === launch.patchSha256
+  let snapshot = receivedSnapshot
+  let snapshotCompatible = snapshot && snapshot.metadata.profileId === profileId && snapshot.metadata.gameId === id && snapshot.metadata.core === launch.core && snapshot.metadata.romSha256 === launch.romSha256 && snapshot.metadata.runtimeId === launch.runtimeId && snapshot.metadata.patchSha256 === launch.patchSha256
   if (snapshot && !snapshotCompatible) console.warn('[emulator-snapshot] stored snapshot is incompatible with this launch; starting without it')
+  if (snapshotCompatible && snapshot.metadata.promptOnLaunch === false && snapshot.metadata.saveRevision === cloudSaveSynchronizer.getRevision()) {
+    try {
+      await deleteEmulatorSnapshot(launch.snapshotUrl, snapshot.revision, { sessionId, generation: leaseGeneration })
+      snapshot = null
+      snapshotCompatible = false
+    } catch (error) {
+      console.warn('[emulator-snapshot] could not discard legacy redundant snapshot; keeping it available for recovery', error)
+    }
+  }
   savedSnapshot = snapshotCompatible ? { state: snapshot.state, saveRevision: snapshot.metadata.saveRevision } : null
   snapshotRevision = snapshot?.revision ?? null
-  snapshotPromptOnLaunch = snapshot?.metadata.promptOnLaunch !== false || snapshot.metadata.saveRevision !== cloudSaveSynchronizer.getRevision()
-  offerPolicy = createSnapshotOfferPolicy({ suppressedLaunchSaveRevision: savedSnapshot && !snapshotPromptOnLaunch ? cloudSaveSynchronizer.getRevision() : null })
+  offerPolicy = createSnapshotOfferPolicy()
   window.EJS_player = '#game'
   window.EJS_core = launch.core
   window.EJS_gameUrl = URL.createObjectURL(new Blob([romBytes]))
@@ -635,7 +649,7 @@ async function start() {
         await localRecoveryStore.clear(profileId, id)
       }
     }
-    const restoreCloudSnapshot = savedSnapshot && snapshotPromptOnLaunch ? await requestRestoreDecision('cloud-snapshot') : false
+    const restoreCloudSnapshot = savedSnapshot ? await requestRestoreDecision('cloud-snapshot') : false
     let restoredRuntimeState = false
     if (selectedLocalRecovery) {
       window.EJS_emulator.gameManager.loadState(new Uint8Array(selectedLocalRecovery.state))
@@ -649,10 +663,7 @@ async function start() {
     }
     if (restoredRuntimeState) offerPolicy.recordRuntimeRestore()
     watchBatterySaveChanges()
-    cloudSaveInterval = window.setInterval(() => {
-      if (!offerPolicy.shouldCapturePeriodic()) return
-      saveEmulatorState().catch(() => {})
-    }, 15000)
+    cloudSaveInterval = window.setInterval(() => saveEmulatorState().catch(() => {}), 15000)
     localRecoveryInterval = window.setInterval(() => void captureLocalRecovery(), 2_500)
     void captureLocalRecovery()
     stopFrameProgressMonitor?.()
