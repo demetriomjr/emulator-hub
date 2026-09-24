@@ -24,6 +24,7 @@ function closeHarness({ ready, deleteFails = false }) {
     cloudRecoveryDeleteTimer: null,
     cloudRecoveryDeletion: null,
     localRecoveryInterval: 2,
+    localRecoveryDeleteTimer: null,
     stopBatterySavePolling() { actions.push('stop-polling') },
     localRecoveryCapture: null,
     pendingSaveSync: Promise.resolve(),
@@ -75,6 +76,13 @@ test('normal close never creates another cloud recovery snapshot', async () => {
   assert.ok(actions.includes('upload-save'))
   assert.ok(actions.includes('delete-cloud'))
   assert.equal(actions.includes('write-cloud'), false)
+})
+
+test('normal close cancels a pending local recovery discard', async () => {
+  const { close, context, actions } = closeHarness({ ready: true })
+  context.localRecoveryDeleteTimer = 3
+  await close()
+  assert.ok(actions.some(action => Array.isArray(action) && action[0] === 'clear-timeout' && action[1] === 3))
 })
 
 test('automatic cloud deletion failure does not turn a successful save flush into a failed close', async () => {

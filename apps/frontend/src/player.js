@@ -81,6 +81,7 @@ let pendingSaveSync = Promise.resolve()
 let snapshotCapture = null
 let latestSaveBytes = null
 let localRecoveryInterval = null
+let localRecoveryDeleteTimer = null
 let localRecoveryCapture = null
 let localRecovery = null
 let restoreCandidates = []
@@ -102,6 +103,8 @@ function loseLease() {
   snapshotTelemetry.warn('lease-lost', { reason: 'heartbeat-or-session-fenced' })
   if (cloudRecoveryDeleteTimer) window.clearTimeout(cloudRecoveryDeleteTimer)
   cloudRecoveryDeleteTimer = null
+  if (localRecoveryDeleteTimer) window.clearTimeout(localRecoveryDeleteTimer)
+  localRecoveryDeleteTimer = null
   if (leaseHeartbeat) window.clearInterval(leaseHeartbeat)
   if (cloudSaveInterval) window.clearInterval(cloudSaveInterval)
   stopBatterySavePolling?.()
@@ -237,6 +240,8 @@ async function captureLocalRecovery() {
 }
 
 async function clearLocalRecovery() {
+  if (localRecoveryDeleteTimer) window.clearTimeout(localRecoveryDeleteTimer)
+  localRecoveryDeleteTimer = null
   if (localRecoveryInterval) window.clearInterval(localRecoveryInterval)
   await localRecoveryStore.clear(profileId, id)
 }
@@ -492,6 +497,28 @@ async function deleteRestoreCandidate(message) {
   }
 }
 
+function startLocalRecoveryCapture() {
+  if (closeRequested || leaseLost || localRecoveryInterval) return
+  localRecoveryInterval = window.setInterval(() => void captureLocalRecovery().catch(error => snapshotTelemetry.warn('automatic-capture-failed', { snapshotKind: 'local-recovery', code: error.code, error: error.message }, { repeating: true })), 2_500)
+  void captureLocalRecovery().catch(error => snapshotTelemetry.warn('automatic-capture-failed', { snapshotKind: 'local-recovery', code: error.code, error: error.message }, { repeating: true }))
+}
+
+function scheduleLocalRecoveryDeleteAfterChoice(candidateId) {
+  if (!candidateId) return
+  if (localRecoveryDeleteTimer) window.clearTimeout(localRecoveryDeleteTimer)
+  localRecoveryDeleteTimer = window.setTimeout(async () => {
+    localRecoveryDeleteTimer = null
+    if (!runtimeReady || closeRequested || leaseLost) return
+    try {
+      const deleted = await localRecoveryStore.deleteIfMatches(profileId, id, candidateId)
+      snapshotTelemetry[deleted ? 'info' : 'warn'](deleted ? 'local-recovery-deleted' : 'local-recovery-changed', { snapshotKind: 'local-recovery', candidateId, reason: 'choice-consumed' })
+    } catch (error) {
+      snapshotTelemetry.warn('local-recovery-delete-failed', { snapshotKind: 'local-recovery', candidateId, phase: 'choice-consumed', code: error.code, error: error.message })
+    }
+    startLocalRecoveryCapture()
+  }, 10_000)
+}
+
 function scheduleCloudRecoveryDeleteAfterChoice(revision) {
   if (!Number.isInteger(revision) || snapshotRevision !== revision) return
   if (cloudRecoveryDeleteTimer) window.clearTimeout(cloudRecoveryDeleteTimer)
@@ -519,6 +546,8 @@ function scheduleCloudRecoveryDeleteAfterChoice(revision) {
 async function closeEmulator() {
   if (cloudRecoveryDeleteTimer) window.clearTimeout(cloudRecoveryDeleteTimer)
   cloudRecoveryDeleteTimer = null
+  if (localRecoveryDeleteTimer) window.clearTimeout(localRecoveryDeleteTimer)
+  localRecoveryDeleteTimer = null
   if (!runtimeReady) {
     closeRequested = true
     for (const pending of pendingRestoreRequests.values()) {
@@ -528,6 +557,7 @@ async function closeEmulator() {
     snapshotTelemetry.info('close-preserved-recovery', { reason: 'startup-unresolved', candidateCount: restoreCandidates.length })
     return { preserveRecovery: true }
   }
+  closeRequested = true
   if (cloudSaveInterval) window.clearInterval(cloudSaveInterval)
   if (localRecoveryInterval) window.clearInterval(localRecoveryInterval)
   stopBatterySavePolling?.()
@@ -841,14 +871,6 @@ async function start() {
     const restoreChoice = restoreCandidates.length ? await requestRestoreChoice(restoreCandidates) : null
     if (closeRequested) return
     const selectedCandidateId = restoreChoice?.candidateId ?? (restoreLocalRecovery ? localRecovery?.candidateId : null)
-    if (restoreChoice?.explicit && localRecoveryPrompt && localRecoveryCandidateId && selectedCandidateId !== localRecoveryCandidateId) {
-      try {
-        const deleted = await localRecoveryStore.deleteIfMatches(profileId, id, localRecoveryCandidateId)
-        snapshotTelemetry[deleted ? 'info' : 'warn'](deleted ? 'local-recovery-deleted' : 'local-recovery-changed', { snapshotKind: 'local-recovery', candidateId: localRecoveryCandidateId, reason: 'choice-declined' })
-      } catch (error) { snapshotTelemetry.warn('local-recovery-delete-failed', { snapshotKind: 'local-recovery', candidateId: localRecoveryCandidateId, phase: 'choice-declined', code: error.code, error: error.message }) }
-      if (closeRequested) return
-      localRecovery = null
-    }
     let restoredRuntimeState = false
     const selected = restoreCandidates.find(candidate => candidate.candidateId === selectedCandidateId)
     const selectedRevision = selected?.kind === 'user-state' ? userSnapshot?.revision : selected?.kind === 'cloud-recovery' ? savedSnapshot?.revision : undefined
@@ -861,10 +883,6 @@ async function start() {
         if (current?.candidateId === selectedCandidateId && current.core === launchDescriptor.core && current.romSha256 === launchDescriptor.romSha256 && current.runtimeId === launchDescriptor.runtimeId && current.patchSha256 === launchDescriptor.patchSha256) {
           window.EJS_emulator.gameManager.loadState(new Uint8Array(current.state))
           restoredRuntimeState = true
-          try {
-            const deleted = await localRecoveryStore.deleteIfMatches(profileId, id, current.candidateId)
-            snapshotTelemetry[deleted ? 'info' : 'warn'](deleted ? 'local-recovery-deleted' : 'local-recovery-changed', { snapshotKind: 'local-recovery', candidateId: current.candidateId, reason: 'choice-restored' })
-          } catch (error) { snapshotTelemetry.warn('local-recovery-delete-failed', { snapshotKind: 'local-recovery', candidateId: current.candidateId, phase: 'choice-restored', code: error.code, error: error.message }) }
           if (closeRequested) return
         }
       } else if (selected && (selected.kind === 'cloud-recovery' || selected.kind === 'user-state')) {
@@ -904,11 +922,11 @@ async function start() {
     setPlayerReady()
     runtimeReady = true
     if (restoreCandidates.length) window.EJS_emulator.play()
+    if (restoreChoice?.explicit && localRecoveryPrompt && localRecoveryCandidateId) scheduleLocalRecoveryDeleteAfterChoice(localRecoveryCandidateId)
+    else startLocalRecoveryCapture()
     if (restoreChoice?.explicit && savedSnapshot && (!selectedCandidateId || restoredRuntimeState)) scheduleCloudRecoveryDeleteAfterChoice(savedSnapshot.revision)
     watchBatterySaveChanges()
     cloudSaveInterval = window.setInterval(() => saveEmulatorState({ reasonCode: 'periodic-recovery' }).catch(error => snapshotTelemetry.error('automatic-capture-failed', { snapshotKind: 'cloud-recovery', code: error.code, error: error.message, status: error.status }, { repeating: true })), 15000)
-    localRecoveryInterval = window.setInterval(() => void captureLocalRecovery().catch(error => snapshotTelemetry.warn('automatic-capture-failed', { snapshotKind: 'local-recovery', code: error.code, error: error.message }, { repeating: true })), 2_500)
-    void captureLocalRecovery().catch(error => snapshotTelemetry.warn('automatic-capture-failed', { snapshotKind: 'local-recovery', code: error.code, error: error.message }, { repeating: true }))
     stopFrameProgressMonitor?.()
     if (clientDiagnostics) {
       stopFrameProgressMonitor = monitorEmulatorFrameProgress({

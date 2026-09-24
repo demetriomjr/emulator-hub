@@ -40,6 +40,8 @@ function harness({ selection, localRecoveryPrompt = false, localRecovery = null,
     reportPlayerActionFailure(action) { actions.push(`failed:${action}`) },
     offerPolicy: { recordRuntimeRestore() { actions.push('record-restore') } },
     scheduleCloudRecoveryDeleteAfterChoice() { actions.push('schedule-cloud-delete') },
+    scheduleLocalRecoveryDeleteAfterChoice() { actions.push('schedule-local-delete') },
+    startLocalRecoveryCapture() {},
     savedSnapshot: cloudRecovery,
     userSnapshot: null,
     installationIdentity: { comparisonId: null },
@@ -86,11 +88,33 @@ test('Close during the local read does not apply the selected state', async () =
   assert.deepEqual(actions, [])
 })
 
-test('explicit Continue deletes only the previously offered local recovery', async () => {
+test('explicit Continue schedules deletion of the previously offered local recovery after readiness', async () => {
   const candidate = { candidateId: 'local-1', core: 'gba', romSha256: 'rom', runtimeId: 'runtime', state: new Uint8Array([1]) }
   const { actions, run } = harness({ selection: null, localRecoveryPrompt: true, localRecovery: candidate })
   await run()
-  assert.deepEqual(actions, ['delete-local', 'restart', 'restore-save'])
+  assert.deepEqual(actions, ['restart', 'restore-save', 'schedule-local-delete'])
+})
+
+test('local recovery deletion waits ten seconds and targets only the offered candidate', async () => {
+  const begin = source.indexOf('function scheduleLocalRecoveryDeleteAfterChoice(')
+  const end = source.indexOf('function scheduleCloudRecoveryDeleteAfterChoice(', begin)
+  assert.ok(begin > 0 && end > begin)
+  const actions = []
+  let delayed
+  const context = {
+    runtimeReady: true, closeRequested: false, leaseLost: false, localRecoveryDeleteTimer: null,
+    localRecoveryStore: { async deleteIfMatches(profile, game, candidateId) { actions.push(['delete', profile, game, candidateId]); return true } },
+    profileId: 'profile', id: 'game',
+    snapshotTelemetry: { info() {}, warn() {} },
+    startLocalRecoveryCapture() { actions.push(['start-local-capture']) },
+    window: { setTimeout(callback, delay) { delayed = { callback, delay }; return 1 }, clearTimeout() {} },
+  }
+  const schedule = runInNewContext(`${source.slice(begin, end)}\nscheduleLocalRecoveryDeleteAfterChoice`, context)
+  schedule('local-1')
+  assert.equal(delayed.delay, 10_000)
+  assert.deepEqual(actions, [])
+  await delayed.callback()
+  assert.deepEqual(actions, [['delete', 'profile', 'game', 'local-1'], ['start-local-capture']])
 })
 
 test('a pending restore choice keeps startup blocked until the player responds', async () => {
@@ -104,7 +128,7 @@ test('a pending restore choice keeps startup blocked until the player responds',
   assert.equal(context.runtimeReady, false)
   respond({ candidateId: null, explicit: true })
   await startup
-  assert.deepEqual(actions, ['delete-local', 'restart', 'restore-save'])
+  assert.deepEqual(actions, ['restart', 'restore-save', 'schedule-local-delete'])
 })
 
 test('the emulation core remains paused while the restore chooser waits', async () => {
@@ -119,7 +143,7 @@ test('the emulation core remains paused while the restore chooser waits', async 
   assert.deepEqual(actions, ['pause-core'])
   respond({ candidateId: null, explicit: true })
   await startup
-  assert.deepEqual(actions, ['pause-core', 'delete-local', 'restart', 'restore-save', 'play-core'])
+  assert.deepEqual(actions, ['pause-core', 'restart', 'restore-save', 'play-core', 'schedule-local-delete'])
 })
 
 test('closing an unanswered chooser never resumes the emulation core', async () => {
@@ -163,18 +187,18 @@ test('restore request has no deadline and resolves only from an explicit respons
   assert.deepEqual(await result, { candidateId: 'local-1', explicit: true })
 })
 
-test('restoring local recovery deletes its source only after loading it', async () => {
+test('restoring local recovery schedules its source for deletion only after loading it', async () => {
   const candidate = { candidateId: 'local-1', core: 'gba', romSha256: 'rom', runtimeId: 'runtime', state: new Uint8Array([1]) }
   const { actions, run } = harness({ selection: 'local', localRecoveryPrompt: true, localRecovery: candidate })
   await run()
-  assert.deepEqual(actions, ['load-state', 'delete-local', 'restore-save', 'record-restore'])
+  assert.deepEqual(actions, ['load-state', 'restore-save', 'record-restore', 'schedule-local-delete'])
 })
 
 test('a resolved choice schedules cloud deletion after readiness even when local was restored', async () => {
   const candidate = { candidateId: 'local-1', core: 'gba', romSha256: 'rom', runtimeId: 'runtime', state: new Uint8Array([1]) }
   const { actions, run } = harness({ selection: 'local', localRecoveryPrompt: true, localRecovery: candidate, cloudRecovery: { revision: 4 } })
   await run()
-  assert.deepEqual(actions, ['load-state', 'delete-local', 'restore-save', 'record-restore', 'schedule-cloud-delete'])
+  assert.deepEqual(actions, ['load-state', 'restore-save', 'record-restore', 'schedule-local-delete', 'schedule-cloud-delete'])
 })
 
 test('restoring a cloud snapshot still injects the separate canonical save', async () => {
@@ -184,12 +208,12 @@ test('restoring a cloud snapshot still injects the separate canonical save', asy
   assert.deepEqual(actions, ['load-state', 'restore-save', 'record-restore', 'schedule-cloud-delete'])
 })
 
-test('a failed local cleanup does not block the chosen state or canonical save', async () => {
+test('a pending local cleanup does not block the chosen state or canonical save', async () => {
   const candidate = { candidateId: 'local-1', core: 'gba', romSha256: 'rom', runtimeId: 'runtime', state: new Uint8Array([1]) }
   const { context, actions, run } = harness({ selection: 'local', localRecoveryPrompt: true, localRecovery: candidate })
   context.localRecoveryStore.deleteIfMatches = async () => { throw new Error('storage unavailable') }
   await run()
-  assert.deepEqual(actions, ['load-state', 'restore-save', 'record-restore'])
+  assert.deepEqual(actions, ['load-state', 'restore-save', 'record-restore', 'schedule-local-delete'])
   assert.equal(context.runtimeReady, true)
 })
 

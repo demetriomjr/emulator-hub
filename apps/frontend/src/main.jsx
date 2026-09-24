@@ -144,33 +144,25 @@ function TriggerBinding({ trigger, profile, captureTarget, onCapture }) {
   </div>
 }
 
-function SnapshotRestorePrompt({ request, onRestore, onContinue, onDelete }) {
+function SnapshotRestorePrompt({ request, onRestore, onContinue }) {
   const ready = Boolean(request.requestId)
-  const [confirmingDelete, setConfirmingDelete] = useState(null)
+  const [selectedCandidateId, setSelectedCandidateId] = useState(null)
   const candidates = request.candidates ?? []
+  const selectedCandidateAvailable = candidates.some(candidate => candidate.candidateId === selectedCandidateId)
   return <div className="snapshot-restore-overlay" role="dialog" aria-modal="true" aria-labelledby={`snapshot-restore-title-${request.sessionId}`}>
     <div className="snapshot-restore-card">
       <h2 id={`snapshot-restore-title-${request.sessionId}`}>Estados disponíveis</h2>
-      <p>Escolha um estado para restaurar ou continue pelo save do jogo.</p>
-      <div className="snapshot-restore-list">
-        {candidates.map(candidate => { const view = describeRestoreCandidate(candidate); return <section className="snapshot-restore-candidate" key={candidate.candidateId}>
-          <h3>{view.title}</h3>
-          <p>{view.reason} · {view.origin}</p>
-          <p>{view.capture}</p>
-          {view.saveFreshness && <p>{view.saveFreshness}</p>}
-          {view.gameTime && <p>{view.gameTime}</p>}
-          {confirmingDelete === candidate.candidateId && <p className="snapshot-restore-delete-confirmation">Excluir {view.title.toLowerCase()}? Esta ação não pode ser desfeita.</p>}
-          <div className="snapshot-restore-actions">
-            <button type="button" className="snapshot-restore-primary" disabled={!ready || request.deleting || request.resolving} onClick={() => onRestore(candidate.candidateId)}>Restaurar este estado</button>
-            <button type="button" className="snapshot-restore-delete" disabled={!ready || request.deleting || request.resolving} onClick={() => confirmingDelete === candidate.candidateId ? onDelete(candidate) : setConfirmingDelete(candidate.candidateId)}>{request.deleting && request.candidateId === candidate.candidateId ? 'Excluindo…' : confirmingDelete === candidate.candidateId ? 'Confirmar exclusão' : 'Excluir estado'}</button>
-            {confirmingDelete === candidate.candidateId && <button type="button" className="snapshot-restore-secondary" disabled={request.deleting || request.resolving} onClick={() => setConfirmingDelete(null)}>Cancelar</button>}
-          </div>
-        </section> })}
+      <p>Selecione um snapshot para carregar ou continue sem carregar.</p>
+      <div className="snapshot-restore-list" role="group" aria-label="Snapshots disponíveis">
+        {candidates.map(candidate => { const view = describeRestoreCandidate(candidate); return <button type="button" className={`snapshot-restore-candidate${selectedCandidateId === candidate.candidateId ? ' is-selected' : ''}`} key={candidate.candidateId} aria-pressed={selectedCandidateId === candidate.candidateId} disabled={!ready || request.resolving} onClick={() => setSelectedCandidateId(candidate.candidateId)}>
+          <span className="snapshot-restore-candidate-title">{candidate.kind === 'local-recovery' ? 'Local' : 'Remoto'}</span>
+          <span>{view.capture}</span>
+        </button> })}
       </div>
-      {request.deleteError && <p className="snapshot-restore-error" role="alert">{request.deleteError}</p>}
       {request.choiceError && <p className="snapshot-restore-error" role="alert">{request.choiceError}</p>}
       <div className="snapshot-restore-actions">
-        <button type="button" className="snapshot-restore-secondary" disabled={!ready || request.deleting || request.resolving} onClick={onContinue}>{request.resolving ? 'Carregando…' : 'Continuar pelo save do jogo'}</button>
+        <button type="button" className="snapshot-restore-primary" disabled={!ready || !selectedCandidateAvailable || request.resolving} onClick={() => onRestore(selectedCandidateId)}>Carregar snapshot</button>
+        <button type="button" className="snapshot-restore-secondary" disabled={!ready || request.resolving} onClick={onContinue}>Continuar sem carregar</button>
       </div>
     </div>
   </div>
@@ -962,32 +954,6 @@ function App() {
     restoreChoiceTimersRef.current.delete(sessionId)
   }
 
-  function requestSnapshotCandidateDelete(sessionId, candidate) {
-    const request = snapshotRestoreRequests[sessionId]
-    const session = activeSessions.find(candidate => candidate.sessionId === sessionId)
-    if (!request?.requestId || !request.candidates?.some(current => current.candidateId === candidate.candidateId && current.kind === candidate.kind) || !session || request.deleting) return
-    const frame = [...document.querySelectorAll('.player-cell')].find(candidate => candidate.dataset.sessionId === sessionId)?.querySelector('iframe')
-    if (!frame?.contentWindow) {
-      setSnapshotRestoreRequests(current => ({ ...current, [sessionId]: { ...current[sessionId], deleteError: 'O emulador não está disponível para excluir este estado.' } }))
-      return
-    }
-    const deleteRequestId = crypto.randomUUID()
-    if (!snapshotDeleteWatchdogRef.current.begin({ sessionId, requestId: deleteRequestId, restoreRequestId: request.requestId, candidateId: candidate.candidateId, kind: candidate.kind })) return
-    const updated = { ...request, candidateId: candidate.candidateId, deleting: true, deleteRequestId, timedOutDeleteRequestId: null, deleteError: null }
-    snapshotRestoreRequestsRef.current = { ...snapshotRestoreRequestsRef.current, [sessionId]: updated }
-    setSnapshotRestoreRequests(current => ({ ...current, [sessionId]: updated }))
-    frame.contentWindow.postMessage({
-      type: 'emulator-hub:snapshot-candidate-delete',
-      requestId: deleteRequestId,
-      restoreRequestId: request.requestId,
-      candidateId: candidate.candidateId,
-      kind: candidate.kind,
-      sessionId,
-      gameId: session.gameId,
-      profileId: session.profileId,
-    }, window.location.origin)
-  }
-
   async function submitProfile(event) {
     event.preventDefault()
     setProfileError('')
@@ -1344,7 +1310,7 @@ function App() {
           <div className="player-grid">
             {activeSessions.map(session => <div className={`player-cell${selectedPlayerSessionId === session.sessionId && activeSessions.length > 1 ? ' is-selected' : ''}`} data-session-id={session.sessionId} key={`${session.gameId}:${session.profileId}`} onPointerDown={() => setFocusedSessionId(session.sessionId)}>
               <iframe src={playerFrameUrl(session)} title="EmulatorJS" allow="fullscreen; gamepad" onLoad={event => configurePlayerFrame(event.currentTarget, { type: 'emulator-hub:fast-forward', enabled: fastForwardEnabled, speed: fastForwardSpeed })} />
-              {snapshotRestoreRequests[session.sessionId] && <SnapshotRestorePrompt key={snapshotRestoreRequests[session.sessionId].requestId ?? 'pending'} request={snapshotRestoreRequests[session.sessionId]} onRestore={candidateId => snapshotRestoreRequests[session.sessionId].requestId && respondToRestore(session.sessionId, snapshotRestoreRequests[session.sessionId].requestId, candidateId)} onContinue={() => snapshotRestoreRequests[session.sessionId].requestId && respondToRestore(session.sessionId, snapshotRestoreRequests[session.sessionId].requestId, null)} onDelete={candidate => requestSnapshotCandidateDelete(session.sessionId, candidate)} />}
+              {snapshotRestoreRequests[session.sessionId] && <SnapshotRestorePrompt key={snapshotRestoreRequests[session.sessionId].requestId ?? 'pending'} request={snapshotRestoreRequests[session.sessionId]} onRestore={candidateId => snapshotRestoreRequests[session.sessionId].requestId && respondToRestore(session.sessionId, snapshotRestoreRequests[session.sessionId].requestId, candidateId)} onContinue={() => snapshotRestoreRequests[session.sessionId].requestId && respondToRestore(session.sessionId, snapshotRestoreRequests[session.sessionId].requestId, null)} />}
               {playerActionErrors[session.sessionId]?.length > 0 && <div className="player-action-errors" role="alert">{playerActionErrors[session.sessionId].map((message, index) => <p key={`${index}:${message}`}>{message}</p>)}</div>}
             </div>)}
           </div>

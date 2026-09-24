@@ -277,11 +277,10 @@ Use an opaque per-installation UUID stored with browser metadata to label a remo
 - The 15-second timer writes only the `cloud-recovery` slot with reason `periodic-recovery`. A useful close capture uses `session-close`.
 - The confirmed-save/no-play policy applies only to `cloud-recovery`. When it qualifies, delete that candidate; never delete `user-state` or `local-recovery` through this path.
 - Local recovery continues every 2.5 seconds. Lease loss persists `runtime-break`; a surviving `active` record after an unclean page exit is presented as `possible-recovery`. Normal close and explicit dismissal clear it.
-- The parent combines available summaries into one chooser per player session. For several candidates, show a selectable card for each with type, reason, origin, capture time, and save-revision relationship. The user restores the selected candidate or continues from the canonical `.sav`. This replaces today's sequential local then remote prompts.
+- The parent combines available summaries into one chooser per player session. Show every candidate as a selectable option with its local/remote origin and capture date. Selection alone does not restore anything. The user then presses **Carregar snapshot** or **Continuar sem carregar**. This replaces sequential local and remote prompts.
 - The iframe retains candidate state bytes and resolves the opaque `candidateId` only within that iframe. The parent sends the selected ID or `continue` to the requesting session. Recheck compatibility immediately before `loadState()`.
-- The user may delete an individual candidate from the chooser before restoring or continuing. Deletion is candidate-scoped, requires an explicit confirmation, and never deletes the canonical `.sav` or a sibling candidate. For a remote candidate, delete only its typed slot and require the candidate revision/ETag plus the current lease fence; for local recovery, delete only that IndexedDB record after rechecking its candidate ID and generation. A stale/replaced candidate must not cause its replacement to be deleted.
-- Remove a candidate from the chooser and refresh **Carregar estado** availability only after storage confirms deletion. On failure or revision conflict, keep the candidate visible, refresh its metadata if possible, and explain that it could not be deleted. Bind the delete command and result to session, game, profile, candidate ID, revision/generation and request ID.
-- If the iframe does not answer a delete request within 8 seconds, restore the same chooser and actions with an error message. A later reply for that exact request reconciles the card only while the same chooser is idle; it cannot affect a newer request. If the user chooses a candidate while deletion is still finishing, the iframe rejects a stale ID and returns its current candidate list. The timeout proves only that the UI did not receive confirmation; it cannot prove whether persistence completed. A retry remains conditional on the candidate identity/revision, and an already absent candidate can be dismissed safely.
+- The chooser has no manual delete action. After either decision, discard offered automatic local and cloud recovery 10 seconds after the runtime is ready. Match the offered local candidate ID and remote revision so a replacement is not deleted. Delay new local captures until the offered local candidate has been discarded; otherwise a new capture could replace it before the timer fires. A discard failure is logged without interrupting play.
+- Never discard `user-state` through this decision. It remains available through **Carregar estado**. Snapshot decisions never modify the canonical `.sav`.
 - **Carregar estado** loads only `user-state`; it does not silently load the latest automatic recovery. Disable the action when no compatible user-state candidate exists. Startup recovery remains in the chooser.
 
 ### Persistence and migration
@@ -296,7 +295,7 @@ Add an optional save-adapter capability such as `readSaveMetadata(bytes, layout)
 
 ### Restore chooser contents
 
-For every candidate, show its type, why it exists, origin, capture time with timezone and clock source, and whether its associated canonical save revision is older/newer/equal. Show an internal game save time only when an adapter verifies its semantics, with a distinct “hora interna do jogo” label. Keep the same card when only one candidate exists. Offer **Restaurar este estado** and **Excluir estado** per candidate, plus **Continuar pelo save do jogo**. Deletion asks for confirmation naming the candidate type; successful deletion removes only that card. On deletion failure/conflict, keep the card and report the outcome rather than silently treating it as gone. Show no modal when there are no candidates. Bind restore, delete and their answers to session, game, profile and request ID. In multi-instance view, restoration, deletion and manual load remain scoped to the selected iframe.
+For every candidate, show a selectable option labeled Local or Remote with its capture date and clock source. The two actions are **Carregar snapshot** (enabled only after selecting an available option) and **Continuar sem carregar**. Show no modal when there are no candidates. Bind the restore decision to session, game, profile and request ID. In multi-instance view, the decision remains scoped to the selected iframe. The canonical .sav remains independent of the snapshot decision.
 
 ### Implementation plan
 
@@ -343,11 +342,11 @@ For every candidate, show its type, why it exists, origin, capture time with tim
 
 **Files:** Modify `SnapshotRestorePrompt` and player header controls in `apps/frontend/src/main.jsx`; update existing frontend UI tests and only the styles needed by this chooser.
 
-- [ ] Render one chooser per player with candidate cards for type, reason, origin, capture time/timezone, verified internal game time and save-revision relationship.
+- [x] Render one chooser per player with selectable candidate options showing local/remote origin and capture date/time.
 - [x] Sort local and remote candidates by UTC capture time, newest first, accepting browser/server clock skew; label each clock source.
-- [ ] Offer restore per candidate and **Continuar pelo save do jogo**. Keep identical metadata layout when there is a single candidate.
-- [x] Offer **Excluir estado** in the current local/remote restore prompts with explicit confirmation. On success dismiss that candidate only after storage confirms deletion; on failure/conflict keep it visible and report the failure.
-- [ ] In the typed chooser, recompute manual **Carregar estado** availability after deleting a `user-state` candidate.
+- [x] Offer a selectable local/remote candidate list and the two actions **Carregar snapshot** and **Continuar sem carregar**. Require selection only for loading.
+- [x] Remove the manual delete action from the chooser. Consume offered automatic candidates after the restore decision and a 10-second ready-runtime delay; preserve the manual `user-state`.
+- [x] Keep `user-state` available through **Carregar estado**; the restore decision never deletes it.
 - [ ] Verify local and remote candidates no longer produce sequential prompts; metadata crosses to the parent but state bytes and installation UUID do not.
 
 #### Task 6: Migration and end-to-end verification

@@ -235,9 +235,11 @@ button { font: inherit; }
 .snapshot-restore-card h2 { margin: 0 0 9px; color: #effff5; font-size: 18px; }
 .snapshot-restore-card p { margin: 0; color: #c5e5d5; font-size: 13px; line-height: 1.45; }
 .snapshot-restore-list { display: grid; gap: 10px; margin-top: 16px; text-align: left; }
-.snapshot-restore-candidate { padding: 12px; border: 1px solid #398269; border-radius: 9px; background: #0b2b28; }
-.snapshot-restore-candidate h3 { margin: 0 0 6px; color: #effff5; font-size: 14px; }
-.snapshot-restore-candidate p + p { margin-top: 4px; }
+.snapshot-restore-candidate { display: grid; gap: 5px; width: 100%; padding: 12px; border: 1px solid #398269; border-radius: 9px; color: #c5e5d5; background: #0b2b28; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.snapshot-restore-candidate:hover, .snapshot-restore-candidate.is-selected { border-color: #6fe0a4; background: #174b3c; }
+.snapshot-restore-candidate:focus-visible { outline: 3px solid #ddffe9; outline-offset: 2px; }
+.snapshot-restore-candidate:disabled { opacity: .5; cursor: wait; }
+.snapshot-restore-candidate-title { color: #effff5; font-size: 14px; font-weight: 700; }
 .snapshot-restore-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 18px; }
 .snapshot-restore-actions button { min-height: 38px; border: 1px solid #70c99e; border-radius: 8px; padding: 0 12px; color: #e8fff1; background: #174b3c; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
 .snapshot-restore-actions button:hover { border-color: #b5f7d0; background: #22624f; }
@@ -245,9 +247,6 @@ button { font: inherit; }
 .snapshot-restore-actions button:focus-visible { outline: 3px solid #ddffe9; outline-offset: 2px; }
 .snapshot-restore-actions .snapshot-restore-primary { border-color: #6fe0a4; color: #082219; background: #69d99e; }
 .snapshot-restore-actions .snapshot-restore-primary:hover { border-color: #b5f7d0; background: #8cf0ba; }
-.snapshot-restore-actions .snapshot-restore-delete { border-color: #b9787e; color: #ffe5e7; background: #532d32; }
-.snapshot-restore-actions .snapshot-restore-delete:hover { border-color: #efadb2; background: #713c42; }
-.snapshot-restore-delete-confirmation { margin-top: 12px !important; color: #ffe5be !important; }
 .snapshot-restore-error { margin-top: 12px !important; color: #ffb8bd !important; }
 .player-actions { display: flex; gap: 7px; }
 .player-global-controls, .fast-forward-control, .player-header-group { display: flex; align-items: center; gap: 7px; }
