@@ -1,4 +1,4 @@
-const minimumPollIntervalMs = 1_000
+const minimumPollIntervalMs = 3_000
 const bytesPerMillisecond = 1_024
 
 export function startEmulatorSavePolling(emulator, { setIntervalFn = setInterval, clearIntervalFn = clearInterval } = {}) {

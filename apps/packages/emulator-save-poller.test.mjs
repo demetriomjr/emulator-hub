@@ -28,7 +28,7 @@ test('flushes changed battery data through the EmulatorJS save event only while 
   })
 
   assert.equal(saveFileReads, 1)
-  assert.equal(ticks[0].delay, 1_000)
+  assert.equal(ticks[0].delay, 3_000)
   ticks[0].callback()
   assert.equal(saveFileFlushes, 0)
   emulator.started = true

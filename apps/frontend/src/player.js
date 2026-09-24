@@ -511,7 +511,7 @@ async function deleteRestoreCandidate(message) {
 
 function startLocalRecoveryCapture() {
   if (closeRequested || leaseLost || localRecoveryInterval) return
-  localRecoveryInterval = window.setInterval(() => void captureLocalRecovery().catch(error => snapshotTelemetry.warn('automatic-capture-failed', { snapshotKind: 'local-recovery', code: error.code, error: error.message }, { repeating: true })), 2_500)
+  localRecoveryInterval = window.setInterval(() => void captureLocalRecovery().catch(error => snapshotTelemetry.warn('automatic-capture-failed', { snapshotKind: 'local-recovery', code: error.code, error: error.message }, { repeating: true })), 10_000)
   void captureLocalRecovery().catch(error => snapshotTelemetry.warn('automatic-capture-failed', { snapshotKind: 'local-recovery', code: error.code, error: error.message }, { repeating: true }))
 }
 

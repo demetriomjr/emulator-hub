@@ -62,7 +62,7 @@ bytes to the `.sav` path.
   `gameManager.saveSaveFiles()` to flush SRAM through EmulatorJS's
   `saveSaveFiles` event; this poll is save-only and does not upload snapshots.
   Upload only when the save bytes hash differs from the last acknowledged
-  hash. The poll interval is at least one second and scales with SRAM size.
+  hash. The poll interval is at least three seconds and scales with SRAM size.
   Serialize uploads per player and coalesce repeated events while one upload
   is in flight.
 - Periodic recovery synchronization captures and uploads `getState()` only.
