@@ -16,6 +16,8 @@ import { createSnapshotTelemetry } from '../../packages/snapshot-telemetry.mjs'
 import { getInstallationIdentity, localCandidateSummary, remoteCandidateSummary, snapshotMatchesLaunch, snapshotUrlForKind, sortRestoreCandidates } from '../../packages/restore-candidate.mjs'
 import { softResetEmulator } from '../../packages/player-reset.mjs'
 import { createOddsManipulatorClock } from '../../packages/odds-manipulator-clock.mjs'
+import { createEmulatorAudioMute } from '../../packages/emulator-audio-mute.mjs'
+import { createPlayerInteractionLock } from '../../packages/player-interaction-lock.mjs'
 
 const parameters = new URLSearchParams(location.search)
 const id = parameters.get('id')
@@ -24,6 +26,7 @@ const sessionId = parameters.get('sessionId')
 const leaseGeneration = Number(parameters.get('leaseGeneration'))
 const restoreLocalRecovery = parameters.get('restoreRecovery') === '1'
 const localRecoveryPrompt = parameters.get('localRecoveryPrompt') === '1'
+const audioMute = createEmulatorAudioMute(parameters.get('muted') === '1')
 let localRecoveryCandidateId = parameters.get('localRecoveryCandidateId')
 const game = document.getElementById('game')
 const playerLoading = document.createElement('div')
@@ -72,6 +75,15 @@ let launchDescriptor = null
 let emulatorGameId = null
 let gamepadInput = null
 let gamepadBindings = []
+const interactionLock = createPlayerInteractionLock({
+  getEmulator: () => window.EJS_emulator,
+  releaseGamepadInput: () => gamepadInput?.release(),
+  canResume: () => runtimeReady && !closeRequested && !leaseLost,
+})
+window.emulatorHubSetInteractionLock = locked => interactionLock.setLocked(locked)
+const blockLockedKeyboard = event => { interactionLock.blockKeyboard(event) }
+window.addEventListener('keydown', blockLockedKeyboard, true)
+window.addEventListener('keyup', blockLockedKeyboard, true)
 let cloudSaveSynchronizer = null
 let cloudSaveInterval = null
 let cloudRecoveryDeleteTimer = null
@@ -220,7 +232,7 @@ function watchBatterySaveChanges() {
 }
 
 async function captureLocalRecovery() {
-  if (leaseLost || closeRequested || !runtimeReady || localRecoveryCapture || !launchDescriptor) return localRecoveryCapture
+  if (leaseLost || closeRequested || !runtimeReady || interactionLock.isLocked() || localRecoveryCapture || !launchDescriptor) return localRecoveryCapture
   const manager = window.EJS_emulator?.gameManager
   if (!manager) {
     snapshotTelemetry.warn('automatic-capture-unavailable', { snapshotKind: 'local-recovery', reason: 'manager-unavailable' }, { repeating: true })
@@ -392,7 +404,7 @@ function applyFastForward() {
 }
 
 async function saveEmulatorState({ kind = 'cloud-recovery', reasonCode = 'periodic-recovery', promptOnLaunch = true } = {}) {
-  if (leaseLost || closeRequested || !runtimeReady) return false
+  if (leaseLost || closeRequested || !runtimeReady || (kind === 'cloud-recovery' && interactionLock.isLocked())) return false
   if (kind === 'user-state') {
     if (userSnapshotCapture) return userSnapshotCapture
     userSnapshotCapture = persistEmulatorState({ kind, reasonCode: 'user-request', promptOnLaunch: true }).finally(() => { userSnapshotCapture = null })
@@ -610,8 +622,14 @@ window.addEventListener('message', event => {
   if (event.origin !== location.origin) return
   const isClosePlayerMessage = event.data?.type === 'emulator-hub:close-player'
   if (!isClosePlayerMessage && event.source !== window.parent) return
+  if (event.data?.type === 'emulator-hub:interaction-lock') {
+    if (typeof event.data.locked !== 'boolean') return
+    interactionLock.setLocked(event.data.locked)
+    return
+  }
   if (event.data?.type === 'emulator-hub:gamepad') {
     if (!Array.isArray(event.data.bindings) || !event.data.bindings.every(value => typeof value === 'string')) return
+    if (interactionLock.isLocked()) { gamepadInput?.release(); return }
     if (gamepadInput && event.data.bindings.some(binding => !lastGamepadBindings.has(binding))) offerPolicy?.recordInput()
     lastGamepadBindings = new Set(event.data.bindings)
     gamepadBindings = event.data.bindings
@@ -697,6 +715,11 @@ window.addEventListener('message', event => {
     if (!Number.isFinite(speed) || speed < 1.5 || speed > 5 || (speed * 2) % 1 !== 0) return
     fastForwardRequest = { enabled: event.data.enabled === true, speed }
     applyFastForward()
+    return
+  }
+  if (event.data?.type === 'emulator-hub:mute') {
+    if (typeof event.data.muted !== 'boolean') return
+    audioMute.setMuted(event.data.muted)
     return
   }
   if (event.data?.type === 'emulator-hub:get-fast-forward-state') {
@@ -827,7 +850,10 @@ async function start() {
     contextMenu: false,
   }
   window.EJS_ready = () => {
+    interactionLock.apply()
     stopLifecycleDiagnostics?.()
+    audioMute.attach(window.EJS_emulator)
+    audioMute.apply()
     if (isMobilePlayerViewport) window.EJS_emulator?.changeSettingOption?.('virtual-gamepad', 'enabled')
     if (isMobilePlayerViewport) {
       applyMobileGamepadLayout()
@@ -845,6 +871,8 @@ async function start() {
   window.EJS_onGameStart = async () => {
     if (closeRequested) return
     setPlayerLoading('Carregando save...')
+    audioMute.attach(window.EJS_emulator)
+    audioMute.apply()
     // EJS_ready fires before EmulatorJS creates its gameManager. Reapply here
     // because earlier setting changes can be ignored during loader startup.
     applyFastForward()
@@ -855,8 +883,11 @@ async function start() {
       getAudioContext: () => getEmulatorAudioContext(window.EJS_emulator),
     })
     gamepadInput = createEmulatorGamepadInput(window.EJS_emulator, controlProfile.bindings)
-    if (gamepadBindings.length > 0) offerPolicy.recordInput()
-    gamepadInput.update(gamepadBindings)
+    interactionLock.apply()
+    if (!interactionLock.isLocked()) {
+      if (gamepadBindings.length > 0) offerPolicy.recordInput()
+      gamepadInput.update(gamepadBindings)
+    }
     const focusPlayer = () => window.parent.postMessage({ type: 'emulator-hub:player-focused', sessionId, gameId: id, profileId }, location.origin)
     window.addEventListener('keydown', event => { if (event.isTrusted) { offerPolicy.recordInput(); focusPlayer() } }, { capture: true })
     game.addEventListener('pointerdown', event => { if (event.isTrusted) { offerPolicy.recordInput(); focusPlayer() } }, { capture: true })
@@ -921,7 +952,8 @@ async function start() {
     if (closeRequested) return
     setPlayerReady()
     runtimeReady = true
-    if (restoreCandidates.length) window.EJS_emulator.play()
+    if (restoreCandidates.length && !interactionLock.isLocked()) window.EJS_emulator.play()
+    interactionLock.apply()
     if (restoreChoice?.explicit && localRecoveryPrompt && localRecoveryCandidateId) scheduleLocalRecoveryDeleteAfterChoice(localRecoveryCandidateId)
     else startLocalRecoveryCapture()
     if (restoreChoice?.explicit && savedSnapshot && (!selectedCandidateId || restoredRuntimeState)) scheduleCloudRecoveryDeleteAfterChoice(savedSnapshot.revision)

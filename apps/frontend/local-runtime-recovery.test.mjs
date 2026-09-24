@@ -25,5 +25,5 @@ test('offers a matching recovery candidate inside a scoped emulator session', as
 test('clears local recovery after successful close synchronization and preserves it on failure', async () => {
   const hub = await readFile(new URL('./src/main.jsx', import.meta.url), 'utf8')
   assert.match(hub, /const closeResult = await flushPlayerSave\(frame\)\s+if \(!closeResult\.preserveRecovery\) \{[\s\S]*?await clearPlayerRecovery\(frame\)[\s\S]*?catch/)
-  assert.match(hub, /else void closePlayer\(\)/)
+  assert.match(hub, /else if \(!saveCloseCoordinatorRef\.current\) void closePlayer\(\)/)
 })

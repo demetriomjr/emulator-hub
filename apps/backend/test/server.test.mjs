@@ -1469,7 +1469,7 @@ describe('hub backend HTTP contract', () => {
     assert.equal(initialResponse.status, 200)
     assert.equal(initialResponse.headers.get('cache-control'), 'no-store')
     assert.deepEqual(await jsonResponse(initialResponse), {
-      preferences: { version: 1, fastForwardSpeed: 1.5, fastForwardEnabled: false, triggerActions: { l2: 'none', r2: 'none' } },
+      preferences: { version: 1, fastForwardSpeed: 1.5, fastForwardEnabled: false, muted: false, triggerActions: { l2: 'none', r2: 'none' } },
       initialized: false,
     })
 
@@ -1479,30 +1479,42 @@ describe('hub backend HTTP contract', () => {
     })
     assert.equal(migratedResponse.status, 200)
     assert.deepEqual(await jsonResponse(migratedResponse), {
-      preferences: { version: 1, fastForwardSpeed: 3.5, fastForwardEnabled: false, triggerActions: { l2: 'none', r2: 'none' } },
+      preferences: { version: 1, fastForwardSpeed: 3.5, fastForwardEnabled: false, muted: false, triggerActions: { l2: 'none', r2: 'none' } },
       initialized: true,
     })
 
     const updateResponse = await fetch(`${baseUrl}/api/user-preferences`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ triggerActions: { l2: 'fast-forward' } }),
+      body: JSON.stringify({ triggerActions: { l2: 'fast-forward' }, muted: true }),
     })
     assert.equal(updateResponse.status, 200)
     assert.deepEqual(await jsonResponse(updateResponse), {
-      preferences: { version: 1, fastForwardSpeed: 3.5, fastForwardEnabled: false, triggerActions: { l2: 'fast-forward', r2: 'none' } },
+      preferences: { version: 1, fastForwardSpeed: 3.5, fastForwardEnabled: false, muted: true, triggerActions: { l2: 'fast-forward', r2: 'none' } },
       initialized: true,
     })
 
     const invalidResponse = await fetch(`${baseUrl}/api/user-preferences`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ triggerActions: { r2: 'cheat' } }),
+      body: JSON.stringify({ muted: 'yes' }),
     })
     assert.equal(invalidResponse.status, 400)
     const storedResponse = await fetch(`${baseUrl}/api/user-preferences`)
     assert.deepEqual(await jsonResponse(storedResponse), {
-      preferences: { version: 1, fastForwardSpeed: 3.5, fastForwardEnabled: false, triggerActions: { l2: 'fast-forward', r2: 'none' } },
+      preferences: { version: 1, fastForwardSpeed: 3.5, fastForwardEnabled: false, muted: true, triggerActions: { l2: 'fast-forward', r2: 'none' } },
       initialized: true,
     })
+  })
+
+  test('first mute preference update persists before any other preference exists', async () => {
+    const { baseUrl } = await startFixture([])
+    const update = await fetch(`${baseUrl}/api/user-preferences`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ muted: true }),
+    })
+    assert.equal(update.status, 200)
+    assert.equal((await jsonResponse(update)).preferences.muted, true)
+    const stored = await fetch(`${baseUrl}/api/user-preferences`)
+    assert.equal((await jsonResponse(stored)).preferences.muted, true)
   })
 
   test('creates profiles and requires one for a launch', async () => {

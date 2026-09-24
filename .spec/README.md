@@ -1,5 +1,9 @@
 # Specifications
 
+- [Spec 061 — Selective closing of multiple emulators](061-selective-multi-emulator-close.md): choose which ROM/profile sessions to close, lock all emulator input and pause while close overlays are open, then reflow surviving instances without restarting them.
+
+- [Spec 060 — Global player mute preference](060-global-player-mute.md): persist one header mute toggle and apply it to all EmulatorJS instances, including new players.
+
 - [Spec 058 — Current snapshot system audit and save-then-close plan](058-current-snapshot-system-audit.md): current frontend/backend restore decisions, condition matrix, observed gaps, and the technical plan for suppressing unnecessary restore prompts after a confirmed save.
 
 - [Spec 057 — Player picker and runtime preferences](057-player-picker-and-runtime-preferences.md): show ordered ROM cover tiles and profiles when adding an emulator, persist Fast Forward enabled state, reorder L2/R2 actions, and reset the odds manipulator when the player wrapper first opens.

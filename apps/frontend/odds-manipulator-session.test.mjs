@@ -14,7 +14,7 @@ function launchHarness(existingSessions, purpose) {
     activeSessions: existingSessions,
     profilePurpose: purpose,
     profileGame: { id: 'game-2' },
-    fastForwardEnabled: false, fastForwardSpeed: 1.5,
+    fastForwardEnabled: false, fastForwardSpeed: 1.5, muted: false,
     MAX_PLAYER_INSTANCES: 6,
     crypto: { randomUUID: () => 'session-2' },
     async acquirePlayerLease() { return { leaseGeneration: 1 } },
@@ -53,26 +53,36 @@ test('a newly loaded iframe receives the already enabled wrapper odds clock', ()
   assert.ok(begin > 0 && end > begin)
   const actions = []
   const configure = runInNewContext(`${hub.slice(begin, end)}\nconfigurePlayerFrameOnLoad`, {
-    fastForwardEnabled: false, fastForwardSpeed: 1.5, oddsManipulatorEnabled: true,
+    fastForwardEnabled: false, fastForwardSpeed: 1.5, muted: false, oddsManipulatorEnabled: true,
+    closeLockRef: { current: false }, window: { location: { origin: 'http://localhost' } },
+    sendPlayerInteractionLock() {},
     configurePlayerFrame: (frame, message) => actions.push(['frame', frame, { ...message }]),
     configureOddsClock: (frame, session, count, timestamp) => { actions.push(['odds', frame, session, count, timestamp]); return Promise.resolve(true) },
   })
-  const frame = { contentWindow: {} }
+  const frame = { contentWindow: { postMessage() {} } }
   const session = { sessionId: 'session-2', oddsResetCount: 3 }
   configure(frame, session)
   assert.deepEqual(actions, [
     ['frame', frame, { type: 'emulator-hub:fast-forward', enabled: false, speed: 1.5 }],
+    ['frame', frame, { type: 'emulator-hub:mute', muted: false }],
     ['odds', frame, session, 3, 180_000],
   ])
 })
 
 test('closing the whole wrapper clears the odds toggle before a later first launch', async () => {
-  const begin = hub.indexOf('  async function finishPlayerClose()')
+  const begin = hub.indexOf('  async function finishSelectedPlayerClose()')
   const end = hub.indexOf('  function flushPlayerSave(', begin)
   assert.ok(begin > 0 && end > begin)
   const actions = []
-  const close = runInNewContext(`${hub.slice(begin, end)}\nfinishPlayerClose`, {
+  const close = runInNewContext(`${hub.slice(begin, end)}\nfinishSelectedPlayerClose`, {
     document: { fullscreenElement: null }, playerShellRef: { current: null },
+    activeSessions: [{ sessionId: 'session-1' }], closeBatchSessionIdsRef: { current: ['session-1'] },
+    activeSessionsRef: { current: [{ sessionId: 'session-1' }] },
+    snapshotDeleteWatchdogRef: { current: { cancel() {} } }, clearRestoreChoiceTimer() {},
+    oddsSyncRef: { current: new Map() }, oddsClockReadyRef: { current: new Map() }, oddsResetQueueRef: { current: new Map() },
+    setSnapshotRestoreRequests() {}, snapshotRestoreRequestsRef: { current: {} },
+    setUserStateAvailable() {}, setPlayerActionErrors() {}, setFocusedSessionId() {},
+    setCloseChooserOpen() {}, setSelectedCloseSessionIds() {}, Set, Object,
     setActiveSessions: sessions => actions.push(['sessions', sessions.length]),
     setOddsManipulatorEnabled: enabled => actions.push(['odds', enabled]),
     setFullscreen() {}, setSaveCloseRows() {},

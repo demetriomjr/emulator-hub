@@ -3,6 +3,7 @@ import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 import vm from 'node:vm'
 import { activeGamepadBindings, readGamepadBinding, readGamepadSnapshot, createEmulatorGamepadInput } from './gamepad-input.mjs'
+import { createPlayerInteractionLock } from './player-interaction-lock.mjs'
 
 const pad = (buttons = [], axes = [], index = 0) => ({ index, buttons: buttons.map(value => ({ pressed: value === 1, value })), axes })
 
@@ -130,6 +131,8 @@ test('player boot keeps backend controls authoritative and applies pre-start par
     monitorEmulatorFrameProgress: () => () => {},
     instrumentEmulatorLifecycle: () => () => {},
     createEmulatorGamepadInput,
+    createPlayerInteractionLock,
+    createEmulatorAudioMute: () => ({ attach() {}, apply() {} }),
   })
   await Promise.race([loaderAdded, new Promise((_, reject) => setTimeout(() => reject(new Error(`Player loader not attached: ${JSON.stringify(startupErrors)}`)), 100))])
   assert.deepEqual(startupErrors, [])

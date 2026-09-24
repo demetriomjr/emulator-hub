@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { createRoot } from 'react-dom/client'
 import { ConfigProvider } from 'antd'
@@ -109,6 +109,7 @@ function playerFrameUrl(session) {
     leaseGeneration: String(session.leaseGeneration),
     fastForward: session.initialFastForwardEnabled ? '1' : '0',
     fastForwardSpeed: String(session.initialFastForwardSpeed),
+    muted: session.initialMuted ? '1' : '0',
     restoreRecovery: session.restoreRecovery ? '1' : '0',
     localRecoveryPrompt: session.localRecoveryPrompt ? '1' : '0',
     ...(session.localRecoveryPrompt?.candidateId ? { localRecoveryCandidateId: session.localRecoveryPrompt.candidateId } : {}),
@@ -217,6 +218,8 @@ function App() {
   const [, setCatalogLoading] = useState(true)
   const [, setCatalogError] = useState('')
   const [activeSessions, setActiveSessions] = useState([])
+  const activeSessionsRef = useRef(activeSessions)
+  activeSessionsRef.current = activeSessions
   const [focusedSessionId, setFocusedSessionId] = useState(null)
   const [userStateAvailable, setUserStateAvailable] = useState({})
   const [playerActionErrors, setPlayerActionErrors] = useState({})
@@ -229,6 +232,7 @@ function App() {
   const [pokemonHubOpen, setPokemonHubOpen] = useState(false)
   const [pokemonHubCloseSignal, setPokemonHubCloseSignal] = useState(0)
   const [fastForwardEnabled, setFastForwardEnabled] = useState(false)
+  const [muted, setMuted] = useState(false)
   const [oddsManipulatorEnabled, setOddsManipulatorEnabled] = useState(false)
   const [fastForwardSpeed, setFastForwardSpeed] = useState(() => readFastForwardSpeed(document.cookie))
   const [l2TriggerAction, setL2TriggerAction] = useState('none')
@@ -266,27 +270,68 @@ function App() {
   const [fullscreen, setFullscreen] = useState(false)
   const [saveCloseRows, setSaveCloseRows] = useState(null)
   const saveCloseCoordinatorRef = useRef(null)
+  const closeBatchSessionIdsRef = useRef([])
+  const [closeChooserOpen, setCloseChooserOpen] = useState(false)
+  const [selectedCloseSessionIds, setSelectedCloseSessionIds] = useState(new Set())
+  const closeLockRef = useRef(false)
+  const awaitGamepadNeutralRef = useRef(false)
   const [viewport, setViewport] = useState(readViewport)
   const playerShellRef = useRef(null)
   const profilePickerRequestRef = useRef(0)
   const preferenceWriteRef = useRef(Promise.resolve())
+  const muteRevisionRef = useRef(0)
   const fastForwardToggleRef = useRef(Promise.resolve())
-  const confirmedPreferencesRef = useRef({ fastForwardSpeed, fastForwardEnabled: false, triggerActions: { l2: 'none', r2: 'none' } })
+  const confirmedPreferencesRef = useRef({ fastForwardSpeed, fastForwardEnabled: false, muted: false, triggerActions: { l2: 'none', r2: 'none' } })
   const oddsSyncRef = useRef(new Map())
   const oddsClockReadyRef = useRef(new Map())
   const oddsResetQueueRef = useRef(new Map())
 
+  function setPlayerInteractionLocked(locked) {
+    closeLockRef.current = locked
+    if (locked) awaitGamepadNeutralRef.current = true
+    for (const frame of document.querySelectorAll('.player-grid iframe')) {
+      sendPlayerInteractionLock(frame, locked)
+      if (locked) frame.contentWindow?.postMessage({ type: 'emulator-hub:gamepad', bindings: [] }, window.location.origin)
+    }
+  }
+
+  function sendPlayerInteractionLock(frame, locked) {
+    try {
+      if (typeof frame.contentWindow?.emulatorHubSetInteractionLock === 'function') {
+        frame.contentWindow.emulatorHubSetInteractionLock(locked)
+        return
+      }
+    } catch {}
+    frame.contentWindow?.postMessage({ type: 'emulator-hub:interaction-lock', locked }, window.location.origin)
+  }
+
+  useLayoutEffect(() => {
+    setPlayerInteractionLocked(closeChooserOpen || saveCloseRows !== null)
+  }, [closeChooserOpen, saveCloseRows !== null, activeSessions.length])
+
+  useEffect(() => {
+    if (!closeChooserOpen) return
+    const live = new Set(activeSessions.map(session => session.sessionId))
+    setSelectedCloseSessionIds(current => {
+      const next = new Set([...current].filter(sessionId => live.has(sessionId)))
+      return next.size === current.size ? current : next
+    })
+    if (live.size === 0) setCloseChooserOpen(false)
+  }, [activeSessions, closeChooserOpen])
+
   useEffect(() => {
     let active = true
+    const muteRevision = muteRevisionRef.current
     getUserPreferences().then(({ preferences, initialized }) => {
       if (!active) return
       const speed = initialized ? preferences.fastForwardSpeed : readFastForwardSpeed(document.cookie)
       const enabled = initialized ? preferences.fastForwardEnabled : false
       setFastForwardSpeed(speed)
       setFastForwardEnabled(enabled)
+      if (muteRevision === muteRevisionRef.current) setMuted(preferences.muted)
       setL2TriggerAction(preferences.triggerActions.l2)
       setR2TriggerAction(preferences.triggerActions.r2)
-      confirmedPreferencesRef.current = { fastForwardSpeed: speed, fastForwardEnabled: enabled, triggerActions: { ...preferences.triggerActions } }
+      confirmedPreferencesRef.current = { fastForwardSpeed: speed, fastForwardEnabled: enabled, muted: muteRevision === muteRevisionRef.current ? preferences.muted : confirmedPreferencesRef.current.muted, triggerActions: { ...preferences.triggerActions } }
       if (!initialized && /(?:^|;\s*)emulator_hub_fast_forward_speed=/.test(document.cookie)) void saveUserPreferences({ fastForwardSpeed: speed, initializeIfAbsent: true })
       else if (initialized) document.cookie = 'emulator_hub_fast_forward_speed=; Path=/; Max-Age=0; SameSite=Lax'
     }).catch(() => {})
@@ -514,7 +559,9 @@ function App() {
     document.body.style.overflow = 'hidden'
     const syncFullscreen = () => setFullscreen(document.fullscreenElement === playerShellRef.current)
     const onKeyDown = event => {
-      if (event.key === 'Escape' && !document.fullscreenElement) {
+      if (event.key === 'Escape' && closeChooserOpen) {
+        cancelCloseChooser()
+      } else if (event.key === 'Escape' && !document.fullscreenElement) {
         if (controlPanelOpen) {
           setControlPanelOpen(false)
           setCaptureTarget(null)
@@ -526,7 +573,7 @@ function App() {
           setCreatingProfile(false)
         }
         else if (instancePicker) setInstancePicker(false)
-        else void closePlayer()
+        else if (!saveCloseCoordinatorRef.current) void closePlayer()
       }
     }
     document.addEventListener('fullscreenchange', syncFullscreen)
@@ -536,7 +583,7 @@ function App() {
       document.removeEventListener('fullscreenchange', syncFullscreen)
       document.removeEventListener('keydown', onKeyDown)
     }
-  }, [activeSessions.length, controlPanelOpen, instancePicker, profileGame, pokemonHubOpen])
+  }, [activeSessions.length, controlPanelOpen, instancePicker, profileGame, pokemonHubOpen, closeChooserOpen])
 
   useEffect(() => {
     if (!captureTarget) return
@@ -583,9 +630,10 @@ function App() {
     // Poll the parent document so changing window focus does not silence
     // controllers. A full snapshot also reaches newly loaded frames.
     const poll = () => {
-      const bindings = controlPanelOpen || profileGame || instancePicker
-        ? []
-        : activeGamepadBindings(readGamepadSnapshot())
+      const observedBindings = activeGamepadBindings(readGamepadSnapshot())
+      if (awaitGamepadNeutralRef.current && observedBindings.length === 0) awaitGamepadNeutralRef.current = false
+      const bindings = controlPanelOpen || profileGame || instancePicker || closeLockRef.current || awaitGamepadNeutralRef.current
+        ? [] : observedBindings
       triggerActions.update(bindings, { l2: l2TriggerAction, r2: r2TriggerAction }, triggerBindings)
       broadcast(bindings)
     }
@@ -604,26 +652,30 @@ function App() {
     const frames = [...document.querySelectorAll('.player-grid iframe')]
     for (const [index, frame] of frames.entries()) {
       configurePlayerFrame(frame, message)
+      frame.contentWindow?.postMessage({ type: 'emulator-hub:mute', muted }, window.location.origin)
       const session = activeSessions[index]
       if (session && oddsManipulatorEnabled) void configureOddsClock(frame, session, session.oddsResetCount ?? 0, (session.oddsResetCount ?? 0) * 60_000)
       else if (session) frame.contentWindow?.postMessage({ type: 'emulator-hub:odds-manipulator-configure', enabled: false }, window.location.origin)
     }
-  }, [activeSessions, fastForwardEnabled, fastForwardSpeed, oddsManipulatorEnabled])
+  }, [activeSessions, fastForwardEnabled, fastForwardSpeed, muted, oddsManipulatorEnabled])
 
   async function saveUserPreferences(partial) {
+    const muteRevision = muteRevisionRef.current
     preferenceWriteRef.current = preferenceWriteRef.current.catch(() => {}).then(async () => {
       const result = await updateUserPreferences(partial)
       setFastForwardSpeed(result.preferences.fastForwardSpeed)
       setFastForwardEnabled(result.preferences.fastForwardEnabled)
+      if (muteRevision === muteRevisionRef.current) setMuted(result.preferences.muted)
       setL2TriggerAction(result.preferences.triggerActions.l2)
       setR2TriggerAction(result.preferences.triggerActions.r2)
-      confirmedPreferencesRef.current = { fastForwardSpeed: result.preferences.fastForwardSpeed, fastForwardEnabled: result.preferences.fastForwardEnabled, triggerActions: { ...result.preferences.triggerActions } }
+      confirmedPreferencesRef.current = { fastForwardSpeed: result.preferences.fastForwardSpeed, fastForwardEnabled: result.preferences.fastForwardEnabled, muted: result.preferences.muted, triggerActions: { ...result.preferences.triggerActions } }
       document.cookie = 'emulator_hub_fast_forward_speed=; Path=/; Max-Age=0; SameSite=Lax'
       return result
     }).catch(cause => {
       const confirmed = confirmedPreferencesRef.current
       setFastForwardSpeed(confirmed.fastForwardSpeed)
       setFastForwardEnabled(confirmed.fastForwardEnabled)
+      if (muteRevision === muteRevisionRef.current) setMuted(confirmed.muted)
       setL2TriggerAction(confirmed.triggerActions.l2)
       setR2TriggerAction(confirmed.triggerActions.r2)
       setError(cause.message)
@@ -725,8 +777,17 @@ function App() {
     })
   }
 
+  function toggleMute() {
+    const nextMuted = !muted
+    muteRevisionRef.current += 1
+    setMuted(nextMuted)
+    void saveUserPreferences({ muted: nextMuted }).catch(() => {})
+  }
+
   function configurePlayerFrameOnLoad(frame, session) {
+    sendPlayerInteractionLock(frame, closeLockRef.current)
     configurePlayerFrame(frame, { type: 'emulator-hub:fast-forward', enabled: fastForwardEnabled, speed: fastForwardSpeed })
+    configurePlayerFrame(frame, { type: 'emulator-hub:mute', muted })
     if (oddsManipulatorEnabled) void configureOddsClock(frame, session, session.oddsResetCount ?? 0, (session.oddsResetCount ?? 0) * 60_000)
   }
 
@@ -758,13 +819,33 @@ function App() {
     })
   }
 
-  async function closePlayer() {
+  function cancelCloseChooser() {
+    setCloseChooserOpen(false)
+    setSelectedCloseSessionIds(new Set())
+  }
+
+  function closePlayer() {
+    if (saveCloseCoordinatorRef.current || closeChooserOpen || activeSessions.length === 0) return
+    if (activeSessions.length > 1) {
+      setPlayerInteractionLocked(true)
+      setSelectedCloseSessionIds(new Set(activeSessions.map(session => session.sessionId)))
+      setCloseChooserOpen(true)
+      return
+    }
+    void closeSessions([activeSessions[0].sessionId])
+  }
+
+  async function closeSessions(sessionIds) {
     if (saveCloseCoordinatorRef.current) return
-    const tasks = activeSessions.map((session, index) => ({
+    const selected = activeSessionsRef.current.filter(session => sessionIds.includes(session.sessionId))
+    if (selected.length === 0) return
+    setPlayerInteractionLocked(true)
+    closeBatchSessionIdsRef.current = selected.map(session => session.sessionId)
+    const tasks = selected.map(session => ({
       id: `${session.gameId}:${session.profileId}`,
-      label: games.find(game => game.id === session.gameId)?.title ?? session.gameId,
+      label: `${session.gameTitle ?? session.gameId} | ${session.profileName ?? session.profileId}`,
       run: async () => {
-        const frame = document.querySelectorAll('.player-grid iframe')[index]
+        const frame = [...document.querySelectorAll('.player-cell')].find(cell => cell.dataset.sessionId === session.sessionId)?.querySelector('iframe')
         if (!frame) throw new Error('iframe do emulador não encontrado')
         await oddsSyncRef.current.get(session.sessionId)?.flush()
         const closeResult = await flushPlayerSave(frame)
@@ -780,7 +861,7 @@ function App() {
     const coordinator = createMultiSaveCloseCoordinator({ tasks, onUpdate: rows => setSaveCloseRows(rows) })
     saveCloseCoordinatorRef.current = coordinator
     const result = await coordinator.run()
-    if (result.every(row => row.status === 'saved')) await finishPlayerClose()
+    if (result.every(row => row.status === 'saved')) await finishSelectedPlayerClose()
     return
   }
 
@@ -788,10 +869,35 @@ function App() {
     const coordinator = saveCloseCoordinatorRef.current
     if (!coordinator) return
     const result = await coordinator.retryFailed()
-    if (result.every(row => row.status === 'saved')) await finishPlayerClose()
+    if (result.every(row => row.status === 'saved')) await finishSelectedPlayerClose()
   }
 
-  async function finishPlayerClose() {
+  async function finishSelectedPlayerClose() {
+    const closing = new Set(closeBatchSessionIdsRef.current)
+    const remaining = activeSessionsRef.current.filter(session => !closing.has(session.sessionId))
+    for (const sessionId of closing) {
+      snapshotDeleteWatchdogRef.current.cancel(sessionId)
+      clearRestoreChoiceTimer(sessionId)
+      oddsSyncRef.current.get(sessionId)?.stop()
+      oddsSyncRef.current.delete(sessionId)
+      oddsClockReadyRef.current.delete(sessionId)
+      oddsResetQueueRef.current.delete(sessionId)
+    }
+    const removeClosed = current => Object.fromEntries(Object.entries(current).filter(([sessionId]) => !closing.has(sessionId)))
+    setSnapshotRestoreRequests(removeClosed)
+    snapshotRestoreRequestsRef.current = removeClosed(snapshotRestoreRequestsRef.current)
+    setUserStateAvailable(removeClosed)
+    setPlayerActionErrors(removeClosed)
+    setFocusedSessionId(current => remaining.some(session => session.sessionId === current) ? current : remaining[0]?.sessionId ?? null)
+    setCloseChooserOpen(false)
+    setSelectedCloseSessionIds(new Set())
+    closeBatchSessionIdsRef.current = []
+    if (remaining.length > 0) {
+      setActiveSessions(current => current.filter(session => !closing.has(session.sessionId)))
+      setSaveCloseRows(null)
+      saveCloseCoordinatorRef.current = null
+      return
+    }
     try {
       if (document.fullscreenElement === playerShellRef.current) await document.exitFullscreen()
     } catch {
@@ -896,12 +1002,15 @@ function App() {
       setProfilePickerPlacement(null)
       const session = {
         gameId: game.id,
+        gameTitle: game.title,
         profileId: profile.id,
+        profileName: profile.name,
         oddsResetCount: profile.oddsResetCount ?? 0,
         sessionId,
         leaseGeneration: lease.leaseGeneration,
         initialFastForwardEnabled: fastForwardEnabled,
         initialFastForwardSpeed: fastForwardSpeed,
+        initialMuted: muted,
         restoreRecovery,
         localRecoveryPrompt,
       }
@@ -1245,9 +1354,12 @@ function App() {
     </div>)}
     {activeSessions.length > 0 && <div className="player-overlay" role="dialog" aria-modal="true" aria-label="Emulator">
       <div className={`player-shell player-shell-${activeSessions.length}`} ref={playerShellRef}>
-        <header className="player-header">
+        <header className="player-header" inert={closeChooserOpen || saveCloseRows !== null ? true : undefined}>
           <div className="player-global-controls">
             <div className="fast-forward-control">
+              <button className={`fast-forward-button mute-button${muted ? ' is-active' : ''}`} type="button" aria-label={muted ? 'Desmutar áudio' : 'Mutar áudio'} title={muted ? 'Desmutar áudio' : 'Mutar áudio'} aria-pressed={muted} onClick={toggleMute}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4Z" /><path d={muted ? 'M17 9l5 6m0-6-5 6' : 'M16 9a4 4 0 0 1 0 6m2-9a8 8 0 0 1 0 12'} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+              </button>
               <button className={`fast-forward-button${fastForwardEnabled ? ' is-active' : ''}`} type="button" aria-label="Fast Forward" title="Fast Forward" aria-pressed={fastForwardEnabled} onClick={toggleFastForward}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5v14l7-7-7-7Zm8 0v14l7-7-7-7Z" /></svg>
               </button>
@@ -1311,7 +1423,7 @@ function App() {
             </button>
           </div>
         </header>
-        <div className={`player-panel player-panel-${activeSessions.length}`}>
+        <div className={`player-panel player-panel-${activeSessions.length}`} inert={closeChooserOpen || saveCloseRows !== null ? true : undefined}>
           <div className="player-grid">
             {activeSessions.map(session => <div className="player-cell" data-session-id={session.sessionId} key={`${session.gameId}:${session.profileId}`} onPointerDown={() => setFocusedSessionId(session.sessionId)}>
               <iframe src={playerFrameUrl(session)} title="EmulatorJS" allow="fullscreen; gamepad" onLoad={event => configurePlayerFrameOnLoad(event.currentTarget, session)} />
@@ -1322,6 +1434,24 @@ function App() {
         </div>
       </div>
     </div>}
+    {closeChooserOpen && !saveCloseRows && renderLayer(<div className="close-chooser-overlay" role="dialog" aria-modal="true" aria-labelledby="close-chooser-title">
+      <div className="close-chooser-panel">
+        <h2 id="close-chooser-title">Fechar emuladores</h2>
+        <button type="button" className="close-chooser-all" autoFocus onClick={() => setSelectedCloseSessionIds(selectedCloseSessionIds.size === activeSessions.length ? new Set() : new Set(activeSessions.map(session => session.sessionId)))}>
+          {selectedCloseSessionIds.size === activeSessions.length ? 'Desselecionar tudo' : 'Selecionar tudo'}
+        </button>
+        <ul className="close-chooser-list">
+          {activeSessions.map(session => <li key={session.sessionId}><label>
+            <input type="checkbox" checked={selectedCloseSessionIds.has(session.sessionId)} onChange={() => setSelectedCloseSessionIds(current => { const next = new Set(current); if (next.has(session.sessionId)) next.delete(session.sessionId); else next.add(session.sessionId); return next })} />
+            <span>{session.gameTitle ?? session.gameId} | {session.profileName ?? session.profileId}</span>
+          </label></li>)}
+        </ul>
+        <div className="close-chooser-actions">
+          <button type="button" onClick={cancelCloseChooser}>Cancelar</button>
+          <button type="button" disabled={selectedCloseSessionIds.size === 0} onClick={() => { const ids = [...selectedCloseSessionIds]; setCloseChooserOpen(false); void closeSessions(ids) }}>Confirmar</button>
+        </div>
+      </div>
+    </div>)}
     {saveCloseRows && renderLayer(<div className="save-close-overlay" role="dialog" aria-modal="true" aria-labelledby="save-close-title">
       <div className="save-close-panel">
         <h2 id="save-close-title">Salvando jogos</h2>

@@ -14,6 +14,7 @@ function harness({ selection, localRecoveryPrompt = false, localRecovery = null,
   const telemetryEvents = []
   const context = {
     closeRequested: false,
+    interactionLock: { isLocked: () => false, apply() {} },
     runtimeReady: false,
     setPlayerReady() {},
     restoreCandidates: [
@@ -278,6 +279,7 @@ test('automatic captures cannot replace old recovery before the runtime is ready
   const actions = []
   const context = {
     leaseLost: false, closeRequested: false, runtimeReady: false,
+    interactionLock: { isLocked: () => false },
     localRecoveryCapture: null, snapshotCapture: null, userSnapshotCapture: null,
     launchDescriptor: { core: 'gba', romSha256: 'rom', runtimeId: 'runtime' },
     window: { EJS_emulator: { gameManager: { getState() { actions.push('read-state'); return new Uint8Array([1]) } } } },
@@ -296,12 +298,35 @@ test('automatic captures cannot replace old recovery before the runtime is ready
   assert.deepEqual(actions, ['read-state', 'write-local', 'write-remote'])
 })
 
+test('close interaction lock skips automatic local and cloud capture while runtime remains ready', async () => {
+  const captureBegin = source.indexOf('async function captureLocalRecovery()')
+  const captureEnd = source.indexOf('async function clearLocalRecovery()', captureBegin)
+  const saveBegin = source.indexOf('async function saveEmulatorState(')
+  const saveEnd = source.indexOf('async function persistEmulatorState(', saveBegin)
+  const actions = []
+  const context = {
+    leaseLost: false, closeRequested: false, runtimeReady: true,
+    interactionLock: { isLocked: () => true },
+    localRecoveryCapture: null, snapshotCapture: null, userSnapshotCapture: null,
+    launchDescriptor: { core: 'gba', romSha256: 'rom', runtimeId: 'runtime' },
+    window: { EJS_emulator: { gameManager: { getState() { actions.push('read-state'); return new Uint8Array([1]) } } } },
+    localRecoveryStore: { async put() { actions.push('write-local') } },
+    async persistEmulatorState() { actions.push('write-cloud'); return true },
+  }
+  const capture = runInNewContext(`${source.slice(captureBegin, captureEnd)}\ncaptureLocalRecovery`, context)
+  const save = runInNewContext(`${source.slice(saveBegin, saveEnd)}\nsaveEmulatorState`, context)
+  assert.equal(await capture(), null)
+  assert.equal(await save(), false)
+  assert.deepEqual(actions, [])
+})
+
 test('missing state bytes in a ready runtime are reported as an automatic capture failure', async () => {
   const begin = source.indexOf('async function captureLocalRecovery()')
   const end = source.indexOf('async function clearLocalRecovery()', begin)
   const events = []
   const capture = runInNewContext(`${source.slice(begin, end)}\ncaptureLocalRecovery`, {
     leaseLost: false, closeRequested: false, runtimeReady: true, localRecoveryCapture: null,
+    interactionLock: { isLocked: () => false },
     launchDescriptor: { core: 'gba', romSha256: 'rom', runtimeId: 'runtime' },
     window: { EJS_emulator: { gameManager: { getState: () => null } } },
     snapshotTelemetry: { warn(event, details) { events.push([event, details.reason]) } },

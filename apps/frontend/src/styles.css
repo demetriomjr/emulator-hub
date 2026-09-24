@@ -292,6 +292,17 @@ button { font: inherit; }
 }
 
 .save-close-overlay { position: fixed; z-index: 1000; inset: 0; display: grid; place-items: center; background: #000; color: #f2fff8; }
+.close-chooser-overlay { position: fixed; z-index: 1000; inset: 0; display: grid; place-items: center; padding: 16px; background: #000c; color: #f2fff8; }
+.close-chooser-panel { width: min(520px, 100%); max-height: 100%; overflow: auto; padding: 24px; border: 1px solid #398269; border-radius: 14px; background: #07100d; box-shadow: 0 18px 80px #000; }
+.close-chooser-panel h2 { margin: 0 0 16px; }
+.close-chooser-all { margin-bottom: 14px; }
+.close-chooser-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.close-chooser-list label { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 8px; background: #10251d; cursor: pointer; }
+.close-chooser-list input { accent-color: #398269; }
+.close-chooser-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+.close-chooser-panel button { padding: 9px 14px; border: 1px solid #398269; border-radius: 7px; background: #10251d; color: #f2fff8; cursor: pointer; }
+.close-chooser-actions button:last-child { background: #398269; }
+.close-chooser-panel button:disabled { opacity: .45; cursor: not-allowed; }
 .save-close-panel { width: min(520px, calc(100vw - 32px)); padding: 28px; border: 1px solid #398269; border-radius: 14px; background: #07100d; box-shadow: 0 18px 80px #000; }
 .save-close-panel h2 { margin: 0 0 8px; }
 .save-close-panel p { margin: 0 0 18px; color: #b8d8c9; }
