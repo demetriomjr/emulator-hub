@@ -271,6 +271,42 @@ describe('hub backend HTTP contract', () => {
     assert.equal('save' in decoded, false)
   })
 
+  test('keeps a suppressed snapshot across leases only when its canonical save revision matches', async () => {
+    const rom = Buffer.from('suppressed snapshot fixture')
+    const { baseUrl } = await startFixture([{ id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom) }], { 'pokemon-red.gb': rom })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Red' }) }))
+    const first = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'suppressed-one')
+    const headers = { Cookie: first.cookie, 'X-Player-Session-Id': 'suppressed-one', 'X-Player-Lease-Generation': String(first.body.leaseGeneration) }
+    const snapshotUrl = `${baseUrl}${first.body.snapshotUrl}`
+    const snapshotBody = saveRevision => encodeSnapshotBundle({
+      metadata: { profileId: profile.id, gameId: 'pokemon-red', core: 'gambatte', romSha256: sha256(rom), runtimeId: first.body.runtimeId, saveRevision, promptOnLaunch: false },
+      state: new Uint8Array([7, 8]),
+    })
+    const putSnapshot = async (saveRevision, ifMatch = '*') => fetch(snapshotUrl, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/vnd.emulator-hub.snapshot', 'If-Match': ifMatch }, body: await snapshotBody(saveRevision) })
+
+    const missingSave = await putSnapshot(0)
+    assert.equal(missingSave.status, 409)
+    assert.equal((await missingSave.json()).code, 'SNAPSHOT_SAVE_REVISION_MISMATCH')
+    const saveBytes = new Uint8Array([4, 5, 6])
+    const saveWrite = await fetch(`${baseUrl}${first.body.saveUrl}`, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/octet-stream', 'If-Match': '*' }, body: saveBytes })
+    assert.equal(saveWrite.status, 201)
+    assert.equal((await putSnapshot(0)).status, 409)
+    assert.equal((await putSnapshot(1)).status, 201)
+    const release = await fetch(`${baseUrl}/api/player-leases/suppressed-one`, { method: 'DELETE', headers: { Cookie: first.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: profile.id, gameId: 'pokemon-red', generation: first.body.leaseGeneration }) })
+    assert.equal(release.status, 200)
+
+    const second = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'suppressed-two', first.cookie)
+    const secondHeaders = { Cookie: first.cookie, 'X-Player-Session-Id': 'suppressed-two', 'X-Player-Lease-Generation': String(second.body.leaseGeneration) }
+    const read = await fetch(snapshotUrl, { headers: secondHeaders })
+    assert.equal(read.status, 200)
+    const snapshot = await decodeSnapshotBundle(new Uint8Array(await read.arrayBuffer()))
+    assert.equal(snapshot.metadata.promptOnLaunch, false)
+    assert.equal(snapshot.metadata.saveRevision, 1)
+    assert.deepEqual([...snapshot.state], [7, 8])
+    const save = await fetch(`${baseUrl}${second.body.saveUrl}`, { headers: secondHeaders })
+    assert.deepEqual([...new Uint8Array(await save.arrayBuffer())], [...saveBytes])
+  })
+
   test('simulates save events, snapshot upload, and close-time revision reconciliation across HTTP endpoints', async () => {
     const rom = Buffer.from('save and snapshot flow fixture')
     const backendEvents = []

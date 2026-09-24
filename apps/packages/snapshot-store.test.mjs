@@ -67,3 +67,17 @@ test('deletes only the matching profile and game snapshot slot', async () => {
   assert.equal(await store.get('profile-may', 'pokemon-emerald'), null)
   assert.deepEqual([...(await store.get('profile-leaf', 'pokemon-emerald')).state], [3])
 })
+
+test('persists suppressed offers and defaults legacy stored snapshots to offered', async () => {
+  const dataPath = await mkdtemp(join(tmpdir(), 'emulator-hub-snapshot-store-'))
+  const store = createSnapshotStore({ dataPath })
+  const first = await store.put('profile-may', 'pokemon-emerald', { metadata: { ...(await bundle([1], 2)).metadata, promptOnLaunch: false }, state: new Uint8Array([1]) }, null, { fenceGeneration: 1 })
+  assert.equal((await store.get('profile-may', 'pokemon-emerald')).metadata.promptOnLaunch, false)
+  await store.put('profile-may', 'pokemon-emerald', await bundle([2], 2), first.revision, { fenceGeneration: 1 })
+  assert.equal((await store.get('profile-may', 'pokemon-emerald')).metadata.promptOnLaunch, true)
+  const metadataPath = join(dataPath, 'profile-may', 'pokemon-emerald.json')
+  const legacyMetadata = JSON.parse(await readFile(metadataPath, 'utf8'))
+  delete legacyMetadata.promptOnLaunch
+  await writeFile(metadataPath, JSON.stringify(legacyMetadata))
+  assert.equal((await store.get('profile-may', 'pokemon-emerald')).metadata.promptOnLaunch, true)
+})

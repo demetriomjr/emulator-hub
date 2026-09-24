@@ -21,16 +21,16 @@ test('uses the iframe same-origin save synchronizer before falling back to postM
 
 test('uploads battery saves from EmulatorJS save events and keeps periodic snapshots state-only', async () => {
   const player = await readFile(new URL('./src/player.js', import.meta.url), 'utf8')
-  assert.match(player, /observeEmulatorSaveFiles\(emulator, queueCloudSave\)/)
+  assert.match(player, /observeEmulatorSaveFiles\(emulator, bytes => \{/)
   assert.match(player, /const traceId = crypto\.randomUUID\(\)/)
   assert.match(player, /cloudSaveSynchronizer\.syncBytes\(copy, traceId\)/)
   assert.match(player, /logger: logSavePipeline/)
   assert.match(player, /putCloudSave\(launch\.saveUrl, bytes, revision,[\s\S]*?traceId, logSavePipeline\)/)
   assert.match(player, /saveRevision: cloudSaveSynchronizer\.getRevision\(\)/)
-  const snapshotCapture = player.slice(player.indexOf('async function persistEmulatorState()'), player.indexOf('async function closeEmulator()'))
+  const snapshotCapture = player.slice(player.indexOf('async function persistEmulatorState('), player.indexOf('async function closeEmulator()'))
   assert.match(snapshotCapture, /manager\.getState\?\.\(\)/)
   assert.doesNotMatch(snapshotCapture, /saveSaveFiles|getSaveFile|syncBytes|\.sav/)
-  assert.match(player, /const restoreCloudSnapshot = savedSnapshot \? await requestRestoreDecision\('cloud-snapshot'\) : false/)
+  assert.match(player, /const restoreCloudSnapshot = savedSnapshot && snapshotPromptOnLaunch \? await requestRestoreDecision\('cloud-snapshot'\) : false/)
   assert.match(player, /restoreSnapshotState\(savedSnapshot/)
   assert.match(player, /await cloudSaveSynchronizer\.restore\(window\.EJS_emulator\.gameManager\)/)
   assert.match(player, /await cloudSaveSynchronizer\.restore\([\s\S]*?setPlayerReady\(\)/)
@@ -86,4 +86,23 @@ test('continues without a failed optional IPS or an incompatible snapshot', asyn
   assert.match(player, /launch\.patchUrl = undefined[\s\S]*launch\.patchSha256 = undefined/)
   assert.match(player, /if \(snapshot && !snapshotCompatible\) console\.warn/)
   assert.match(player, /savedSnapshot = snapshotCompatible \? /)
+})
+
+test('uses a confirmed live save to classify the final snapshot without counting the close flush', async () => {
+  const player = await readFile(new URL('./src/player.js', import.meta.url), 'utf8')
+  assert.match(player, /createSnapshotOfferPolicy/)
+  assert.match(player, /observeEmulatorSaveFiles\(emulator, bytes => \{[\s\S]*?beginLiveSave\(\)[\s\S]*?queueCloudSave\(bytes,[\s\S]*?confirmLiveSave\(token, cloudSaveSynchronizer\.getRevision\(\)\)/)
+  assert.match(player, /onUncertain: \(\) => offerPolicy\?\.recordSaveUncertainty\(\)/)
+  const close = player.slice(player.indexOf('async function closeEmulator()'), player.indexOf('window.emulatorHubClose'))
+  assert.match(close, /queueCloudSave\(finalSaveBytes\)/)
+  assert.match(close, /shouldPromptAtClose\(cloudSaveSynchronizer\.getRevision\(\)\)/)
+  assert.doesNotMatch(close, /beginLiveSave/)
+})
+
+test('a suppressed compatible snapshot remains loadable manually without triggering a launch prompt', async () => {
+  const player = await readFile(new URL('./src/player.js', import.meta.url), 'utf8')
+  assert.match(player, /savedSnapshot = snapshotCompatible \? \{ state: snapshot\.state/)
+  assert.match(player, /savedSnapshot && snapshotPromptOnLaunch \? await requestRestoreDecision\('cloud-snapshot'\) : false/)
+  assert.match(player, /if \(!offerPolicy\.shouldCapturePeriodic\(\)\) return/)
+  assert.match(player, /manager\.loadState\(new Uint8Array\(savedSnapshot\.state\)\)/)
 })

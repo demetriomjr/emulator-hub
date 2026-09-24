@@ -13,6 +13,7 @@ export function createSnapshotStore({ dataPath, lockTimeoutMs = 5_000, lockRetry
     let metadata
     try { metadata = JSON.parse(await readFile(paths.metadata, 'utf8')) } catch (error) { if (error.code === 'ENOENT') return null; throw error }
     if (!Number.isInteger(metadata.saveRevision)) metadata.saveRevision = 0
+    if (metadata.promptOnLaunch === undefined) metadata.promptOnLaunch = true
     try {
       const state = await readFile(join(paths.directory, metadata.stateFile))
       if (!validMetadata(metadata, state)) throw snapshotError('SNAPSHOT_PERSISTED_INVALID', 'Persisted snapshot is invalid.')
@@ -98,7 +99,8 @@ function validateBundle(bundle) {
   for (const key of ['core', 'romSha256', 'runtimeId']) if (typeof metadata[key] !== 'string' || metadata[key].length === 0) throw snapshotError('SNAPSHOT_INVALID', `Snapshot metadata ${key} is invalid.`)
   if (!/^[a-f0-9]{64}$/.test(metadata.romSha256)) throw snapshotError('SNAPSHOT_INVALID', 'Snapshot ROM hash is invalid.')
   if (!Number.isInteger(metadata.saveRevision) || metadata.saveRevision < 0) throw snapshotError('SNAPSHOT_INVALID', 'Snapshot save revision is invalid.')
-  return { metadata: { core: metadata.core, romSha256: metadata.romSha256, runtimeId: metadata.runtimeId, saveRevision: metadata.saveRevision }, state: bundle.state }
+  if (metadata.promptOnLaunch !== undefined && typeof metadata.promptOnLaunch !== 'boolean') throw snapshotError('SNAPSHOT_INVALID', 'Snapshot promptOnLaunch is invalid.')
+  return { metadata: { core: metadata.core, romSha256: metadata.romSha256, runtimeId: metadata.runtimeId, saveRevision: metadata.saveRevision, promptOnLaunch: metadata.promptOnLaunch ?? true }, state: bundle.state }
 }
 
 function validMetadata(metadata, state) {
@@ -106,6 +108,7 @@ function validMetadata(metadata, state) {
     && Number.isInteger(metadata.fenceGeneration) && metadata.fenceGeneration >= 0
     && Number.isInteger(metadata.byteLength) && metadata.byteLength === state.byteLength
     && Number.isInteger(metadata.saveRevision) && metadata.saveRevision >= 0
+    && typeof metadata.promptOnLaunch === 'boolean'
     && typeof metadata.stateFile === 'string'
     && typeof metadata.core === 'string' && typeof metadata.runtimeId === 'string'
     && /^[a-f0-9]{64}$/.test(metadata.romSha256 ?? '')

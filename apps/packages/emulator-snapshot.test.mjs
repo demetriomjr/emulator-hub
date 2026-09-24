@@ -22,6 +22,7 @@ test('encodes and verifies state with its associated canonical save revision', a
   assert.deepEqual([...decoded.state], [1, 2, 3])
   assert.deepEqual(decoded.metadata, {
     ...metadata,
+    promptOnLaunch: true,
     stateByteLength: 3,
     sha256: '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81',
   })
@@ -47,4 +48,15 @@ test('rejects a snapshot with a malformed optional patch hash', async () => {
     encodeSnapshotBundle({ metadata: { ...metadata, patchSha256: 'not-a-hash' }, state: new Uint8Array([1]) }),
     /patch hash/i,
   )
+})
+
+test('round-trips a suppressed restore offer and defaults legacy bundles to offered', async () => {
+  const suppressed = await decodeSnapshotBundle(await encodeSnapshotBundle({ metadata: { ...metadata, promptOnLaunch: false }, state: new Uint8Array([4]) }))
+  const legacy = await decodeSnapshotBundle(await encodeSnapshotBundle({ metadata, state: new Uint8Array([5]) }))
+  assert.equal(suppressed.metadata.promptOnLaunch, false)
+  assert.equal(legacy.metadata.promptOnLaunch, true)
+})
+
+test('rejects a non-boolean restore offer field', async () => {
+  await assert.rejects(encodeSnapshotBundle({ metadata: { ...metadata, promptOnLaunch: 'false' }, state: new Uint8Array([4]) }), /prompt/i)
 })

@@ -1183,6 +1183,10 @@ async function handleSnapshot(request, response, config, { profileId, gameId }) 
   if (!patchVerification.ok) return json(response, 409, { error: patchVerification.reason })
   const runtimeId = 'emulatorjs-4.2.3'
   if (decoded.metadata.profileId !== profileId || decoded.metadata.gameId !== gameId || decoded.metadata.core !== entry.core || decoded.metadata.romSha256 !== entry.sha256 || decoded.metadata.runtimeId !== runtimeId || decoded.metadata.patchSha256 !== patchVerification.patch?.sha256) return json(response, 400, { error: 'Snapshot metadata is incompatible with this launch.' })
+  if (decoded.metadata.promptOnLaunch === false) {
+    const save = await config.saveStore.get(profileId, gameId)
+    if (!save || save.revision !== decoded.metadata.saveRevision) return json(response, 409, { error: 'Snapshot suppression requires the current canonical save revision.', code: 'SNAPSHOT_SAVE_REVISION_MISMATCH' })
+  }
   try {
     const saved = await config.snapshotStore.put(profileId, gameId, decoded, expectedRevision, { fenceGeneration: lease.generation })
     json(response, expectedRevision === null ? 201 : 200, saved)
