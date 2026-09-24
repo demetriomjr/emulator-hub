@@ -30,4 +30,5 @@ test('production backend image copies IPS assets into the backend patch director
   const dockerfile = await readFile(backendDockerfile, 'utf8')
 
   assert.match(dockerfile, /COPY assets\/ips\/ \.\/backend\/patches\//)
+  assert.match(dockerfile, /RUN rm -rf \.\/backend\/patches[\s\S]*COPY assets\/ips\/ \.\/backend\/patches\//)
 })

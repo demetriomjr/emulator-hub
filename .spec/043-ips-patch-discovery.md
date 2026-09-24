@@ -20,7 +20,7 @@ explicit, data-only association using the trusted ROM and patch SHA-256 values.
   "patches": [
     {
       "romSha256": "<64 lowercase hex characters>",
-      "file": "<safe .ips filename>",
+      "file": "<safe relative path to a .ips file>",
       "patchSha256": "<64 lowercase hex characters>"
     }
   ]
@@ -31,6 +31,12 @@ Adding a patch requires adding its IPS asset and registry entry only. A registry
 entry applies to the exact ROM bytes, independent of ROM filename, title,
 catalog ID, or game system. A ROM can have at most one registered IPS patch;
 duplicate entries are ambiguous and are skipped.
+Organize assets under a game directory and name each IPS after the exact ROM
+SHA-256, for example `Pokemon Emerald/<romSha256>.ips`. The directory is for
+human navigation; only the verified ROM hash controls matching. Relative paths
+must stay inside the patch directory, and no path component may be a symlink.
+The production image clears its patch directory before copying `assets/ips/`
+so obsolete patches from the backend source cannot remain in the image.
 
 ## Runtime behavior
 

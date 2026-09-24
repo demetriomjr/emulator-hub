@@ -25,8 +25,9 @@ IPS patches are discovered globally by the verified ROM SHA-256. The
 `patches/manifest.json` file maps ROM hashes to patch filenames and trusted
 patch hashes; IPS format, path safety, and content hash are checked before a
 patch is attached. A patch is independent of catalog IDs, titles, and ROM
-filenames. To add a patch, add its `.ips` file and a manifest entry; no game
-logic change is required. Missing, ambiguous, unsafe, malformed, unreadable, or
+filenames. To add a patch, place `<ROM SHA-256>.ips` in a game directory under
+`assets/ips/` and add its relative path to the manifest; no game logic change
+is required. Missing, ambiguous, unsafe, malformed, unreadable, or
 tampered patch data is skipped with a warning, and the ROM launches unpatched.
 The production image copies the entire `assets/ips/` directory into
 `patches/`, including its manifest.

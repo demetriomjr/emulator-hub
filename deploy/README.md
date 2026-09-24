@@ -22,6 +22,14 @@ Caddy and Redis are external services.
    docker compose --env-file deploy/.env up -d --build
    ```
 
+The backend image takes IPS files only from `assets/ips/`. Its patch directory
+is cleared before those files are copied, and Compose does not mount that
+directory as a volume. On the next deployment with `--build`, the new backend
+container contains the current manifest and patches; obsolete IPS files from
+the previous image do not carry over. The persistent save data and ROM mounts
+are unaffected. `docker compose up -d` without `--build` may keep using the old
+image and must not be used to publish a changed IPS.
+
 For a containerized Caddy, configure the upstream as `frontend:8080` and
 attach Caddy to `CADDY_NETWORK`. The backend joins `REDIS_NETWORK` so its
 `REDIS_URL` must use the Redis container DNS name on that network. For Caddy
