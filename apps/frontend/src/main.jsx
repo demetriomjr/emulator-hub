@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { createRoot } from 'react-dom/client'
 import { ConfigProvider } from 'antd'
@@ -222,8 +222,8 @@ function setControlBinding(profile, id, kind, value) {
 
 function App() {
   const [games, setGames] = useState([])
-  const [catalogLoading, setCatalogLoading] = useState(true)
-  const [catalogError, setCatalogError] = useState('')
+  const [, setCatalogLoading] = useState(true)
+  const [, setCatalogError] = useState('')
   const [activeSessions, setActiveSessions] = useState([])
   const [focusedSessionId, setFocusedSessionId] = useState(null)
   const [userStateAvailable, setUserStateAvailable] = useState({})

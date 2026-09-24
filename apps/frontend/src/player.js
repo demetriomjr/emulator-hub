@@ -711,7 +711,7 @@ async function start() {
     logger: logSavePipeline,
   })
   if (Boolean(launch.patchUrl) !== Boolean(launch.patchSha256)) throw new Error('Incomplete patch configuration.')
-  const [_, receivedSnapshot, receivedUserSnapshot, romResponse, initialPatchResponse] = await Promise.all([
+  const [, receivedSnapshot, receivedUserSnapshot, romResponse, initialPatchResponse] = await Promise.all([
     cloudSaveSynchronizer.load(),
     getEmulatorSnapshot(launch.snapshotUrl, { sessionId, generation: leaseGeneration }),
     getEmulatorSnapshot(snapshotUrlForKind(launch.snapshotUrl, 'user-state'), { sessionId, generation: leaseGeneration }),

@@ -6,6 +6,8 @@
     "predev": "node scripts/sync-pokemon-resources.mjs --background",
     "dev": "vite",
     "sync:pokemon-resources": "node scripts/sync-pokemon-resources.mjs --refresh",
+    "lint": "eslint .",
+    "prebuild": "npm run lint",
     "build": "vite build"
   },
   "dependencies": {
@@ -17,7 +19,10 @@
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@vitejs/plugin-react": "^6.0.1",
+    "eslint": "^10.11.0",
+    "globals": "^17.12.0",
     "vite": "^8.0.0"
   }
 }
