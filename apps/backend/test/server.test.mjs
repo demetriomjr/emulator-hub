@@ -1284,7 +1284,7 @@ describe('hub backend HTTP contract', () => {
     assert.equal(initialResponse.status, 200)
     assert.equal(initialResponse.headers.get('cache-control'), 'no-store')
     assert.deepEqual(await jsonResponse(initialResponse), {
-      preferences: { version: 1, fastForwardSpeed: 1.5, triggerActions: { l2: 'none', r2: 'none' } },
+      preferences: { version: 1, fastForwardSpeed: 1.5, fastForwardEnabled: false, triggerActions: { l2: 'none', r2: 'none' } },
       initialized: false,
     })
 
@@ -1294,7 +1294,7 @@ describe('hub backend HTTP contract', () => {
     })
     assert.equal(migratedResponse.status, 200)
     assert.deepEqual(await jsonResponse(migratedResponse), {
-      preferences: { version: 1, fastForwardSpeed: 3.5, triggerActions: { l2: 'none', r2: 'none' } },
+      preferences: { version: 1, fastForwardSpeed: 3.5, fastForwardEnabled: false, triggerActions: { l2: 'none', r2: 'none' } },
       initialized: true,
     })
 
@@ -1304,7 +1304,7 @@ describe('hub backend HTTP contract', () => {
     })
     assert.equal(updateResponse.status, 200)
     assert.deepEqual(await jsonResponse(updateResponse), {
-      preferences: { version: 1, fastForwardSpeed: 3.5, triggerActions: { l2: 'fast-forward', r2: 'none' } },
+      preferences: { version: 1, fastForwardSpeed: 3.5, fastForwardEnabled: false, triggerActions: { l2: 'fast-forward', r2: 'none' } },
       initialized: true,
     })
 
@@ -1315,7 +1315,7 @@ describe('hub backend HTTP contract', () => {
     assert.equal(invalidResponse.status, 400)
     const storedResponse = await fetch(`${baseUrl}/api/user-preferences`)
     assert.deepEqual(await jsonResponse(storedResponse), {
-      preferences: { version: 1, fastForwardSpeed: 3.5, triggerActions: { l2: 'fast-forward', r2: 'none' } },
+      preferences: { version: 1, fastForwardSpeed: 3.5, fastForwardEnabled: false, triggerActions: { l2: 'fast-forward', r2: 'none' } },
       initialized: true,
     })
   })

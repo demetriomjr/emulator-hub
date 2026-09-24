@@ -30,6 +30,19 @@ button { font: inherit; }
 .title small { font-size: 11px; font-weight: 650; }
 .profile-overlay { position: fixed; inset: 0; z-index: 20; display: grid; place-items: start center; padding: clamp(28px, 8vh, 88px) 16px; background: #02090de6; }
 .profile-panel { width: min(390px, 100%); overflow: hidden; border: 1px solid #398269; border-radius: 18px; background: #10262a; box-shadow: 0 26px 80px #000c; }
+.instance-picker-panel { width: min(var(--instance-picker-width, 760px), calc(100vw - 32px)); height: min(600px, 82dvh); display: flex; flex-direction: column; }
+.instance-picker-body { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 14px; overflow: hidden; }
+.instance-rom-strip { display: flex; flex: none; gap: 12px; max-width: 100%; overflow-x: auto; padding: 2px 2px 9px; }
+.instance-rom-tile { display: grid; flex: 0 0 96px; gap: 6px; justify-items: center; min-width: 0; padding: 4px; border: 1px solid transparent; border-radius: 10px; color: #d8f8e7; background: transparent; cursor: pointer; }
+.instance-rom-tile:hover, .instance-rom-tile.is-selected { border-color: #77e2af; background: #1b473d; }
+.instance-rom-tile:focus-visible { outline: 3px solid #ddffe9; outline-offset: 2px; }
+.instance-rom-cover { display: grid; place-items: center; width: 84px; aspect-ratio: 1; overflow: hidden; border: 1px solid #397c67; border-radius: 9px; color: #effff5; text-align: center; background: radial-gradient(circle at 50% 46%, #357c64 0, #1a5149 55%, #10333b 100%); }
+.instance-rom-cover img { width: 100%; height: 100%; object-fit: cover; }
+.instance-rom-cover > span { padding: 5px; font-size: 10px; line-height: 1.25; }
+.instance-picker-body .profile-picker-content { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px; min-height: 0; overflow: hidden; }
+.instance-picker-body .profile-picker-profiles { min-height: 0; overflow: auto; }
+.instance-picker-body .profile-list { max-height: min(34dvh, 300px); }
+.instance-picker-body .profile-picker-create { align-self: start; }
 .profile-picker-overlay { display: block; padding: 0; }
 .profile-picker-panel { position: fixed; overflow: hidden; }
 .profile-picker-content { display: contents; }
@@ -283,7 +296,9 @@ button { font: inherit; }
   .hub-section-internal .boxes, .hub-section-games .boxes { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .profile-picker-mobile { place-items: stretch; padding: 12px; }
   .profile-picker-mobile .profile-picker-panel { position: fixed !important; inset: 12px !important; display: flex; width: auto !important; height: auto !important; max-height: none !important; flex-direction: column; border: 1px solid #398269; border-radius: 18px; }
+  .profile-picker-mobile .instance-picker-panel { width: auto !important; height: calc(100dvh - 24px); }
   .profile-picker-mobile .profile-body { display: flex; min-height: 0; flex: 1; padding: 18px; }
+  .profile-picker-mobile .instance-picker-body { flex: 1; }
   .profile-picker-mobile .profile-picker-content { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; width: 100%; min-height: 0; }
   .profile-picker-mobile .profile-picker-profiles, .profile-picker-mobile .profile-picker-create { display: flex; min-height: 0; flex-direction: column; }
   .profile-picker-mobile .profile-list { width: 100%; border: 0; align-self: start; display: grid; max-height: 100%; flex: none; gap: 8px; padding: 0; overflow-y: auto; }

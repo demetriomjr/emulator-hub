@@ -1,5 +1,7 @@
 # Specifications
 
+- [Spec 057 — Player picker and runtime preferences](057-player-picker-and-runtime-preferences.md): show ordered ROM cover tiles and profiles when adding an emulator, persist Fast Forward enabled state, reorder L2/R2 actions, and reset the odds manipulator on each emulator start.
+
 - [Spec 050 — Authentic GBA RTC clock provider](050-authentic-gba-rtc-clock.md): make the host-clock RTC path explicit, testable, and extensible without changing game RNG semantics.
 
 - [Spec 055 — Reset advances the emulator clock](055-reset-advances-emulator-clock.md): optionally configure a virtual clock for reset-based shiny hunting, advancing it on soft and hard resets.

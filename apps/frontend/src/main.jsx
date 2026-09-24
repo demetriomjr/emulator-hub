@@ -232,7 +232,7 @@ function App() {
   const profilePickerRequestRef = useRef(0)
   const preferenceWriteRef = useRef(Promise.resolve())
   const fastForwardToggleRef = useRef(Promise.resolve())
-  const confirmedPreferencesRef = useRef({ fastForwardSpeed, triggerActions: { l2: 'none', r2: 'none' } })
+  const confirmedPreferencesRef = useRef({ fastForwardSpeed, fastForwardEnabled: false, triggerActions: { l2: 'none', r2: 'none' } })
   const oddsSyncRef = useRef(new Map())
   const oddsClockReadyRef = useRef(new Map())
   const oddsResetQueueRef = useRef(new Map())
@@ -242,10 +242,12 @@ function App() {
     getUserPreferences().then(({ preferences, initialized }) => {
       if (!active) return
       const speed = initialized ? preferences.fastForwardSpeed : readFastForwardSpeed(document.cookie)
+      const enabled = initialized ? preferences.fastForwardEnabled : false
       setFastForwardSpeed(speed)
+      setFastForwardEnabled(enabled)
       setL2TriggerAction(preferences.triggerActions.l2)
       setR2TriggerAction(preferences.triggerActions.r2)
-      confirmedPreferencesRef.current = { fastForwardSpeed: speed, triggerActions: { ...preferences.triggerActions } }
+      confirmedPreferencesRef.current = { fastForwardSpeed: speed, fastForwardEnabled: enabled, triggerActions: { ...preferences.triggerActions } }
       if (!initialized && /(?:^|;\s*)emulator_hub_fast_forward_speed=/.test(document.cookie)) void saveUserPreferences({ fastForwardSpeed: speed, initializeIfAbsent: true })
       else if (initialized) document.cookie = 'emulator_hub_fast_forward_speed=; Path=/; Max-Age=0; SameSite=Lax'
     }).catch(() => {})
@@ -399,6 +401,7 @@ function App() {
         } else if (pokemonHubOpen) setPokemonHubCloseSignal(current => current + 1)
         else if (profileGame) {
           setProfileGame(null)
+          setInstancePicker(false)
           setProfilePickerPlacement(null)
           setCreatingProfile(false)
         }
@@ -483,6 +486,7 @@ function App() {
       configurePlayerFrame(frame, message)
       const session = activeSessions[index]
       if (session && oddsManipulatorEnabled) void configureOddsClock(frame, session, session.oddsResetCount ?? 0, (session.oddsResetCount ?? 0) * 60_000)
+      else if (session) frame.contentWindow?.postMessage({ type: 'emulator-hub:odds-manipulator-configure', enabled: false }, window.location.origin)
     }
   }, [activeSessions, fastForwardEnabled, fastForwardSpeed, oddsManipulatorEnabled])
 
@@ -490,14 +494,16 @@ function App() {
     preferenceWriteRef.current = preferenceWriteRef.current.catch(() => {}).then(async () => {
       const result = await updateUserPreferences(partial)
       setFastForwardSpeed(result.preferences.fastForwardSpeed)
+      setFastForwardEnabled(result.preferences.fastForwardEnabled)
       setL2TriggerAction(result.preferences.triggerActions.l2)
       setR2TriggerAction(result.preferences.triggerActions.r2)
-      confirmedPreferencesRef.current = { fastForwardSpeed: result.preferences.fastForwardSpeed, triggerActions: { ...result.preferences.triggerActions } }
+      confirmedPreferencesRef.current = { fastForwardSpeed: result.preferences.fastForwardSpeed, fastForwardEnabled: result.preferences.fastForwardEnabled, triggerActions: { ...result.preferences.triggerActions } }
       document.cookie = 'emulator_hub_fast_forward_speed=; Path=/; Max-Age=0; SameSite=Lax'
       return result
     }).catch(cause => {
       const confirmed = confirmedPreferencesRef.current
       setFastForwardSpeed(confirmed.fastForwardSpeed)
+      setFastForwardEnabled(confirmed.fastForwardEnabled)
       setL2TriggerAction(confirmed.triggerActions.l2)
       setR2TriggerAction(confirmed.triggerActions.r2)
       setError(cause.message)
@@ -507,7 +513,9 @@ function App() {
   }
 
   function toggleFastForward() {
-    setFastForwardEnabled(current => !current)
+    const enabled = !fastForwardEnabled
+    setFastForwardEnabled(enabled)
+    void saveUserPreferences({ fastForwardEnabled: enabled })
   }
 
   function toggleFastForwardFromFirstFrame() {
@@ -521,6 +529,7 @@ function App() {
         if (document.querySelector('.player-grid iframe') !== frame) { finish(); return }
         const enabled = !event.data.enabled
         setFastForwardEnabled(enabled)
+        void saveUserPreferences({ fastForwardEnabled: enabled })
         const message = { type: 'emulator-hub:fast-forward', enabled, speed: fastForwardSpeed }
         for (const activeFrame of document.querySelectorAll('.player-grid iframe')) configurePlayerFrame(activeFrame, message)
         finish()
@@ -611,6 +620,16 @@ function App() {
         void oddsSyncRef.current.get(session.sessionId)?.flush()
         frame.contentWindow?.postMessage({ type: 'emulator-hub:odds-manipulator-configure', enabled: false }, window.location.origin)
       }
+    })
+  }
+
+  function disableOddsManipulator() {
+    setOddsManipulatorEnabled(false)
+    const frames = [...document.querySelectorAll('.player-grid iframe')]
+    activeSessions.forEach((session, index) => {
+      oddsClockReadyRef.current.delete(session.sessionId)
+      void oddsSyncRef.current.get(session.sessionId)?.flush()
+      frames[index]?.contentWindow?.postMessage({ type: 'emulator-hub:odds-manipulator-configure', enabled: false }, window.location.origin)
     })
   }
 
@@ -762,7 +781,9 @@ function App() {
       const game = profileGame
       const sessionId = crypto.randomUUID()
       const lease = await acquirePlayerLease(game.id, profile.id, sessionId)
+      disableOddsManipulator()
       setProfileGame(null)
+      setInstancePicker(false)
       setProfilePickerPlacement(null)
       const session = {
         gameId: game.id,
@@ -858,6 +879,12 @@ function App() {
     if (isMobileLandscape || activeSessions.length >= MAX_PLAYER_INSTANCES) return
     setError('')
     setInstancePicker(true)
+    const firstGame = gameSections.flatMap(section => section.games).find(game => game.status === 'ready')
+    if (firstGame) openProfilePicker(firstGame, 'add-instance')
+    else {
+      setInstancePicker(false)
+      setError('Não há ROMs prontas para adicionar.')
+    }
   }
 
   async function openControlPanel() {
@@ -896,7 +923,6 @@ function App() {
   }
 
   function chooseInstanceGame(game) {
-    setInstancePicker(false)
     openProfilePicker(game, 'add-instance')
   }
 
@@ -1004,28 +1030,18 @@ function App() {
       </div>
     </div>)}
     {pokemonHubOpen && renderLayer(<React.Suspense fallback={<div className="pokemon-workspace" role="status">Carregando workspace...</div>}><PokemonHub onClose={() => setPokemonHubOpen(false)} closeSignal={pokemonHubCloseSignal} /></React.Suspense>)}
-    {instancePicker && renderLayer(<div className="profile-overlay" role="dialog" aria-modal="true" aria-label="Selecionar jogo">
-      <div className="profile-panel">
-        <header className="profile-header">
-          <h2>Selecionar jogo</h2>
-          <button className="dialog-close" type="button" aria-label="Fechar seleção de jogo" onClick={() => setInstancePicker(false)}>×</button>
-        </header>
-        <div className="profile-body">
-          <div className="profile-list">
-            {games.filter(game => game.status === 'ready').map(game => <div className="profile-row" key={game.id}>
-              <button className="profile-select" type="button" onClick={() => chooseInstanceGame(game)}>{game.title}</button>
-            </div>)}
-          </div>
-        </div>
-      </div>
-    </div>)}
     {profileGame && renderLayer(<div className={`profile-overlay${profilePickerPlacement ? ' profile-picker-overlay' : ''} profile-picker-mobile`} role="dialog" aria-modal="true" aria-label="Selecionar perfil">
-      <div className={`profile-panel${profilePickerPlacement ? ' profile-picker-panel' : ''}`} style={profilePickerPlacement ? profilePickerPlacement : undefined}>
+      <div className={`profile-panel${profilePickerPlacement ? ' profile-picker-panel' : ''}${profilePurpose === 'add-instance' ? ' instance-picker-panel' : ''}`} style={profilePurpose === 'add-instance' ? { '--instance-picker-width': `${Math.max(560, gameSections.flatMap(section => section.games).filter(game => game.status === 'ready').length * 108 + 44)}px` } : profilePickerPlacement ? profilePickerPlacement : undefined}>
         <header className="profile-header">
-          <h2>{profileGame.title}</h2>
-          <button className="dialog-close" type="button" aria-label="Fechar seleção de perfil" onClick={() => { setProfileGame(null); setProfilePickerPlacement(null); setCreatingProfile(false) }}>×</button>
+          <h2>{profilePurpose === 'add-instance' ? 'Adicionar emulador' : profileGame.title}</h2>
+          <button className="dialog-close" type="button" aria-label="Fechar seleção de perfil" onClick={() => { setProfileGame(null); setProfilePickerPlacement(null); setInstancePicker(false); setCreatingProfile(false) }}>×</button>
         </header>
-        <div className="profile-body">
+        <div className={`profile-body${profilePurpose === 'add-instance' ? ' instance-picker-body' : ''}`}>
+          {profilePurpose === 'add-instance' && <div className="instance-rom-strip" aria-label="ROMs disponíveis">
+            {gameSections.flatMap(section => section.games).filter(game => game.status === 'ready').map(game => <button className={`instance-rom-tile${profileGame.id === game.id ? ' is-selected' : ''}`} key={game.id} type="button" aria-label={`Selecionar ${game.title}`} aria-pressed={profileGame.id === game.id} onClick={() => chooseInstanceGame(game)}>
+              <span className="instance-rom-cover">{game.coverUrl ? <img src={game.coverUrl} alt={`Capa de ${game.title}`} /> : <span>{game.title}</span>}</span>
+            </button>)}
+          </div>}
           <div className="profile-picker-content">
           <div className="profile-picker-profiles">
           {profiles.length > 0 && <div className="profile-list">

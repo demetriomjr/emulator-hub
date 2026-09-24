@@ -8,10 +8,10 @@ test('returns defaults until initialized and merges validated partial updates', 
   const store = createRedisUserPreferencesStore({ persistence: createMemoryRedisPersistence() })
   assert.deepEqual(await store.get(), { preferences: defaultUserPreferences, initialized: false })
   assert.deepEqual(await store.patch({ fastForwardSpeed: 4, initializeIfAbsent: true }), {
-    preferences: { version: 1, fastForwardSpeed: 4, triggerActions: { l2: 'none', r2: 'none' } }, initialized: true,
+    preferences: { version: 1, fastForwardSpeed: 4, fastForwardEnabled: false, triggerActions: { l2: 'none', r2: 'none' } }, initialized: true,
   })
   assert.deepEqual(await store.patch({ triggerActions: { l2: 'fast-forward' } }), {
-    preferences: { version: 1, fastForwardSpeed: 4, triggerActions: { l2: 'fast-forward', r2: 'none' } }, initialized: true,
+    preferences: { version: 1, fastForwardSpeed: 4, fastForwardEnabled: false, triggerActions: { l2: 'fast-forward', r2: 'none' } }, initialized: true,
   })
 })
 

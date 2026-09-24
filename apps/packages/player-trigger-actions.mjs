@@ -1,10 +1,10 @@
 export const playerTriggerActionOptions = Object.freeze([
   { value: 'none', label: 'Do nothing' },
+  { value: 'fast-forward', label: 'Fast Forward' },
   { value: 'soft-reset', label: 'Soft Reset' },
   { value: 'reset', label: 'Hard Reset' },
   { value: 'save-state', label: 'Save state' },
   { value: 'load-state', label: 'Load state' },
-  { value: 'fast-forward', label: 'Fast Forward' },
 ])
 
 const triggerBindings = Object.freeze({
