@@ -211,7 +211,7 @@ button { font: inherit; }
 .control-save { width: 100%; min-height: 42px; margin-top: 18px; border: 0; border-radius: 0; color: #fff; background: #22b36f; font-weight: 650; cursor: pointer; }
 .control-save:disabled { opacity: .55; cursor: wait; }
 .player-overlay { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 0; background: #02090de6; overflow: hidden; }
-.player-shell { width: min(100vw, calc((100dvh - 52px) * 1.5)); }
+.player-shell { position: relative; width: min(100vw, calc((100dvh - 52px) * 1.5)); }
 .player-shell-2 { width: min(100vw, calc((100dvh - 52px) * 3)); }
 .player-shell-5 { width: min(100vw, calc((100dvh - 52px) * 2.25)); }
 .player-shell-6 { width: min(100vw, calc((100dvh - 52px) * 2.25)); }
@@ -257,10 +257,12 @@ button { font: inherit; }
 .fast-forward-button { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 1px solid #a0dcc4a0; border-radius: 9px; color: #e8f5ef; background: #102b30e8; cursor: pointer; }
 .fast-forward-button:hover, .fast-forward-button.is-active { background: #22624f; }
 .fast-forward-button.is-active { border-color: #77e2af; color: #fff; }
-.fast-forward-button:focus-visible, .fast-forward-control select:focus-visible, .trigger-action-control select:focus-visible { outline: 3px solid #ddffe9; outline-offset: 2px; }
+.fast-forward-button:focus-visible, .player-header-select:focus-within { outline: 3px solid #ddffe9; outline-offset: 2px; }
 .fast-forward-button svg { width: 20px; height: 20px; fill: currentColor; }
-.fast-forward-control select { width: 58px; height: 36px; border: 1px solid #a0dcc4a0; border-radius: 9px; padding: 0 5px; color: #e8f5ef; background: #102b30e8; font-size: 12px; cursor: pointer; }
-.trigger-action-control select { width: 106px; height: 36px; border: 1px solid #a0dcc4a0; border-radius: 9px; padding: 0 5px; color: #e8f5ef; background: #102b30e8; font-size: 12px; cursor: pointer; }
+.player-header-select.ant-select-single { height: 36px; font-size: 12px; }
+.player-header-select .ant-select-selector { border-color: #a0dcc4a0; border-radius: 9px; background: #102b30e8; }
+.player-speed-select { width: 58px; }
+.player-trigger-select { width: 106px; }
 .global-reset-button { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 1px solid #a0dcc4a0; border-radius: 9px; color: #e8f5ef; background: #102b30e8; cursor: pointer; }
 .global-reset-button:hover { background: #22624f; }
 .global-reset-button:focus-visible { outline: 3px solid #ddffe9; outline-offset: 2px; }
@@ -338,6 +340,7 @@ button { font: inherit; }
   .player-actions { margin-top: 0; }
   .player-control-button, .player-actions button, .fast-forward-button, .global-reset-button { width: 64px; height: var(--mobile-player-control-height); }
   .hub-sidebar .hub-sidebar-action[aria-label='Configurar controles'], .player-header .player-control-button[aria-label='Configurar controles'] { display: none; }
-  .fast-forward-control select { width: 64px; height: var(--mobile-player-control-height); padding: 0; appearance: none; -webkit-appearance: none; text-align: center; text-align-last: center; font-size: 12px; }
+  .player-header-select.ant-select-single { width: 64px; height: var(--mobile-player-control-height); }
+  .trigger-action-control { flex-direction: column; gap: 2px; }
   .player-panel { grid-column: 2; grid-row: 1; align-self: stretch; justify-self: stretch; width: 100%; height: 100%; aspect-ratio: auto; border: 0; border-radius: 0; box-shadow: none; }
 }

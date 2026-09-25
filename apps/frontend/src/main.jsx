@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { createRoot } from 'react-dom/client'
-import { ConfigProvider } from 'antd'
+import { ConfigProvider, Select } from 'antd'
 import { acquirePlayerLease, createProfile, deleteProfile as deleteProfileRequest, getControlProfile, getGames, getProfiles, getUserPreferences, releasePlayerLease, syncOddsResetCount, updateControlProfile, updateProfile, updateUserPreferences } from '../../packages/hub-client.js'
 import { activeGamepadBindings, readGamepadBinding, readGamepadSnapshot } from '../../packages/gamepad-input.mjs'
 import { replaceCatalogProfile } from '../../packages/save-profile-catalog.mjs'
@@ -93,6 +93,10 @@ const antTheme = {
 
 function configurePlayerFrame(frame, message) {
   if (frame) frame.contentWindow?.postMessage(message, frameOrigin(frame, window.location.origin))
+}
+
+function playerSelectPopupContainer(trigger) {
+  return trigger.closest('.player-shell') ?? document.body
 }
 
 function playerFrameUrl(session) {
@@ -275,6 +279,7 @@ function App() {
   const [viewport, setViewport] = useState(readViewport)
   const playerShellRef = useRef(null)
   const profilePickerRequestRef = useRef(0)
+  const lastInstanceGameIdRef = useRef(null)
   const preferenceWriteRef = useRef(Promise.resolve())
   const muteRevisionRef = useRef(0)
   const fastForwardToggleRef = useRef(Promise.resolve())
@@ -282,6 +287,10 @@ function App() {
   const oddsSyncRef = useRef(new Map())
   const oddsClockReadyRef = useRef(new Map())
   const oddsResetQueueRef = useRef(new Map())
+
+  useEffect(() => {
+    if (activeSessions.length === 0) lastInstanceGameIdRef.current = null
+  }, [activeSessions.length])
 
   function setPlayerInteractionLocked(locked) {
     if (closeLockRef.current !== locked) closeLockRevisionRef.current += 1
@@ -728,7 +737,7 @@ function App() {
 
   function dispatchReset(type) {
     const frames = [...document.querySelectorAll('.player-grid iframe')]
-    activeSessions.forEach((session, index) => {
+    activeSessionsRef.current.forEach((session, index) => {
       const frame = frames[index]
       if (!frame) return
       if (!oddsManipulatorEnabled) {
@@ -1107,8 +1116,9 @@ function App() {
     if (isMobileLandscape || activeSessions.length >= MAX_PLAYER_INSTANCES) return
     setError('')
     setInstancePicker(true)
-    const firstGame = gameSections.flatMap(section => section.games).find(game => game.status === 'ready')
-    if (firstGame) openProfilePicker(firstGame, 'add-instance')
+    const readyGames = gameSections.flatMap(section => section.games).filter(game => game.status === 'ready')
+    const selectedGame = readyGames.find(game => game.id === lastInstanceGameIdRef.current) ?? readyGames[0]
+    if (selectedGame) openProfilePicker(selectedGame, 'add-instance')
     else {
       setInstancePicker(false)
       setError('Não há ROMs prontas para adicionar.')
@@ -1151,6 +1161,7 @@ function App() {
   }
 
   function chooseInstanceGame(game) {
+    lastInstanceGameIdRef.current = game.id
     openProfilePicker(game, 'add-instance')
   }
 
@@ -1345,9 +1356,7 @@ function App() {
               <button className={`fast-forward-button${fastForwardEnabled ? ' is-active' : ''}`} type="button" aria-label="Fast Forward" title="Fast Forward" aria-pressed={fastForwardEnabled} onClick={toggleFastForward}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5v14l7-7-7-7Zm8 0v14l7-7-7-7Z" /></svg>
               </button>
-              <select aria-label="Velocidade do Fast Forward" title="Velocidade do Fast Forward" value={fastForwardSpeed} onChange={event => { const speed = Number(event.target.value); setFastForwardSpeed(speed); void saveUserPreferences({ fastForwardSpeed: speed }) }}>
-                {fastForwardSpeeds.map(speed => <option key={speed} value={speed}>{speed}×</option>)}
-              </select>
+              <Select className="player-header-select player-speed-select" aria-label="Velocidade do Fast Forward" title="Velocidade do Fast Forward" value={fastForwardSpeed} options={fastForwardSpeeds.map(speed => ({ value: speed, label: `${speed}×` }))} getPopupContainer={playerSelectPopupContainer} popupMatchSelectWidth={false} onChange={speed => { setFastForwardSpeed(speed); void saveUserPreferences({ fastForwardSpeed: speed }) }} />
             </div>
             <span className="player-header-separator" aria-hidden="true" />
             <div className="player-header-group">
@@ -1370,14 +1379,10 @@ function App() {
             <span className="player-header-separator" aria-hidden="true" />
             <div className="player-header-group">
               <label className="trigger-action-control">L2
-                <select aria-label="Ação do L2" title="Ação do L2" value={l2TriggerAction} onChange={event => { const action = event.target.value; setL2TriggerAction(action); void saveUserPreferences({ triggerActions: { l2: action } }) }}>
-                  {playerTriggerActionOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
+                <Select className="player-header-select player-trigger-select" aria-label="Ação do L2" title="Ação do L2" value={l2TriggerAction} options={playerTriggerActionOptions} getPopupContainer={playerSelectPopupContainer} popupMatchSelectWidth={false} onChange={action => { setL2TriggerAction(action); void saveUserPreferences({ triggerActions: { l2: action } }) }} />
               </label>
               <label className="trigger-action-control">R2
-                <select aria-label="Ação do R2" title="Ação do R2" value={r2TriggerAction} onChange={event => { const action = event.target.value; setR2TriggerAction(action); void saveUserPreferences({ triggerActions: { r2: action } }) }}>
-                  {playerTriggerActionOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
+                <Select className="player-header-select player-trigger-select" aria-label="Ação do R2" title="Ação do R2" value={r2TriggerAction} options={playerTriggerActionOptions} getPopupContainer={playerSelectPopupContainer} popupMatchSelectWidth={false} onChange={action => { setR2TriggerAction(action); void saveUserPreferences({ triggerActions: { r2: action } }) }} />
               </label>
             </div>
             <span className="player-header-separator" aria-hidden="true" />

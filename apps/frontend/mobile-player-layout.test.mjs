@@ -13,6 +13,6 @@ test('uses a full-screen mobile player viewport with side controls', async () =>
   assert.match(mobileRules, /\.player-header\s*\{[^}]*border-right:\s*0;[^}]*background:\s*transparent;[^}]*overflow:\s*hidden;/)
   assert.match(mobileRules, /\.player-shell\s*\{[^}]*--mobile-player-control-height:\s*min\(42px,\s*calc\(\(100dvh\s*-\s*72px\)\s*\/\s*9\)\);/)
   assert.match(mobileRules, /\.player-control-button, \.player-actions button, \.fast-forward-button, \.global-reset-button\s*\{[^}]*width:\s*64px;[^}]*height:\s*var\(--mobile-player-control-height\);/)
-  assert.match(mobileRules, /\.fast-forward-control select\s*\{[^}]*width:\s*64px;[^}]*height:\s*var\(--mobile-player-control-height\);[^}]*appearance:\s*none;[^}]*-webkit-appearance:\s*none;[^}]*text-align:\s*center;[^}]*text-align-last:\s*center;/)
+  assert.match(mobileRules, /\.player-header-select\.ant-select-single\s*\{[^}]*width:\s*64px;[^}]*height:\s*var\(--mobile-player-control-height\);/)
   assert.match(mobileRules, /\.hub-sidebar \.hub-sidebar-action\[aria-label='Configurar controles'\], \.player-header \.player-control-button\[aria-label='Configurar controles'\]\s*\{[^}]*display:\s*none;/)
 })

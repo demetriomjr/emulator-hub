@@ -93,3 +93,40 @@ test('closing the whole wrapper clears the odds toggle before a later first laun
   await close()
   assert.deepEqual(actions, [['sessions', 0], ['odds', false]])
 })
+
+test('controller resets advance the current session after React replaces its state object', async () => {
+  const begin = hub.indexOf('  function dispatchReset(')
+  const end = hub.indexOf('  function configureOddsClock(', begin)
+  assert.ok(begin > 0 && end > begin)
+  const frame = { contentWindow: {} }
+  const applied = []
+  const dirty = []
+  const initialSession = { sessionId: 'session-1', gameId: 'game-1', profileId: 'profile-1', oddsResetCount: 10 }
+  const context = {
+    activeSessions: [initialSession],
+    activeSessionsRef: { current: [initialSession] },
+    oddsManipulatorEnabled: true,
+    document: { querySelectorAll: () => [frame] },
+    oddsResetQueueRef: { current: new Map() },
+    oddsSyncRef: { current: new Map([['session-1', { markDirty: count => dirty.push(count) }]]) },
+    configureOddsClock: async () => true,
+    configurePlayerFrame: (_frame, message) => applied.push(message),
+    setActiveSessions(update) { context.activeSessionsRef.current = update(context.activeSessionsRef.current) },
+    clientDiagnostics: null,
+    console,
+  }
+  const dispatchReset = runInNewContext(`${hub.slice(begin, end)}\ndispatchReset`, context)
+
+  dispatchReset('emulator-hub:soft-reset')
+  await context.oddsResetQueueRef.current.get('session-1')
+  dispatchReset('emulator-hub:soft-reset')
+  await context.oddsResetQueueRef.current.get('session-1')
+  context.activeSessions = context.activeSessionsRef.current
+  const reboundDispatchReset = runInNewContext(`${hub.slice(begin, end)}\ndispatchReset`, context)
+  reboundDispatchReset('emulator-hub:soft-reset')
+  await context.oddsResetQueueRef.current.get('session-1')
+
+  assert.deepEqual(dirty, [11, 12, 13])
+  assert.deepEqual(applied.map(message => message.oddsResetCount), [11, 12, 13])
+  assert.equal(context.activeSessionsRef.current[0].oddsResetCount, 13)
+})
