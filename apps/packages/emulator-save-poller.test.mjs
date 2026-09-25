@@ -42,3 +42,25 @@ test('flushes changed battery data through the EmulatorJS save event only while 
 test('does not start polling when EmulatorJS has no save API', () => {
   assert.equal(startEmulatorSavePolling({ gameManager: {} }), null)
 })
+
+test('optional diagnostic measures the synchronous flush without changing save polling', () => {
+  let tick
+  let clock = 10
+  let flushes = 0
+  const measured = []
+  const emulator = { started: true, gameManager: {
+    getSaveFile: () => new Uint8Array(128 * 1024),
+    saveSaveFiles() { flushes += 1; clock += 7 },
+  } }
+  startEmulatorSavePolling(emulator, {
+    setIntervalFn(callback) { tick = callback; return 1 },
+    now: () => clock,
+    onPoll: duration => measured.push(duration),
+  })
+  tick()
+  assert.equal(flushes, 1)
+  assert.deepEqual(measured, [7])
+  emulator.started = false
+  tick()
+  assert.deepEqual(measured, [7])
+})

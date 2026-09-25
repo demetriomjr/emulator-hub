@@ -13,6 +13,8 @@ function closeHarness({ ready, deleteFails = false }) {
     Uint8Array,
     runtimeReady: ready,
     closeRequested: false,
+    stopThreadStartupMonitor() {},
+    stopEmulatedFpsOverlay() {},
     pendingRestoreRequests,
     restoreCandidates: [{ candidateId: 'remote:7' }],
     window: {
@@ -119,25 +121,21 @@ test('the parent preserves local and remote candidates when the iframe closes be
   assert.match(hub, /if \(!closeResult\.preserveRecovery\) \{[\s\S]*?await clearPlayerRecovery\(frame\)[\s\S]*?catch/)
   assert.match(hub, /releasePlayerLease\(session\.sessionId, \{[^}]*preserveRecovery: closeResult\.preserveRecovery/)
   assert.match(hub, /releasePlayerLease\(event\.data\.sessionId, \{[^}]*preserveRecovery: true/)
-  assert.match(hub, /result => finish\(null, result\)/)
-  assert.match(hub, /event\.data\.preserveRecovery/)
+  assert.match(hub, /requestPlayerFrame\(\{ frame, browser: window, sessionId, type: 'emulator-hub:close-player', replyType: 'emulator-hub:save-synced' \}\)/)
+  assert.match(hub, /result\.preserveRecovery === true/)
 })
 
-test('the parent close transport returns the preservation decision through direct and message paths', async () => {
+test('the parent close transport returns the preservation decision from the acknowledged message', async () => {
   const hub = await readFile(new URL('./src/main.jsx', import.meta.url), 'utf8')
   const flushSource = hub.slice(hub.indexOf('function flushPlayerSave(frame)'), hub.indexOf('function clearPlayerRecovery(frame)'))
-  const directWindow = { location: { origin: 'https://hub.test' }, clearTimeout() {}, removeEventListener() {} }
-  const direct = runInNewContext(`${flushSource}\nflushPlayerSave`, { window: directWindow })
-  assert.equal((await direct({ contentWindow: { emulatorHubClose: async () => ({ preserveRecovery: true }) } })).preserveRecovery, true)
-
-  let listener
-  const fallbackWindow = {
-    location: { origin: 'https://hub.test' },
-    setTimeout() { return 1 }, clearTimeout() {},
-    addEventListener(name, callback) { assert.equal(name, 'message'); listener = callback },
-    removeEventListener() { listener = null },
-  }
-  const fallback = runInNewContext(`${flushSource}\nflushPlayerSave`, { window: fallbackWindow })
-  const contentWindow = { postMessage(message) { queueMicrotask(() => listener({ origin: 'https://hub.test', source: contentWindow, data: { type: 'emulator-hub:save-synced', requestId: message.requestId, ok: true, preserveRecovery: true } })) } }
-  assert.equal((await fallback({ contentWindow })).preserveRecovery, true)
+  let message
+  const flush = runInNewContext(`${flushSource}\nflushPlayerSave`, {
+    window: {},
+    requestPlayerFrame(request) { message = request; return Promise.resolve({ preserveRecovery: true }) },
+  })
+  const frame = { closest() { return { dataset: { sessionId: 'session' } } } }
+  assert.equal((await flush(frame)).preserveRecovery, true)
+  assert.equal(message.sessionId, 'session')
+  assert.equal(message.type, 'emulator-hub:close-player')
+  assert.equal(message.replyType, 'emulator-hub:save-synced')
 })

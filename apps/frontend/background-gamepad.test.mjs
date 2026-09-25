@@ -13,6 +13,7 @@ const pollSource = `${hub.slice(pollStart, pollEnd)}\npoll`
 test('gamepad input keeps reaching players while the Hub document is hidden', () => {
   const sent = []
   const poll = runInNewContext(pollSource, {
+    hubPerformance: null,
     controlPanelOpen: false, profileGame: null, instancePicker: false,
     closeLockRef: { current: false }, awaitGamepadNeutralRef: { current: false },
     document: { hidden: true },
@@ -29,6 +30,7 @@ test('gamepad input keeps reaching players while the Hub document is hidden', ()
 test('open controls still suspend gamepad input while the document is hidden', () => {
   const sent = []
   const poll = runInNewContext(pollSource, {
+    hubPerformance: null,
     controlPanelOpen: true, profileGame: null, instancePicker: false,
     closeLockRef: { current: false }, awaitGamepadNeutralRef: { current: false },
     document: { hidden: true },
@@ -46,6 +48,7 @@ test('close lock releases gamepad input and waits for neutral before accepting h
   const sent = []
   let buttons = ['BUTTON_1']
   const context = {
+    hubPerformance: null,
     controlPanelOpen: false, profileGame: null, instancePicker: false,
     closeLockRef: { current: true }, awaitGamepadNeutralRef: { current: true },
     readGamepadSnapshot: () => buttons,
@@ -69,6 +72,7 @@ test('L2 and R2 emulator actions stay blocked through close modal and save overl
   const actions = []
   let buttons = ['LEFT_BOTTOM_SHOULDER', 'RIGHT_BOTTOM_SHOULDER']
   const context = {
+    hubPerformance: null,
     controlPanelOpen: false, profileGame: null, instancePicker: false,
     closeLockRef: { current: true }, awaitGamepadNeutralRef: { current: true },
     readGamepadSnapshot: () => buttons,

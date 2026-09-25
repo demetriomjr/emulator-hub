@@ -6,6 +6,8 @@ import { createEmulatorGamepadInput } from '../../packages/gamepad-input.mjs'
 import { createClientDiagnostics, getClientDiagnosticsOptions } from '../../packages/client-diagnostics.mjs'
 import { getEmulatorAudioContext, installAudioResumeOnUserGesture } from '../../packages/mobile-audio-resume.mjs'
 import { monitorEmulatorFrameProgress } from '../../packages/emulator-frame-progress.mjs'
+import { sampleEmulatedFps } from '../../packages/emulator-fps.mjs'
+import { createPerformanceTimingCollector, measureSynchronousOperation } from '../../packages/emulator-performance-probe.mjs'
 import { instrumentEmulatorLifecycle } from '../../packages/emulator-lifecycle-diagnostics.mjs'
 import { createLocalRuntimeRecoveryStore } from '../../packages/local-runtime-recovery-store.mjs'
 import { selectNewestPokemonGen3SaveCopy } from '../../packages/pokemon-gen3-save-validation.mjs'
@@ -18,6 +20,7 @@ import { softResetEmulator } from '../../packages/player-reset.mjs'
 import { createOddsManipulatorClock } from '../../packages/odds-manipulator-clock.mjs'
 import { createEmulatorAudioMute } from '../../packages/emulator-audio-mute.mjs'
 import { createPlayerInteractionLock } from '../../packages/player-interaction-lock.mjs'
+import { playerThreadFallbackUrl, selectPlayerThreadMode } from '../../packages/player-thread-policy.mjs'
 
 const parameters = new URLSearchParams(location.search)
 const id = parameters.get('id')
@@ -48,6 +51,7 @@ const mobileGamepadLayout = Object.freeze([
 // the known iPhone WebKit rendering stall.
 const dataUrl = 'https://cdn.emulatorjs.org/4.2.3/data/'
 const clientDiagnosticsOptions = getClientDiagnosticsOptions(import.meta.env.VITE_DEBUG, location.search)
+const performanceTimings = clientDiagnosticsOptions.enabled ? createPerformanceTimingCollector() : null
 const clientDiagnostics = clientDiagnosticsOptions.enabled
   ? createClientDiagnostics({ browser: window, source: 'player', sessionId: clientDiagnosticsOptions.sessionId })
   : null
@@ -70,6 +74,13 @@ const installationIdentity = getInstallationIdentity()
 let offerPolicy = null
 let runtimeReady = false
 let closeRequested = false
+let threadDecision = null
+let threadGameStarted = false
+let threadFallbackRequested = false
+let threadStartupMonitor = null
+let threadStartupTimeout = null
+let lastInteractionLockRevision = -1
+let fastForwardOverlayObserver = null
 let lastGamepadBindings = new Set()
 let launchDescriptor = null
 let emulatorGameId = null
@@ -101,6 +112,8 @@ const localRecoveryStore = createLocalRuntimeRecoveryStore()
 const snapshotTelemetry = createSnapshotTelemetry({ browser: window, source: 'player', sessionId, gameId: id, profileId })
 let removeAudioResumeGesture = null
 let stopFrameProgressMonitor = null
+let emulatedFpsTimer = null
+let emulatedFpsOverlay = null
 let stopLifecycleDiagnostics = null
 let leaseHeartbeat = null
 let leaseLost = false
@@ -180,6 +193,39 @@ function setPlayerReady() {
   playerLoading.style.display = 'none'
 }
 
+function startEmulatedFpsOverlay() {
+  if (!clientDiagnosticsOptions.enabled || emulatedFpsTimer) return
+  const overlay = document.createElement('output')
+  overlay.className = 'emulator-fps-overlay'
+  overlay.setAttribute('aria-label', 'FPS emulados deste emulador')
+  document.body.append(overlay)
+  emulatedFpsOverlay = overlay
+  let previous = null
+  const update = () => {
+    let frame
+    try { frame = window.EJS_emulator?.gameManager?.getFrameNum?.() } catch { frame = undefined }
+    const sample = sampleEmulatedFps(previous, frame, performance.now())
+    previous = sample.baseline
+    const target = fastForwardRequest.enabled ? fastForwardRequest.speed : 1
+    const targetText = launchDescriptor?.core === 'gba' ? ` · alvo ${target}×` : ''
+    overlay.textContent = sample.fps === null
+      ? `— FPS${targetText}`
+      : `${Math.round(sample.fps)} FPS${sample.speed !== null && launchDescriptor?.core === 'gba' ? ` · real ${sample.speed.toFixed(1).replace('.', ',')}×` : ''}${targetText}`
+    if (sample.fps !== null && sample.speed !== null) {
+      window.parent.postMessage({ type: 'emulator-hub:performance-sample', sessionId, timestamp: performance.timeOrigin + performance.now(), fps: sample.fps, speed: sample.speed, target, threaded: threadDecision?.enabled === true, isolated: window.crossOriginIsolated === true, timings: performanceTimings.drain() }, location.origin)
+    }
+  }
+  update()
+  emulatedFpsTimer = window.setInterval(update, 1000)
+}
+
+function stopEmulatedFpsOverlay() {
+  if (emulatedFpsTimer) window.clearInterval(emulatedFpsTimer)
+  emulatedFpsTimer = null
+  emulatedFpsOverlay?.remove()
+  emulatedFpsOverlay = null
+}
+
 async function queueCloudSave(bytes, { onUncertain = () => {} } = {}) {
   if (leaseLost || !cloudSaveSynchronizer || !(bytes instanceof Uint8Array) || bytes.byteLength === 0) {
     onUncertain()
@@ -228,7 +274,7 @@ function watchBatterySaveChanges() {
       throw error
     })
   })
-  stopBatterySavePolling = startEmulatorSavePolling(emulator)
+  stopBatterySavePolling = startEmulatorSavePolling(emulator, performanceTimings ? { onPoll: duration => performanceTimings.record('saveSaveFiles', duration) } : undefined)
 }
 
 async function captureLocalRecovery() {
@@ -239,13 +285,14 @@ async function captureLocalRecovery() {
     return false
   }
   localRecoveryCapture = (async () => {
-    const state = manager.getState?.()
+    const state = measureSynchronousOperation(performanceTimings, 'getState.local', () => manager.getState?.())
     if (!state) {
       snapshotTelemetry.warn('automatic-capture-unavailable', { snapshotKind: 'local-recovery', reason: 'state-bytes-unavailable' }, { repeating: true })
       return false
     }
     if (leaseLost) return false
-    await localRecoveryStore.put({ profileId, gameId: id, core: launchDescriptor.core, romSha256: launchDescriptor.romSha256, runtimeId: launchDescriptor.runtimeId, ...(launchDescriptor.patchSha256 ? { patchSha256: launchDescriptor.patchSha256 } : {}), state: new Uint8Array(state) })
+    const stateCopy = measureSynchronousOperation(performanceTimings, 'copyState.local', () => new Uint8Array(state))
+    await localRecoveryStore.put({ profileId, gameId: id, core: launchDescriptor.core, romSha256: launchDescriptor.romSha256, runtimeId: launchDescriptor.runtimeId, ...(launchDescriptor.patchSha256 ? { patchSha256: launchDescriptor.patchSha256 } : {}), state: stateCopy })
     return true
   })().finally(() => { localRecoveryCapture = null })
   return localRecoveryCapture
@@ -281,6 +328,36 @@ function hideFastForwardOverlay() {
 function normalizeEmulatorChrome() {
   hideContextMenuButton()
   hideFastForwardOverlay()
+  if (!fastForwardOverlayObserver) {
+    fastForwardOverlayObserver = new MutationObserver(hideFastForwardOverlay)
+    fastForwardOverlayObserver.observe(game, { childList: true, characterData: true, subtree: true })
+  }
+}
+
+function stopThreadStartupMonitor() {
+  if (threadStartupMonitor) window.clearInterval(threadStartupMonitor)
+  if (threadStartupTimeout) window.clearTimeout(threadStartupTimeout)
+  threadStartupMonitor = null
+  threadStartupTimeout = null
+}
+
+function fallBackFromThreadedCore(reason) {
+  if (!threadDecision?.enabled || threadGameStarted || closeRequested || threadFallbackRequested) return false
+  const next = playerThreadFallbackUrl(location.href)
+  if (!next) return false
+  threadFallbackRequested = true
+  stopThreadStartupMonitor()
+  console.warn('[emulator-threads] threaded core failed before game start; retrying ordinary core', { reason, core: launchDescriptor?.core, sessionId })
+  window.location.replace(next)
+  return true
+}
+
+function monitorThreadedCoreStartup() {
+  if (!threadDecision?.enabled) return
+  threadStartupMonitor = window.setInterval(() => {
+    if (window.EJS_emulator?.failedToStart) fallBackFromThreadedCore('core-start-failed')
+  }, 250)
+  threadStartupTimeout = window.setTimeout(() => fallBackFromThreadedCore('startup-timeout'), 45000)
 }
 
 function resizeMobileDpad(element, size) {
@@ -422,14 +499,15 @@ async function persistEmulatorState({ kind, reasonCode, promptOnLaunch }) {
     if (kind === 'cloud-recovery') snapshotTelemetry.warn('automatic-capture-unavailable', { snapshotKind: kind, reason: 'manager-unavailable' }, { repeating: true })
     return false
   }
-  const state = manager.getState?.()
+  const state = measureSynchronousOperation(performanceTimings, `getState.${kind}`, () => manager.getState?.())
   if (!state) throw new Error('Emulator snapshot bytes are unavailable.')
   const metadata = { profileId, gameId: id, core: launchDescriptor.core, romSha256: launchDescriptor.romSha256, runtimeId: launchDescriptor.runtimeId, saveRevision: cloudSaveSynchronizer.getRevision(), promptOnLaunch, kind, reasonCode, ...(installationIdentity.id ? { originInstallationId: installationIdentity.id } : {}), ...(launchDescriptor.patchSha256 ? { patchSha256: launchDescriptor.patchSha256 } : {}) }
+  const uploadState = measureSynchronousOperation(performanceTimings, `copyState.${kind}`, () => new Uint8Array(state))
   const accepted = await putEmulatorSnapshot(snapshotUrlForKind(launchDescriptor.snapshotUrl, kind), {
     metadata,
-    state: new Uint8Array(state),
+    state: uploadState,
   }, kind === 'user-state' ? userSnapshotRevision : snapshotRevision, { sessionId, generation: leaseGeneration })
-  const captured = { state: new Uint8Array(state), metadata: { ...metadata, capturedAt: accepted.capturedAt }, revision: accepted.revision }
+  const captured = { state: measureSynchronousOperation(performanceTimings, `copyState.${kind}`, () => new Uint8Array(state)), metadata: { ...metadata, capturedAt: accepted.capturedAt }, revision: accepted.revision }
   if (kind === 'user-state') {
     userSnapshotRevision = accepted.revision
     userSnapshot = captured
@@ -556,6 +634,8 @@ function scheduleCloudRecoveryDeleteAfterChoice(revision) {
 }
 
 async function closeEmulator() {
+  stopThreadStartupMonitor()
+  stopEmulatedFpsOverlay()
   if (cloudRecoveryDeleteTimer) window.clearTimeout(cloudRecoveryDeleteTimer)
   cloudRecoveryDeleteTimer = null
   if (localRecoveryDeleteTimer) window.clearTimeout(localRecoveryDeleteTimer)
@@ -623,8 +703,12 @@ window.addEventListener('message', event => {
   const isClosePlayerMessage = event.data?.type === 'emulator-hub:close-player'
   if (!isClosePlayerMessage && event.source !== window.parent) return
   if (event.data?.type === 'emulator-hub:interaction-lock') {
-    if (typeof event.data.locked !== 'boolean') return
-    interactionLock.setLocked(event.data.locked)
+    if (typeof event.data.locked !== 'boolean' || !Number.isInteger(event.data.revision) || typeof event.data.requestId !== 'string' || event.data.sessionId !== sessionId) return
+    if (event.data.revision > lastInteractionLockRevision) {
+      lastInteractionLockRevision = event.data.revision
+      interactionLock.setLocked(event.data.locked)
+    }
+    window.parent.postMessage({ type: 'emulator-hub:interaction-lock-applied', requestId: event.data.requestId, sessionId, revision: lastInteractionLockRevision, ok: true }, location.origin)
     return
   }
   if (event.data?.type === 'emulator-hub:gamepad') {
@@ -728,12 +812,20 @@ window.addEventListener('message', event => {
     return
   }
   if (event.data?.type === 'emulator-hub:close-player') {
+    if (typeof event.data.requestId !== 'string' || event.data.sessionId !== sessionId) return
     closeEmulator().then(
-      result => window.parent.postMessage({ type: 'emulator-hub:save-synced', requestId: event.data.requestId, ok: true, preserveRecovery: result.preserveRecovery }, location.origin),
-      error => window.parent.postMessage({ type: 'emulator-hub:save-synced', requestId: event.data.requestId, ok: false, error: error.message }, location.origin),
+      result => window.parent.postMessage({ type: 'emulator-hub:save-synced', requestId: event.data.requestId, sessionId, ok: true, preserveRecovery: result.preserveRecovery }, location.origin),
+      error => window.parent.postMessage({ type: 'emulator-hub:save-synced', requestId: event.data.requestId, sessionId, ok: false, error: error.message }, location.origin),
+    )
+    return
+  }
+  if (event.data?.type === 'emulator-hub:clear-local-recovery') {
+    if (typeof event.data.requestId !== 'string' || event.data.sessionId !== sessionId) return
+    void clearLocalRecovery().then(
+      () => window.parent.postMessage({ type: 'emulator-hub:local-recovery-cleared', requestId: event.data.requestId, sessionId, ok: true }, location.origin),
+      error => window.parent.postMessage({ type: 'emulator-hub:local-recovery-cleared', requestId: event.data.requestId, sessionId, ok: false, error: error.message }, location.origin),
     )
   }
-  if (event.data?.type === 'emulator-hub:clear-local-recovery') void clearLocalRecovery()
 })
 
 async function start() {
@@ -805,6 +897,9 @@ async function start() {
   userSnapshotRevision = receivedUserSnapshot?.revision ?? null
   announceUserStateAvailability()
   offerPolicy = createSnapshotOfferPolicy()
+  threadDecision = selectPlayerThreadMode({ core: launch.core, protocol: location.protocol, crossOriginIsolated: window.crossOriginIsolated === true, sharedArrayBufferAvailable: typeof window.SharedArrayBuffer === 'function', retryWithoutThreads: parameters.get('threadFallback') === '1', mode: 'ordinary' })
+  window.EJS_threads = threadDecision.enabled
+  console.info('[emulator-threads] core mode selected', { core: launch.core, threaded: threadDecision.enabled, reason: threadDecision.reason, sessionId })
   window.EJS_player = '#game'
   window.EJS_core = launch.core
   window.EJS_gameUrl = URL.createObjectURL(new Blob([romBytes]))
@@ -869,7 +964,9 @@ async function start() {
     applyFastForward()
   }
   window.EJS_onGameStart = async () => {
-    if (closeRequested) return
+    threadGameStarted = true
+    stopThreadStartupMonitor()
+    if (closeRequested || threadFallbackRequested) return
     setPlayerLoading('Carregando save...')
     audioMute.attach(window.EJS_emulator)
     audioMute.apply()
@@ -952,6 +1049,7 @@ async function start() {
     if (closeRequested) return
     setPlayerReady()
     runtimeReady = true
+    startEmulatedFpsOverlay()
     if (restoreCandidates.length && !interactionLock.isLocked()) window.EJS_emulator.play()
     interactionLock.apply()
     if (restoreChoice?.explicit && localRecoveryPrompt && localRecoveryCandidateId) scheduleLocalRecoveryDeleteAfterChoice(localRecoveryCandidateId)
@@ -970,11 +1068,13 @@ async function start() {
   const loader = document.createElement('script')
   loader.src = `${dataUrl}loader.js`
   loader.onerror = () => {
+    if (fallBackFromThreadedCore('loader-unavailable')) return
     const message = 'EmulatorJS loader could not be reached.'
     clientDiagnostics?.capture({ kind: 'emulator-failure', message })
     game.textContent = message
   }
   document.body.appendChild(loader)
+  monitorThreadedCoreStartup()
 }
 
 start().catch(error => {

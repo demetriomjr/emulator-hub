@@ -21,12 +21,25 @@ const workspacePackageDependencyResolver = {
   },
 }
 
+const playerDocumentIsolation = {
+  name: 'player-document-isolation',
+  configureServer(server) { server.middlewares.use(addPlayerIsolationHeader) },
+  configurePreviewServer(server) { server.middlewares.use(addPlayerIsolationHeader) },
+}
+
+function addPlayerIsolationHeader(request, response, next) {
+  if (new URL(request.url ?? '/', 'http://localhost').pathname === '/player.html') {
+    response.setHeader('Document-Isolation-Policy', 'isolate-and-require-corp')
+  }
+  next()
+}
+
 export function createFrontendViteConfiguration(environment) {
   const backendUrl = environment.BACKEND_URL ?? 'http://127.0.0.1:3001'
 
   return {
     base: './',
-    plugins: [workspacePackageDependencyResolver, react()],
+    plugins: [workspacePackageDependencyResolver, playerDocumentIsolation, react()],
     build: {
       rollupOptions: {
         input: {

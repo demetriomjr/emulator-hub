@@ -11,11 +11,11 @@ test('accepts same-origin close-player messages without relying on the parent Wi
   assert.match(player, /event\.data\?\.type === 'emulator-hub:close-player'/)
 })
 
-test('uses the iframe same-origin save synchronizer before falling back to postMessage', async () => {
+test('uses an acknowledged message for the iframe save synchronizer', async () => {
   const hub = await readFile(new URL('./src/main.jsx', import.meta.url), 'utf8')
 
-  assert.match(hub, /const directSync = frame\.contentWindow\?\.emulatorHubClose/)
-  assert.match(hub, /if \(typeof directSync === 'function'\) \{\s*Promise\.resolve\(directSync\(\)\)\.then\(result => finish\(null, result\), finish\)\s*return/s)
+  assert.doesNotMatch(hub, /frame\.contentWindow\?\.emulatorHubClose/)
+  assert.match(hub, /requestPlayerFrame\(\{ frame, browser: window, sessionId, type: 'emulator-hub:close-player', replyType: 'emulator-hub:save-synced' \}\)/)
   assert.match(hub, /type: 'emulator-hub:close-player'/)
 })
 

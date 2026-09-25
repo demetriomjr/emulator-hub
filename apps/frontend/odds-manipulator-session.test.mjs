@@ -53,6 +53,7 @@ test('a newly loaded iframe receives the already enabled wrapper odds clock', ()
   assert.ok(begin > 0 && end > begin)
   const actions = []
   const configure = runInNewContext(`${hub.slice(begin, end)}\nconfigurePlayerFrameOnLoad`, {
+    hubPerformance: null,
     fastForwardEnabled: false, fastForwardSpeed: 1.5, muted: false, oddsManipulatorEnabled: true,
     closeLockRef: { current: false }, window: { location: { origin: 'http://localhost' } },
     sendPlayerInteractionLock() {},

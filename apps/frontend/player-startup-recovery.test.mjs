@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { measureSynchronousOperation } from '../packages/emulator-performance-probe.mjs'
 import { test } from 'node:test'
 import { runInNewContext } from 'node:vm'
 
@@ -17,6 +18,7 @@ function harness({ selection, localRecoveryPrompt = false, localRecovery = null,
     interactionLock: { isLocked: () => false, apply() {} },
     runtimeReady: false,
     setPlayerReady() {},
+    startEmulatedFpsOverlay() {},
     restoreCandidates: [
       ...(selection === 'local' || localRecoveryPrompt ? [{ candidateId: 'local-1', kind: 'local-recovery' }] : []),
       ...(cloudRecovery ? [{ candidateId: 'remote:4', kind: 'cloud-recovery' }] : []),
@@ -279,6 +281,7 @@ test('automatic captures cannot replace old recovery before the runtime is ready
   const actions = []
   const context = {
     leaseLost: false, closeRequested: false, runtimeReady: false,
+    measureSynchronousOperation, performanceTimings: null,
     interactionLock: { isLocked: () => false },
     localRecoveryCapture: null, snapshotCapture: null, userSnapshotCapture: null,
     launchDescriptor: { core: 'gba', romSha256: 'rom', runtimeId: 'runtime' },
@@ -326,6 +329,7 @@ test('missing state bytes in a ready runtime are reported as an automatic captur
   const events = []
   const capture = runInNewContext(`${source.slice(begin, end)}\ncaptureLocalRecovery`, {
     leaseLost: false, closeRequested: false, runtimeReady: true, localRecoveryCapture: null,
+    measureSynchronousOperation, performanceTimings: null,
     interactionLock: { isLocked: () => false },
     launchDescriptor: { core: 'gba', romSha256: 'rom', runtimeId: 'runtime' },
     window: { EJS_emulator: { gameManager: { getState: () => null } } },

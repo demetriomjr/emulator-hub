@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import vm from 'node:vm'
 import { activeGamepadBindings, readGamepadBinding, readGamepadSnapshot, createEmulatorGamepadInput } from './gamepad-input.mjs'
 import { createPlayerInteractionLock } from './player-interaction-lock.mjs'
+import { selectPlayerThreadMode } from './player-thread-policy.mjs'
 
 const pad = (buttons = [], axes = [], index = 0) => ({ index, buttons: buttons.map(value => ({ pressed: value === 1, value })), axes })
 
@@ -104,7 +105,7 @@ test('player boot keeps backend controls authoritative and applies pre-start par
   const loaderAdded = new Promise(resolve => { loaded = resolve })
   const game = { querySelectorAll: () => [], addEventListener() {} }
   vm.runInNewContext(source, {
-    window, location: { origin, search: '?id=game&profileId=profile&sessionId=session&leaseGeneration=1' }, URLSearchParams, URL, Blob, Uint8Array,
+    window, location: { origin, protocol: 'http:', search: '?id=game&profileId=profile&sessionId=session&leaseGeneration=1' }, URLSearchParams, URL, Blob, Uint8Array,
     document: { getElementById: () => game, createElement: () => ({ style: {} }), body: { append() {}, appendChild: loaded } },
     MutationObserver: class { observe() {} },
     crypto: { subtle: { digest: async () => Uint8Array.from([227, 176, 196, 66, 152, 252, 28, 20, 154, 251, 244, 200, 153, 111, 185, 36, 39, 174, 65, 228, 100, 155, 147, 76, 164, 149, 153, 27, 120, 82, 184, 85]).buffer } },
@@ -132,10 +133,12 @@ test('player boot keeps backend controls authoritative and applies pre-start par
     instrumentEmulatorLifecycle: () => () => {},
     createEmulatorGamepadInput,
     createPlayerInteractionLock,
+    selectPlayerThreadMode,
     createEmulatorAudioMute: () => ({ attach() {}, apply() {} }),
   })
   await Promise.race([loaderAdded, new Promise((_, reject) => setTimeout(() => reject(new Error(`Player loader not attached: ${JSON.stringify(startupErrors)}`)), 100))])
   assert.deepEqual(startupErrors, [])
+  assert.equal(window.EJS_threads, false)
   assert.equal(window.EJS_disableLocalStorage, true)
   assert.equal(window.EJS_defaultControls[0], bindings)
   const receive = (source, eventOrigin, labels) => listeners.get('message')({ source, origin: eventOrigin, data: { type: 'emulator-hub:gamepad', bindings: labels } })

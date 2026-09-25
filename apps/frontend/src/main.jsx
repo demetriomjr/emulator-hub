@@ -7,6 +7,7 @@ import { activeGamepadBindings, readGamepadBinding, readGamepadSnapshot } from '
 import { replaceCatalogProfile } from '../../packages/save-profile-catalog.mjs'
 import { groupGamesByLayout } from '../../packages/hub-layout.mjs'
 import { getProfilePickerPlacement } from '../../packages/profile-picker-placement.mjs'
+import { createHubPerformanceRecorder } from '../../packages/emulator-performance-probe.mjs'
 import { appendClientDiagnosticsParameters, createClientDiagnostics, getClientDiagnosticsOptions } from '../../packages/client-diagnostics.mjs'
 import { createMultiSaveCloseCoordinator } from '../../packages/multi-save-close-coordinator.mjs'
 import { isMobileLandscapeViewport, isNarrowPortraitViewport } from '../../packages/mobile-viewport.mjs'
@@ -15,6 +16,7 @@ import { readFastForwardSpeed } from '../../packages/fast-forward-preference.mjs
 import { createLocalRuntimeRecoveryStore } from '../../packages/local-runtime-recovery-store.mjs'
 import { canReconcileLateSnapshotDelete, createSnapshotDeleteWatchdog, restorePromptAfterChoiceTimeout, restorePromptAfterDeleteTimeout } from '../../packages/snapshot-restore-routing.mjs'
 import { createPlayerTriggerActions, playerTriggerActionOptions } from '../../packages/player-trigger-actions.mjs'
+import { requestPlayerFrame } from '../../packages/player-frame-request.mjs'
 import { createOddsManipulatorSync } from '../../packages/odds-manipulator-sync.mjs'
 import { describeRestoreCandidate } from './restore-candidate-view.mjs'
 import { createSnapshotTelemetry } from '../../packages/snapshot-telemetry.mjs'
@@ -26,6 +28,9 @@ const PokemonHub = React.lazy(() => import('../../packages/pokemon-hub-ui.jsx'))
 // The Hub document owns the session lifecycle: every full load/F5 gets a new ID.
 // Player iframes receive that ID explicitly through their launch query string.
 const clientDiagnosticsOptions = getClientDiagnosticsOptions(import.meta.env.VITE_DEBUG)
+const hubPerformance = clientDiagnosticsOptions.enabled
+  ? createHubPerformanceRecorder({ browser: window, getFrames: () => document.querySelectorAll('.player-grid iframe') })
+  : null
 const clientDiagnostics = clientDiagnosticsOptions.enabled
   ? createClientDiagnostics({ browser: window, source: 'hub', sessionId: clientDiagnosticsOptions.sessionId })
   : null
@@ -60,7 +65,6 @@ const playerActionFailureMessages = Object.freeze({
   'game-save-missing': 'O save do jogo esperado para este perfil não foi encontrado.',
 })
 const MAX_PLAYER_INSTANCES = 6
-const configuredPlayerFrames = new WeakSet()
 const localRecoveryStore = createLocalRuntimeRecoveryStore()
 
 function reportHubSnapshot(session, level, event, details = {}) {
@@ -82,23 +86,6 @@ const antTheme = {
 
 function configurePlayerFrame(frame, message) {
   frame.contentWindow?.postMessage(message, window.location.origin)
-  const root = frame.contentDocument?.getElementById('game')
-  if (!root || configuredPlayerFrames.has(frame)) return
-
-  const hideFastForwardOverlay = () => {
-    for (const overlay of root.querySelectorAll('.ejs_message')) {
-      if (/fast[-\s]?forward/i.test(overlay.textContent)) {
-        overlay.style.setProperty('display', 'none', 'important')
-      } else {
-        overlay.style.removeProperty('display')
-      }
-    }
-  }
-
-  const observer = new MutationObserver(hideFastForwardOverlay)
-  observer.observe(root, { childList: true, characterData: true, subtree: true })
-  hideFastForwardOverlay()
-  configuredPlayerFrames.add(frame)
 }
 
 function playerFrameUrl(session) {
@@ -274,6 +261,7 @@ function App() {
   const [closeChooserOpen, setCloseChooserOpen] = useState(false)
   const [selectedCloseSessionIds, setSelectedCloseSessionIds] = useState(new Set())
   const closeLockRef = useRef(false)
+  const closeLockRevisionRef = useRef(0)
   const awaitGamepadNeutralRef = useRef(false)
   const [viewport, setViewport] = useState(readViewport)
   const playerShellRef = useRef(null)
@@ -287,6 +275,7 @@ function App() {
   const oddsResetQueueRef = useRef(new Map())
 
   function setPlayerInteractionLocked(locked) {
+    if (closeLockRef.current !== locked) closeLockRevisionRef.current += 1
     closeLockRef.current = locked
     if (locked) awaitGamepadNeutralRef.current = true
     for (const frame of document.querySelectorAll('.player-grid iframe')) {
@@ -296,13 +285,10 @@ function App() {
   }
 
   function sendPlayerInteractionLock(frame, locked) {
-    try {
-      if (typeof frame.contentWindow?.emulatorHubSetInteractionLock === 'function') {
-        frame.contentWindow.emulatorHubSetInteractionLock(locked)
-        return
-      }
-    } catch {}
-    frame.contentWindow?.postMessage({ type: 'emulator-hub:interaction-lock', locked }, window.location.origin)
+    const sessionId = frame.closest('.player-cell')?.dataset.sessionId
+    if (!sessionId) return
+    void requestPlayerFrame({ frame, browser: window, sessionId, type: 'emulator-hub:interaction-lock', replyType: 'emulator-hub:interaction-lock-applied', details: { locked, revision: closeLockRevisionRef.current }, timeoutMs: 3000 })
+      .catch(error => reportHubSnapshot(activeSessionsRef.current.find(session => session.sessionId === sessionId), 'warn', 'interaction-lock-unconfirmed', { reason: error.message }))
   }
 
   useLayoutEffect(() => {
@@ -630,12 +616,14 @@ function App() {
     // Poll the parent document so changing window focus does not silence
     // controllers. A full snapshot also reaches newly loaded frames.
     const poll = () => {
+      const startedAt = hubPerformance ? performance.now() : 0
       const observedBindings = activeGamepadBindings(readGamepadSnapshot())
       if (awaitGamepadNeutralRef.current && observedBindings.length === 0) awaitGamepadNeutralRef.current = false
       const bindings = controlPanelOpen || profileGame || instancePicker || closeLockRef.current || awaitGamepadNeutralRef.current
         ? [] : observedBindings
       triggerActions.update(bindings, { l2: l2TriggerAction, r2: r2TriggerAction }, triggerBindings)
       broadcast(bindings)
+      hubPerformance?.recordGamepad(performance.now() - startedAt)
     }
     poll()
     const interval = window.setInterval(poll, 16)
@@ -785,6 +773,7 @@ function App() {
   }
 
   function configurePlayerFrameOnLoad(frame, session) {
+    hubPerformance?.frameLoaded(session.sessionId)
     sendPlayerInteractionLock(frame, closeLockRef.current)
     configurePlayerFrame(frame, { type: 'emulator-hub:fast-forward', enabled: fastForwardEnabled, speed: fastForwardSpeed })
     configurePlayerFrame(frame, { type: 'emulator-hub:mute', muted })
@@ -911,42 +900,14 @@ function App() {
   }
 
   function flushPlayerSave(frame) {
-    return new Promise((resolve, reject) => {
-      const requestId = `${Date.now()}-${Math.random()}`
-      let timeout = null
-      const receive = event => {
-        if (event.origin !== window.location.origin || event.source !== frame.contentWindow || event.data?.type !== 'emulator-hub:save-synced' || event.data.requestId !== requestId) return
-        finish(event.data.ok ? null : new Error(event.data.error || 'upload falhou'), { preserveRecovery: event.data.preserveRecovery === true })
-      }
-      const finish = (error, result) => {
-        if (timeout) window.clearTimeout(timeout)
-        window.removeEventListener('message', receive)
-        if (error) { error.transient = true; reject(error) }
-        else resolve({ preserveRecovery: result?.preserveRecovery === true })
-      }
-      try {
-        const directSync = frame.contentWindow?.emulatorHubClose
-        if (typeof directSync === 'function') {
-          Promise.resolve(directSync()).then(result => finish(null, result), finish)
-          return
-        }
-      } catch {
-        // The message fallback supports an iframe which has not exposed its
-        // same-origin synchronizer yet.
-      }
-      timeout = window.setTimeout(() => finish(new Error('tempo esgotado')), 30000)
-      window.addEventListener('message', receive)
-      frame.contentWindow?.postMessage({ type: 'emulator-hub:close-player', requestId }, window.location.origin)
-    })
+    const sessionId = frame.closest('.player-cell')?.dataset.sessionId
+    return requestPlayerFrame({ frame, browser: window, sessionId, type: 'emulator-hub:close-player', replyType: 'emulator-hub:save-synced' })
+      .then(result => ({ preserveRecovery: result.preserveRecovery === true }), error => { error.transient = true; throw error })
   }
 
   function clearPlayerRecovery(frame) {
-    try {
-      const clear = frame.contentWindow?.emulatorHubClearLocalRecovery
-      if (typeof clear === 'function') return Promise.resolve(clear())
-    } catch {}
-    frame.contentWindow?.postMessage({ type: 'emulator-hub:clear-local-recovery' }, window.location.origin)
-    return Promise.resolve()
+    const sessionId = frame.closest('.player-cell')?.dataset.sessionId
+    return requestPlayerFrame({ frame, browser: window, sessionId, type: 'emulator-hub:clear-local-recovery', replyType: 'emulator-hub:local-recovery-cleared', timeoutMs: 5000 })
   }
 
   async function openProfilePicker(game, purpose = 'launch', anchor = null) {

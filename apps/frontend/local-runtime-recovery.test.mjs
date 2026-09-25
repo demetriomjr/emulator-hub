@@ -4,7 +4,7 @@ import { test } from 'node:test'
 
 test('captures local recovery immediately and every 10 seconds, preserving it on lease loss', async () => {
   const player = await readFile(new URL('./src/player.js', import.meta.url), 'utf8')
-  assert.match(player, /async function captureLocalRecovery\(\)[\s\S]*?manager\.getState\?\.\(\)[\s\S]*?localRecoveryStore\.put\([\s\S]*?state: new Uint8Array\(state\)\s*\}\)/)
+  assert.match(player, /async function captureLocalRecovery\(\)[\s\S]*?manager\.getState\?\.\(\)[\s\S]*?stateCopy = measureSynchronousOperation\([\s\S]*?new Uint8Array\(state\)[\s\S]*?localRecoveryStore\.put\([\s\S]*?state: stateCopy\s*\}\)/)
   const localCapture = player.slice(player.indexOf('async function captureLocalRecovery()'), player.indexOf('async function clearLocalRecovery()'))
   assert.doesNotMatch(localCapture, /manager\.saveSaveFiles\?\.\(\)|manager\.getSaveFile\?\.\(\)|localRecovery\.save/)
   assert.match(player, /window\.setInterval\(\(\) => void captureLocalRecovery\(\)\.catch\([\s\S]*?\), 10_000\)/)

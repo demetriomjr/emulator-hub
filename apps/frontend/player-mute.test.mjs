@@ -25,6 +25,7 @@ test('newly loaded iframe receives the current mute toggle state', () => {
   assert.ok(begin > 0 && end > begin)
   const messages = []
   const configure = runInNewContext(`${hub.slice(begin, end)}\nconfigurePlayerFrameOnLoad`, {
+    hubPerformance: null,
     fastForwardEnabled: false, fastForwardSpeed: 1.5, muted: true, oddsManipulatorEnabled: false,
     closeLockRef: { current: false }, sendPlayerInteractionLock() {},
     configurePlayerFrame(_frame, message) { messages.push({ ...message }) },
