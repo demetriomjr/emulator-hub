@@ -20,7 +20,7 @@ function harness(deleteSnapshot) {
     async deleteEmulatorSnapshot() { return deleteSnapshot() },
     snapshotUrlForKind: url => url,
     window: { parent: { postMessage(message) { events.push(['message', message]) } } },
-    location: { origin: 'https://hub.test' },
+    hubOrigin: 'https://hub.test',
     snapshotTelemetry: { info(event, details) { events.push(['info', event, details]) }, warn(event, details) { events.push(['warn', event, details]) } },
   }
   return { events, context, run: runInNewContext(implementation, context) }

@@ -5,7 +5,7 @@ import { test } from 'node:test'
 test('accepts same-origin close-player messages without relying on the parent WindowProxy identity', async () => {
   const player = await readFile(new URL('./src/player.js', import.meta.url), 'utf8')
 
-  assert.match(player, /if \(event\.origin !== location\.origin\) return/)
+  assert.match(player, /if \(event\.origin !== hubOrigin\) return/)
   assert.match(player, /isClosePlayerMessage = event\.data\?\.type === 'emulator-hub:close-player'[\s\S]*?!isClosePlayerMessage && event\.source !== window\.parent/)
   assert.match(player, /window\.emulatorHubClose = closeEmulator/)
   assert.match(player, /event\.data\?\.type === 'emulator-hub:close-player'/)

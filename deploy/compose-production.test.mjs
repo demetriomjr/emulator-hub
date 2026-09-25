@@ -13,6 +13,7 @@ test('production Compose isolates the backend and waits for its healthcheck', as
   assert.match(compose, /CADDY_NETWORK/)
   assert.match(compose, /REDIS_NETWORK/)
   assert.match(compose, /EMULATOR_HUB_BACKUP_TOKEN/)
+  assert.match(compose, /PLAYER_ORIGIN_PORTS: \$\{PLAYER_ORIGIN_PORTS:-\}/)
   assert.match(compose, /external: true/)
   assert.match(compose, /"127\.0\.0\.1:8080:8080"/)
   assert.doesNotMatch(compose, /"0\.0\.0\.0:8080:8080"/)
@@ -23,6 +24,7 @@ test('production frontend image does not synchronize Pokemon sprites during depl
 
   assert.doesNotMatch(dockerfile, /RUN npm run sync:pokemon-resources/)
   assert.match(dockerfile, /RUN npm run build/)
+  assert.match(dockerfile, /ENV VITE_PLAYER_PORTS=\$PLAYER_ORIGIN_PORTS/)
 })
 
 test('production backend image copies IPS assets into the backend patch directory', async () => {

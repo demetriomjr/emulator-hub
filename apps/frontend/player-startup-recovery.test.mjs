@@ -171,7 +171,7 @@ test('restore request has no deadline and resolves only from an explicit respons
   const requests = new Map()
   const choose = runInNewContext(`${source.slice(begin, end)}\nrequestRestoreChoice`, {
     sessionId: 'session', id: 'game', profileId: 'profile', pendingRestoreRequests: requests,
-    Date, Math, location: { origin: 'https://hub.test' },
+    Date, Math, hubOrigin: 'https://hub.test',
     window: {
       setTimeout() { throw new Error('restore choice must not expire') },
       parent: { postMessage(message) { messages.push(message) } },

@@ -68,7 +68,7 @@ test('player acknowledges lock, close and local recovery clear to its own sessio
   let cleared = false
   const parent = { postMessage(message) { sent.push(message) } }
   const context = {
-    location: { origin: 'https://hub.example' }, sessionId: 's1', id: 'game', profileId: 'p1',
+    hubOrigin: 'https://hub.example', sessionId: 's1', id: 'game', profileId: 'p1',
     lastInteractionLockRevision: -1,
     interactionLock: { setLocked(value) { locked = value } },
     closeEmulator: async () => ({ preserveRecovery: true }),

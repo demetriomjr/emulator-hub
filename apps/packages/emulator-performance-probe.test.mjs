@@ -68,6 +68,14 @@ test('parent accepts samples only from the matching live same-origin player ifra
   assert.equal(performanceSampleMatchesFrame({ ...event, source: {} }, [frame], 'https://hub.example'), false)
 })
 
+test('parent accepts a sample from the matching cross-origin player iframe', () => {
+  const source = {}
+  const frame = { src: 'http://localhost:5175/player.html', contentWindow: source, closest: () => ({ dataset: { sessionId: 's1' } }) }
+  const event = { origin: 'http://localhost:5175', source, data: { type: 'emulator-hub:performance-sample', sessionId: 's1' } }
+  assert.equal(performanceSampleMatchesFrame(event, [frame], 'http://localhost:5174'), true)
+  assert.equal(performanceSampleMatchesFrame({ ...event, origin: 'http://localhost:5176' }, [frame], 'http://localhost:5174'), false)
+})
+
 function automaticHarness() {
   let clock = 100_000
   let nextTimer = 1

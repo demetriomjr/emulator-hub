@@ -15,6 +15,7 @@ function launchHarness(existingSessions, purpose) {
     profilePurpose: purpose,
     profileGame: { id: 'game-2' },
     fastForwardEnabled: false, fastForwardSpeed: 1.5, muted: false,
+    playerOriginPorts: [],
     MAX_PLAYER_INSTANCES: 6,
     crypto: { randomUUID: () => 'session-2' },
     async acquirePlayerLease() { return { leaseGeneration: 1 } },

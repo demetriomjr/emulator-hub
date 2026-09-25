@@ -2,12 +2,14 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { runInNewContext } from 'node:vm'
+import { playerOriginForSlot } from '../packages/player-origin-topology.mjs'
 
 const hub = await readFile(new URL('./src/main.jsx', import.meta.url), 'utf8')
 const player = await readFile(new URL('./src/player.js', import.meta.url), 'utf8')
 const begin = hub.indexOf('function playerFrameUrl(session)')
 const end = hub.indexOf('function ControlBinding(', begin)
 const playerFrameUrl = runInNewContext(`${hub.slice(begin, end)}\nplayerFrameUrl`, {
+  playerOriginPorts: [],
   clientDiagnosticsOptions: { enabled: true, sessionId: 'debug-session' },
   appendClientDiagnosticsParameters: parameters => parameters,
   URLSearchParams,
@@ -25,4 +27,20 @@ test('debug player launch keeps the normal core and lease identity without perfo
   assert.equal(url.searchParams.get('sessionId'), 'lease-session')
   assert.equal(url.searchParams.get('leaseGeneration'), '3')
   assert.match(player, /retryWithoutThreads: parameters\.get\('threadFallback'\) === '1'/)
+})
+
+test('configured player ports select a fixed origin without a test query parameter', () => {
+  const makeUrl = runInNewContext(`${hub.slice(begin, end)}\nplayerFrameUrl`, {
+    playerOriginPorts: [8444, 8445, 8446, 8447, 8448, 8449],
+    playerOriginForSlot,
+    window: { location: new URL('https://hub.example/') },
+    clientDiagnosticsOptions: { enabled: true },
+    appendClientDiagnosticsParameters: parameters => parameters,
+    URLSearchParams,
+  })
+  const url = new URL(makeUrl({ ...session, playerOriginSlot: 2 }))
+  assert.equal(url.origin, 'https://hub.example:8446')
+  assert.equal(url.searchParams.get('hubOrigin'), 'https://hub.example')
+  assert.equal(url.searchParams.get('sessionId'), 'lease-session')
+  assert.equal(url.searchParams.has('playerProcessTest'), false)
 })

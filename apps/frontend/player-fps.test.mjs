@@ -28,7 +28,7 @@ function harness(enabled) {
     performanceTimings: { drain: () => ({ 'getState.local': { count: 1, totalMs: 4, maxMs: 4 } }) },
     threadDecision: { enabled: true },
     sessionId: 's1',
-    location: { origin: 'https://hub.example' },
+    hubOrigin: 'https://hub.example',
     performance: { timeOrigin: 100_000, now: () => now },
     document: { createElement(tag) { assert.equal(tag, 'output'); return overlay }, body: { append() {} } },
     window: {

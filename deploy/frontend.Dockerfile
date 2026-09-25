@@ -10,6 +10,8 @@ RUN npm ci
 
 COPY apps/frontend ./
 COPY apps/packages ../packages
+ARG PLAYER_ORIGIN_PORTS=""
+ENV VITE_PLAYER_PORTS=$PLAYER_ORIGIN_PORTS
 RUN npm run build
 
 FROM nginx:1.29-alpine

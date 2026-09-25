@@ -36,6 +36,62 @@ attach Caddy to `CADDY_NETWORK`. The backend joins `REDIS_NETWORK` so its
 running directly on the VPS host, use `127.0.0.1:8080`. Caddy owns the public
 hostname and TLS; this project does not bind ports 80 or 443.
 
+## Separate browser origins for concurrent players
+
+EmulatorJS executes in each visitor's browser. Giving up to six player iframes
+distinct origins lets compatible Chromium browsers schedule them separately.
+This changes browser execution, not the number of frontend or backend Docker
+containers. The Hub page and all players still use the same frontend image.
+
+The default deployment leaves `PLAYER_ORIGIN_PORTS` empty and serves players
+on the Hub origin. To enable six player origins:
+
+1. Choose **six distinct, unused external TCP ports**. They must differ from
+   the Hub's own HTTPS port and be reachable from each visitor's browser.
+   Check host listeners, existing Docker publications, provider firewall rules,
+   and any private network policy. Ports inside Docker alone are insufficient.
+2. Set `PLAYER_ORIGIN_PORTS` in `deploy/.env` to the comma-separated ports,
+   for example `8444,8445,8446,8447,8448,8449`. The frontend Docker build
+   receives this value through a build argument. Rebuild that image after
+   changing the list; restarting the existing image cannot change it.
+3. If Caddy is containerized, add the same six TCP port publications to **the
+   Caddy service's** Compose file. Add six Caddy site addresses on the existing
+   Hub hostname, one per port, each `reverse_proxy`ing to the same frontend
+   service on their shared Docker network. The script below prints both
+   fragments using your hostname and upstream:
+
+   ```sh
+   node deploy/print-player-caddy.mjs hub.example.com 8444,8445,8446,8447,8448,8449 frontend:8080
+   ```
+
+   If Caddy runs directly on the host, use the frontend's published upstream,
+   such as `127.0.0.1:8080`. Review and merge the printed fragments into your
+   separately managed Caddy configuration; the script does not modify a live
+   server. Reload or recreate Caddy as required by changes to its port
+   publications. Keep your existing 443 and private listeners intact.
+4. Keep the existing DNS name. Ports change browser origins without creating
+   new subdomains or DNS records. Caddy uses the hostname's existing TLS
+   certificate on these additional HTTPS ports. Verify `/player.html` on each
+   port from **outside** the VPS with normal certificate validation, including
+   the `Document-Isolation-Policy: isolate-and-require-corp` response header.
+   Verify that `/api/` and `/roms/` on each port reach the same frontend proxy.
+   Then test a real game, lease, save, local recovery and snapshot restoration.
+
+The parent Hub assigns one port to each active player and keeps that slot until
+the player closes. Parent/player messages validate the actual frame origin,
+source and session. Because all player URLs retain the **same hostname**,
+host-only device cookies are shared across ports, while IndexedDB remains
+origin-specific; the player uses the Hub's storage bridge for local recovery.
+The Nginx document-isolation header applies only to `/player.html`. Browsers
+without effective isolation use the ordinary EmulatorJS core. An empty or
+invalid port configuration uses the Hub origin so game launch remains available.
+
+In development, `npm run dev` starts six loopback proxies automatically on the
+Vite port plus one through plus six, or the six ports in
+`apps/frontend/.env` under `PLAYER_ORIGIN_PORTS`. It passes the available
+ports to Vite without a query parameter. If those local ports cannot be
+reserved, it logs one warning and uses same-origin players for that run.
+
 ## Persistent data backup
 
 The backend creates one authenticated startup backup before it begins

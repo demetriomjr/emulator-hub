@@ -28,6 +28,7 @@ test('a delayed acknowledgement keeps the first choice and retries only that cho
     crypto: { randomUUID: () => 'attempt-1' },
     restorePromptAfterChoiceTimeout,
     reportHubSnapshot(session, level, event, details) { telemetry.push({ session, level, event, details }) },
+    configurePlayerFrame(_frame, message) { posted.push(message) },
     window: {
       location: { origin: 'https://hub.test' },
       setTimeout(callback) { const timer = ++nextTimer; timers.set(timer, callback); return timer },

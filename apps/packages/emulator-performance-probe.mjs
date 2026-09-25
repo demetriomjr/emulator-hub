@@ -1,6 +1,9 @@
+import { findTrustedPlayerFrame } from './player-origin-topology.mjs'
+
 export function performanceSampleMatchesFrame(event, frames, origin) {
-  if (event?.origin !== origin || event.data?.type !== 'emulator-hub:performance-sample' || typeof event.data.sessionId !== 'string') return false
-  return [...frames].some(frame => frame.contentWindow === event.source && frame.closest('.player-cell')?.dataset.sessionId === event.data.sessionId)
+  if (event?.data?.type !== 'emulator-hub:performance-sample' || typeof event.data.sessionId !== 'string') return false
+  const frame = findTrustedPlayerFrame(event, frames, origin)
+  return frame?.closest('.player-cell')?.dataset.sessionId === event.data.sessionId
 }
 
 export function createPerformanceTimingCollector() {

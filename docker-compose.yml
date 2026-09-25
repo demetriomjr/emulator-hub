@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: deploy/frontend.Dockerfile
+      args:
+        PLAYER_ORIGIN_PORTS: ${PLAYER_ORIGIN_PORTS:-}
     depends_on:
       backend:
         condition: service_healthy

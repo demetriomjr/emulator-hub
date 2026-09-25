@@ -14,6 +14,7 @@ test('new player URL carries the saved mute state before EmulatorJS loads', () =
     URLSearchParams,
     appendClientDiagnosticsParameters: parameters => parameters,
     clientDiagnosticsOptions: {},
+    playerOriginPorts: [],
   })
   const url = makeUrl({ gameId: 'game', profileId: 'profile', sessionId: 'session', leaseGeneration: 1, initialMuted: true, initialFastForwardEnabled: false, initialFastForwardSpeed: 1.5 })
   assert.equal(new URL(url, 'https://hub.example').searchParams.get('muted'), '1')

@@ -21,8 +21,12 @@ import { createOddsManipulatorClock } from '../../packages/odds-manipulator-cloc
 import { createEmulatorAudioMute } from '../../packages/emulator-audio-mute.mjs'
 import { createPlayerInteractionLock } from '../../packages/player-interaction-lock.mjs'
 import { playerThreadFallbackUrl, selectPlayerThreadMode } from '../../packages/player-thread-policy.mjs'
+import { createPlayerOriginStorageClient } from '../../packages/player-origin-storage-bridge.mjs'
 
 const parameters = new URLSearchParams(location.search)
+const suppliedHubOrigin = parameters.get('hubOrigin')
+const hubOrigin = suppliedHubOrigin ?? location.origin
+if (suppliedHubOrigin && (new URL(hubOrigin).origin !== hubOrigin || new URL(hubOrigin).hostname !== location.hostname || new URL(hubOrigin).protocol !== location.protocol)) throw new Error('Invalid Hub origin for player')
 const id = parameters.get('id')
 const profileId = parameters.get('profileId')
 const sessionId = parameters.get('sessionId')
@@ -70,7 +74,7 @@ let snapshotRevision = null
 let userSnapshot = null
 let userSnapshotRevision = null
 let userSnapshotCapture = null
-const installationIdentity = getInstallationIdentity()
+let installationIdentity = hubOrigin === location.origin ? getInstallationIdentity() : null
 let offerPolicy = null
 let runtimeReady = false
 let closeRequested = false
@@ -108,7 +112,8 @@ let localRecoveryDeleteTimer = null
 let localRecoveryCapture = null
 let localRecovery = null
 let restoreCandidates = []
-const localRecoveryStore = createLocalRuntimeRecoveryStore()
+const originStorageClient = hubOrigin === location.origin ? null : createPlayerOriginStorageClient({ browser: window, parent: window.parent, hubOrigin, sessionId, profileId, gameId: id })
+const localRecoveryStore = originStorageClient ? createLocalRuntimeRecoveryStore({ storage: originStorageClient.storage }) : createLocalRuntimeRecoveryStore()
 const snapshotTelemetry = createSnapshotTelemetry({ browser: window, source: 'player', sessionId, gameId: id, profileId })
 let removeAudioResumeGesture = null
 let stopFrameProgressMonitor = null
@@ -135,7 +140,7 @@ function loseLease() {
   stopBatterySavePolling?.()
   stopBatterySavePolling = null
   if (localRecoveryInterval) window.clearInterval(localRecoveryInterval)
-  void Promise.resolve(localRecoveryCapture).catch(() => {}).finally(() => localRecoveryStore.markRuntimeBreak(profileId, id)).finally(() => window.parent.postMessage({ type: 'emulator-hub:lease-lost', unavailable: true, sessionId, profileId, gameId: id, generation: leaseGeneration }, location.origin))
+  void Promise.resolve(localRecoveryCapture).catch(() => {}).finally(() => localRecoveryStore.markRuntimeBreak(profileId, id)).finally(() => window.parent.postMessage({ type: 'emulator-hub:lease-lost', unavailable: true, sessionId, profileId, gameId: id, generation: leaseGeneration }, hubOrigin))
 }
 
 function startLeaseHeartbeat() {
@@ -160,7 +165,7 @@ function requestRestoreChoice(candidates) {
   const requestId = `${sessionId}:candidates:${Date.now()}:${Math.random()}`
   return new Promise(resolve => {
     pendingRestoreRequests.set(requestId, { resolve, sessionId, gameId: id, profileId, candidates })
-    window.parent.postMessage(createRestoreRequest({ requestId, kind: 'candidate-list', candidates, gameId: id, profileId, sessionId }), location.origin)
+    window.parent.postMessage(createRestoreRequest({ requestId, kind: 'candidate-list', candidates, gameId: id, profileId, sessionId }), hubOrigin)
   })
 }
 
@@ -212,7 +217,7 @@ function startEmulatedFpsOverlay() {
       ? `— FPS${targetText}`
       : `${Math.round(sample.fps)} FPS${sample.speed !== null && launchDescriptor?.core === 'gba' ? ` · real ${sample.speed.toFixed(1).replace('.', ',')}×` : ''}${targetText}`
     if (sample.fps !== null && sample.speed !== null) {
-      window.parent.postMessage({ type: 'emulator-hub:performance-sample', sessionId, timestamp: performance.timeOrigin + performance.now(), fps: sample.fps, speed: sample.speed, target, threaded: threadDecision?.enabled === true, isolated: window.crossOriginIsolated === true, timings: performanceTimings.drain() }, location.origin)
+      window.parent.postMessage({ type: 'emulator-hub:performance-sample', sessionId, timestamp: performance.timeOrigin + performance.now(), fps: sample.fps, speed: sample.speed, target, threaded: threadDecision?.enabled === true, isolated: window.crossOriginIsolated === true, timings: performanceTimings.drain() }, hubOrigin)
     }
   }
   update()
@@ -520,11 +525,11 @@ async function persistEmulatorState({ kind, reasonCode, promptOnLaunch }) {
 }
 
 function announceUserStateAvailability() {
-  window.parent.postMessage({ type: 'emulator-hub:user-state-availability', sessionId, gameId: id, profileId, available: Boolean(userSnapshot) }, location.origin)
+  window.parent.postMessage({ type: 'emulator-hub:user-state-availability', sessionId, gameId: id, profileId, available: Boolean(userSnapshot) }, hubOrigin)
 }
 
 function reportPlayerActionFailure(action) {
-  window.parent.postMessage({ type: 'emulator-hub:player-action-failed', sessionId, gameId: id, profileId, action }, location.origin)
+  window.parent.postMessage({ type: 'emulator-hub:player-action-failed', sessionId, gameId: id, profileId, action }, hubOrigin)
 }
 
 async function deleteRestoreCandidate(message) {
@@ -576,14 +581,14 @@ async function deleteRestoreCandidate(message) {
     pending.candidates = pending.candidates.filter(candidate => candidate.candidateId !== message.candidateId)
     restoreCandidates = pending.candidates
     snapshotTelemetry.info('candidate-deleted', { snapshotKind: message.kind, candidateId: message.candidateId, revision: targetRevision, reason: 'user-request' })
-    window.parent.postMessage({ type: 'emulator-hub:snapshot-candidate-delete-result', requestId: message.requestId, restoreRequestId: message.restoreRequestId, candidateId: message.candidateId, kind: message.kind, sessionId, gameId: id, profileId, ok: true }, location.origin)
+    window.parent.postMessage({ type: 'emulator-hub:snapshot-candidate-delete-result', requestId: message.requestId, restoreRequestId: message.restoreRequestId, candidateId: message.candidateId, kind: message.kind, sessionId, gameId: id, profileId, ok: true }, hubOrigin)
   } catch (error) {
     if (candidateGone) {
       pending.candidates = pending.candidates.filter(candidate => candidate.candidateId !== message.candidateId)
       restoreCandidates = pending.candidates
     }
     snapshotTelemetry[candidateGone ? 'info' : 'warn'](candidateGone ? 'candidate-already-gone' : 'candidate-delete-failed', { snapshotKind: message.kind, candidateId: message.candidateId, revision: targetRevision, code: error.code, error: error.message, status: error.status })
-    window.parent.postMessage({ type: 'emulator-hub:snapshot-candidate-delete-result', requestId: message.requestId, restoreRequestId: message.restoreRequestId, candidateId: message.candidateId, currentCandidate, candidateGone, kind: message.kind, sessionId, gameId: id, profileId, ok: candidateGone, error: error.message, code: error.code ?? null }, location.origin)
+    window.parent.postMessage({ type: 'emulator-hub:snapshot-candidate-delete-result', requestId: message.requestId, restoreRequestId: message.restoreRequestId, candidateId: message.candidateId, currentCandidate, candidateGone, kind: message.kind, sessionId, gameId: id, profileId, ok: candidateGone, error: error.message, code: error.code ?? null }, hubOrigin)
   }
 }
 
@@ -699,7 +704,7 @@ function loadEmulatorState() {
 }
 
 window.addEventListener('message', event => {
-  if (event.origin !== location.origin) return
+  if (event.origin !== hubOrigin) return
   const isClosePlayerMessage = event.data?.type === 'emulator-hub:close-player'
   if (!isClosePlayerMessage && event.source !== window.parent) return
   if (event.data?.type === 'emulator-hub:interaction-lock') {
@@ -708,7 +713,7 @@ window.addEventListener('message', event => {
       lastInteractionLockRevision = event.data.revision
       interactionLock.setLocked(event.data.locked)
     }
-    window.parent.postMessage({ type: 'emulator-hub:interaction-lock-applied', requestId: event.data.requestId, sessionId, revision: lastInteractionLockRevision, ok: true }, location.origin)
+    window.parent.postMessage({ type: 'emulator-hub:interaction-lock-applied', requestId: event.data.requestId, sessionId, revision: lastInteractionLockRevision, ok: true }, hubOrigin)
     return
   }
   if (event.data?.type === 'emulator-hub:gamepad') {
@@ -725,10 +730,10 @@ window.addEventListener('message', event => {
     if (!choice) return
     const reply = { requestId: event.data.requestId, choiceAttemptId: event.data.choiceAttemptId, candidateId: event.data.candidateId, sessionId, gameId: id, profileId }
     if (choice.status === 'stale') {
-      window.parent.postMessage({ type: 'emulator-hub:snapshot-restore-stale', ...reply, candidates: choice.candidates }, location.origin)
+      window.parent.postMessage({ type: 'emulator-hub:snapshot-restore-stale', ...reply, candidates: choice.candidates }, hubOrigin)
       return
     }
-    window.parent.postMessage({ type: 'emulator-hub:snapshot-restore-settled', ...reply, appliedCandidateId: choice.appliedCandidateId }, location.origin)
+    window.parent.postMessage({ type: 'emulator-hub:snapshot-restore-settled', ...reply, appliedCandidateId: choice.appliedCandidateId }, hubOrigin)
     if (settledRestoreRequests.size > 32) settledRestoreRequests.delete(settledRestoreRequests.keys().next().value)
     if (choice.request) {
       choice.request.resolve({ candidateId: choice.request.candidateId, explicit: true })
@@ -808,22 +813,22 @@ window.addEventListener('message', event => {
   }
   if (event.data?.type === 'emulator-hub:get-fast-forward-state') {
     if (typeof event.data.requestId !== 'string') return
-    window.parent.postMessage({ type: 'emulator-hub:fast-forward-state', requestId: event.data.requestId, enabled: fastForwardRequest.enabled }, location.origin)
+    window.parent.postMessage({ type: 'emulator-hub:fast-forward-state', requestId: event.data.requestId, enabled: fastForwardRequest.enabled }, hubOrigin)
     return
   }
   if (event.data?.type === 'emulator-hub:close-player') {
     if (typeof event.data.requestId !== 'string' || event.data.sessionId !== sessionId) return
     closeEmulator().then(
-      result => window.parent.postMessage({ type: 'emulator-hub:save-synced', requestId: event.data.requestId, sessionId, ok: true, preserveRecovery: result.preserveRecovery }, location.origin),
-      error => window.parent.postMessage({ type: 'emulator-hub:save-synced', requestId: event.data.requestId, sessionId, ok: false, error: error.message }, location.origin),
+      result => window.parent.postMessage({ type: 'emulator-hub:save-synced', requestId: event.data.requestId, sessionId, ok: true, preserveRecovery: result.preserveRecovery }, hubOrigin),
+      error => window.parent.postMessage({ type: 'emulator-hub:save-synced', requestId: event.data.requestId, sessionId, ok: false, error: error.message }, hubOrigin),
     )
     return
   }
   if (event.data?.type === 'emulator-hub:clear-local-recovery') {
     if (typeof event.data.requestId !== 'string' || event.data.sessionId !== sessionId) return
     void clearLocalRecovery().then(
-      () => window.parent.postMessage({ type: 'emulator-hub:local-recovery-cleared', requestId: event.data.requestId, sessionId, ok: true }, location.origin),
-      error => window.parent.postMessage({ type: 'emulator-hub:local-recovery-cleared', requestId: event.data.requestId, sessionId, ok: false, error: error.message }, location.origin),
+      () => window.parent.postMessage({ type: 'emulator-hub:local-recovery-cleared', requestId: event.data.requestId, sessionId, ok: true }, hubOrigin),
+      error => window.parent.postMessage({ type: 'emulator-hub:local-recovery-cleared', requestId: event.data.requestId, sessionId, ok: false, error: error.message }, hubOrigin),
     )
   }
 })
@@ -831,6 +836,7 @@ window.addEventListener('message', event => {
 async function start() {
   if (!id || !profileId) throw new Error('Missing game or profile ID')
   if (!sessionId || !Number.isInteger(leaseGeneration)) throw new Error('Missing active player lease')
+  if (originStorageClient) installationIdentity = await originStorageClient.getInstallationIdentity()
   startLeaseHeartbeat()
   const [launch, controlProfile] = await Promise.all([getPlayerLeaseLaunch(sessionId, { profileId, gameId: id, generation: leaseGeneration }), getControlProfile()])
   if (!launch.romUrl || !launch.core) throw new Error('Incomplete launch configuration')
@@ -985,7 +991,7 @@ async function start() {
       if (gamepadBindings.length > 0) offerPolicy.recordInput()
       gamepadInput.update(gamepadBindings)
     }
-    const focusPlayer = () => window.parent.postMessage({ type: 'emulator-hub:player-focused', sessionId, gameId: id, profileId }, location.origin)
+    const focusPlayer = () => window.parent.postMessage({ type: 'emulator-hub:player-focused', sessionId, gameId: id, profileId }, hubOrigin)
     window.addEventListener('keydown', event => { if (event.isTrusted) { offerPolicy.recordInput(); focusPlayer() } }, { capture: true })
     game.addEventListener('pointerdown', event => { if (event.isTrusted) { offerPolicy.recordInput(); focusPlayer() } }, { capture: true })
     game.addEventListener('touchstart', event => { if (event.isTrusted) { offerPolicy.recordInput(); focusPlayer() } }, { capture: true, passive: true })

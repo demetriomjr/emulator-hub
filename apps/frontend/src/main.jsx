@@ -13,10 +13,13 @@ import { createMultiSaveCloseCoordinator } from '../../packages/multi-save-close
 import { isMobileLandscapeViewport, isNarrowPortraitViewport } from '../../packages/mobile-viewport.mjs'
 import { shouldReloadForFrontendRevision } from '../../packages/frontend-revision.mjs'
 import { readFastForwardSpeed } from '../../packages/fast-forward-preference.mjs'
-import { createLocalRuntimeRecoveryStore } from '../../packages/local-runtime-recovery-store.mjs'
+import { createIndexedDbRecoveryStorage, createLocalRuntimeRecoveryStore } from '../../packages/local-runtime-recovery-store.mjs'
 import { canReconcileLateSnapshotDelete, createSnapshotDeleteWatchdog, restorePromptAfterChoiceTimeout, restorePromptAfterDeleteTimeout } from '../../packages/snapshot-restore-routing.mjs'
 import { createPlayerTriggerActions, playerTriggerActionOptions } from '../../packages/player-trigger-actions.mjs'
 import { requestPlayerFrame } from '../../packages/player-frame-request.mjs'
+import { findReachablePlayerOriginSlot, findTrustedPlayerFrame, frameOrigin, parsePlayerOriginPorts, playerOriginForSlot } from '../../packages/player-origin-topology.mjs'
+import { respondToPlayerStorageRequest } from '../../packages/player-origin-storage-bridge.mjs'
+import { getInstallationIdentity } from '../../packages/restore-candidate.mjs'
 import { createOddsManipulatorSync } from '../../packages/odds-manipulator-sync.mjs'
 import { describeRestoreCandidate } from './restore-candidate-view.mjs'
 import { createSnapshotTelemetry } from '../../packages/snapshot-telemetry.mjs'
@@ -65,7 +68,11 @@ const playerActionFailureMessages = Object.freeze({
   'game-save-missing': 'O save do jogo esperado para este perfil não foi encontrado.',
 })
 const MAX_PLAYER_INSTANCES = 6
-const localRecoveryStore = createLocalRuntimeRecoveryStore()
+let playerOriginPorts = []
+try { playerOriginPorts = parsePlayerOriginPorts(window.location, import.meta.env.VITE_PLAYER_PORTS) }
+catch (error) { console.warn('[player-origins] Invalid port configuration; using the Hub origin', { error: error.message }) }
+const localRecoveryStorage = createIndexedDbRecoveryStorage()
+const localRecoveryStore = createLocalRuntimeRecoveryStore({ storage: localRecoveryStorage })
 
 function reportHubSnapshot(session, level, event, details = {}) {
   if (!session) return
@@ -85,7 +92,7 @@ const antTheme = {
 }
 
 function configurePlayerFrame(frame, message) {
-  frame.contentWindow?.postMessage(message, window.location.origin)
+  if (frame) frame.contentWindow?.postMessage(message, frameOrigin(frame, window.location.origin))
 }
 
 function playerFrameUrl(session) {
@@ -101,7 +108,9 @@ function playerFrameUrl(session) {
     localRecoveryPrompt: session.localRecoveryPrompt ? '1' : '0',
     ...(session.localRecoveryPrompt?.candidateId ? { localRecoveryCandidateId: session.localRecoveryPrompt.candidateId } : {}),
   }), clientDiagnosticsOptions)
-  return `/player.html?${parameters}`
+  if (playerOriginPorts.length === 0 || !Number.isInteger(session.playerOriginSlot)) return `/player.html?${parameters}`
+  parameters.set('hubOrigin', window.location.origin)
+  return `${playerOriginForSlot(window.location, session.playerOriginSlot, playerOriginPorts)}/player.html?${parameters}`
 }
 
 function ControlBinding({ control, profile, captureTarget, onCapture }) {
@@ -280,7 +289,7 @@ function App() {
     if (locked) awaitGamepadNeutralRef.current = true
     for (const frame of document.querySelectorAll('.player-grid iframe')) {
       sendPlayerInteractionLock(frame, locked)
-      if (locked) frame.contentWindow?.postMessage({ type: 'emulator-hub:gamepad', bindings: [] }, window.location.origin)
+      if (locked) configurePlayerFrame(frame, { type: 'emulator-hub:gamepad', bindings: [] })
     }
   }
 
@@ -364,7 +373,13 @@ function App() {
 
   useEffect(() => {
     const receive = event => {
-      if (event.origin !== window.location.origin) return
+      const trustedFrame = findTrustedPlayerFrame(event, document.querySelectorAll('.player-cell iframe'), window.location.origin)
+      if (!trustedFrame) return
+      if (event.data?.type === 'emulator-hub:local-storage-request') {
+        const session = activeSessionsRef.current.find(candidate => trustedFrame.closest('.player-cell')?.dataset.sessionId === candidate.sessionId)
+        if (session) void respondToPlayerStorageRequest(event, { frame: trustedFrame, session, storage: localRecoveryStorage, installationIdentity: event.data.operation === 'installation-identity' ? getInstallationIdentity() : null, origin: event.origin })
+        return
+      }
       if (event.data?.type === 'emulator-hub:snapshot-restore-request') {
         if (typeof event.data.requestId !== 'string' || event.data.kind !== 'candidate-list' || !Array.isArray(event.data.candidates) || event.data.candidates.length === 0) return
         const frame = [...document.querySelectorAll('.player-cell iframe')].find(candidate => candidate.contentWindow === event.source)
@@ -610,7 +625,7 @@ function App() {
     }, toggleFastForward: () => { void toggleFastForwardFromFirstFrame() } })
     const broadcast = bindings => {
       for (const frame of document.querySelectorAll('.player-grid iframe')) {
-        frame.contentWindow?.postMessage({ type: 'emulator-hub:gamepad', bindings }, window.location.origin)
+        configurePlayerFrame(frame, { type: 'emulator-hub:gamepad', bindings })
       }
     }
     // Poll the parent document so changing window focus does not silence
@@ -640,10 +655,10 @@ function App() {
     const frames = [...document.querySelectorAll('.player-grid iframe')]
     for (const [index, frame] of frames.entries()) {
       configurePlayerFrame(frame, message)
-      frame.contentWindow?.postMessage({ type: 'emulator-hub:mute', muted }, window.location.origin)
+      configurePlayerFrame(frame, { type: 'emulator-hub:mute', muted })
       const session = activeSessions[index]
       if (session && oddsManipulatorEnabled) void configureOddsClock(frame, session, session.oddsResetCount ?? 0, (session.oddsResetCount ?? 0) * 60_000)
-      else if (session) frame.contentWindow?.postMessage({ type: 'emulator-hub:odds-manipulator-configure', enabled: false }, window.location.origin)
+      else if (session) configurePlayerFrame(frame, { type: 'emulator-hub:odds-manipulator-configure', enabled: false })
     }
   }, [activeSessions, fastForwardEnabled, fastForwardSpeed, muted, oddsManipulatorEnabled])
 
@@ -685,7 +700,7 @@ function App() {
       const requestId = `${Date.now()}-${Math.random()}`
       const finish = () => { window.clearTimeout(timeout); window.removeEventListener('message', receive); resolve() }
       const receive = event => {
-        if (event.origin !== window.location.origin || event.source !== frame.contentWindow || event.data?.type !== 'emulator-hub:fast-forward-state' || event.data.requestId !== requestId || typeof event.data.enabled !== 'boolean') return
+        if (event.origin !== frameOrigin(frame, window.location.origin) || event.source !== frame.contentWindow || event.data?.type !== 'emulator-hub:fast-forward-state' || event.data.requestId !== requestId || typeof event.data.enabled !== 'boolean') return
         if (document.querySelector('.player-grid iframe') !== frame) { finish(); return }
         const enabled = !event.data.enabled
         setFastForwardEnabled(enabled)
@@ -696,7 +711,7 @@ function App() {
       }
       const timeout = window.setTimeout(finish, 1000)
       window.addEventListener('message', receive)
-      frame.contentWindow.postMessage({ type: 'emulator-hub:get-fast-forward-state', requestId }, window.location.origin)
+      configurePlayerFrame(frame, { type: 'emulator-hub:get-fast-forward-state', requestId })
     })).catch(() => {})
     return fastForwardToggleRef.current
   }
@@ -717,7 +732,7 @@ function App() {
       const frame = frames[index]
       if (!frame) return
       if (!oddsManipulatorEnabled) {
-        frame.contentWindow?.postMessage({ type }, window.location.origin)
+        configurePlayerFrame(frame, { type })
         return
       }
       const nextCount = (session.oddsResetCount ?? 0) + 1
@@ -732,7 +747,7 @@ function App() {
         const diagnostic = { kind: 'odds-manipulator', message: 'odds.reset.applied', gameId: session.gameId, profileId: session.profileId, sessionId: session.sessionId, resetType: type, oddsResetCount: nextCount, virtualTimestamp: nextTimestamp }
         clientDiagnostics?.capture(diagnostic)
         console.info('[odds-manipulator]', diagnostic)
-        frame.contentWindow?.postMessage({ type, oddsResetCount: nextCount, virtualTimestamp: nextTimestamp }, window.location.origin)
+        configurePlayerFrame(frame, { type, oddsResetCount: nextCount, virtualTimestamp: nextTimestamp })
         oddsSyncRef.current.get(session.sessionId)?.markDirty(nextCount)
       }
       const queued = (oddsResetQueueRef.current.get(session.sessionId) ?? Promise.resolve()).catch(() => {}).then(run)
@@ -756,12 +771,12 @@ function App() {
         resolve(result)
       }
       const receive = event => {
-        if (event.origin !== window.location.origin || event.source !== frame.contentWindow || event.data?.type !== 'emulator-hub:odds-manipulator-ready' || event.data.requestId !== requestId) return
+        if (event.origin !== frameOrigin(frame, window.location.origin) || event.source !== frame.contentWindow || event.data?.type !== 'emulator-hub:odds-manipulator-ready' || event.data.requestId !== requestId) return
         finish(event.data.accepted === true && event.data.oddsResetCount === oddsResetCount && event.data.virtualTimestamp === virtualTimestamp)
       }
       const timeout = window.setTimeout(() => finish(false), 2_000)
       window.addEventListener('message', receive)
-      frame.contentWindow?.postMessage({ type: 'emulator-hub:odds-manipulator-configure', enabled: true, sessionId: session.sessionId, requestId, oddsResetCount, virtualTimestamp }, window.location.origin)
+      configurePlayerFrame(frame, { type: 'emulator-hub:odds-manipulator-configure', enabled: true, sessionId: session.sessionId, requestId, oddsResetCount, virtualTimestamp })
     })
   }
 
@@ -793,7 +808,7 @@ function App() {
       } else {
         oddsClockReadyRef.current.delete(session.sessionId)
         void oddsSyncRef.current.get(session.sessionId)?.flush()
-        frame.contentWindow?.postMessage({ type: 'emulator-hub:odds-manipulator-configure', enabled: false }, window.location.origin)
+        configurePlayerFrame(frame, { type: 'emulator-hub:odds-manipulator-configure', enabled: false })
       }
     })
   }
@@ -804,7 +819,7 @@ function App() {
     activeSessions.forEach((session, index) => {
       oddsClockReadyRef.current.delete(session.sessionId)
       void oddsSyncRef.current.get(session.sessionId)?.flush()
-      frames[index]?.contentWindow?.postMessage({ type: 'emulator-hub:odds-manipulator-configure', enabled: false }, window.location.origin)
+      configurePlayerFrame(frames[index], { type: 'emulator-hub:odds-manipulator-configure', enabled: false })
     })
   }
 
@@ -956,6 +971,11 @@ function App() {
     try {
       const game = profileGame
       const sessionId = crypto.randomUUID()
+      let playerOriginSlot = null
+      if (playerOriginPorts.length > 0) {
+        playerOriginSlot = await findReachablePlayerOriginSlot(activeSessions, window.location, playerOriginPorts)
+        if (playerOriginSlot === null) console.warn('[player-origins] No player port responded; using the Hub origin')
+      }
       const lease = await acquirePlayerLease(game.id, profile.id, sessionId)
       if (activeSessions.length === 0) disableOddsManipulator()
       setProfileGame(null)
@@ -974,6 +994,7 @@ function App() {
         initialMuted: muted,
         restoreRecovery,
         localRecoveryPrompt,
+        ...(playerOriginSlot !== null ? { playerOriginSlot } : {}),
       }
       oddsSyncRef.current.set(sessionId, createOddsManipulatorSync({
         send: count => syncOddsResetCount(game.id, profile.id, count),
@@ -1015,12 +1036,12 @@ function App() {
       const next = restorePromptAfterChoiceTimeout(snapshotRestoreRequestsRef.current, { sessionId, requestId, candidateId, choiceAttemptId })
       snapshotRestoreRequestsRef.current = next
       setSnapshotRestoreRequests(next)
-      frame.contentWindow?.postMessage(choiceMessage, window.location.origin)
+      configurePlayerFrame(frame, choiceMessage)
       pending.timer = window.setTimeout(retryChoice, 8_000)
     }
     const timer = window.setTimeout(retryChoice, 8_000)
     restoreChoiceTimersRef.current.set(sessionId, { requestId, choiceAttemptId, timer })
-    frame.contentWindow.postMessage(choiceMessage, window.location.origin)
+    configurePlayerFrame(frame, choiceMessage)
   }
 
   function clearRestoreChoiceTimer(sessionId) {
@@ -1135,7 +1156,7 @@ function App() {
 
   function broadcastPlayerMessage(type, payload = {}) {
     for (const frame of document.querySelectorAll('.player-grid iframe')) {
-      frame.contentWindow?.postMessage({ type, ...payload }, window.location.origin)
+      configurePlayerFrame(frame, { type, ...payload })
     }
   }
 
@@ -1144,7 +1165,7 @@ function App() {
     if (!sessionId) return
     setPlayerActionErrors(current => { const next = { ...current }; delete next[sessionId]; return next })
     const frame = [...document.querySelectorAll('.player-cell')].find(cell => cell.dataset.sessionId === sessionId)?.querySelector('iframe')
-    frame?.contentWindow?.postMessage({ type, sessionId }, window.location.origin)
+    configurePlayerFrame(frame, { type, sessionId })
   }
 
   const activeProfileIds = new Set(activeSessions.map(session => `${session.gameId}:${session.profileId}`))
