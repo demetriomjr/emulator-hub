@@ -1505,6 +1505,36 @@ describe('hub backend HTTP contract', () => {
     })
   })
 
+  test('records player session history and conditionally resumes only the latest inactive revision', async () => {
+    const rom = Buffer.from('session history game')
+    const { baseUrl } = await startFixture([{ id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom) }], { 'pokemon-red.gb': rom })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Red' }) }))
+    const first = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'session-one')
+    assert.equal(first.body.sessionRevision, 1)
+    assert.ok(Number.isInteger(first.body.startedAt))
+    const release = await fetch(`${baseUrl}/api/player-leases/session-one`, { method: 'DELETE', headers: { Cookie: first.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: profile.id, gameId: 'pokemon-red', generation: first.body.leaseGeneration }) })
+    assert.equal(release.status, 200)
+
+    const resume = async (sessionId, expectedSessionRevision) => {
+      const response = await fetch(`${baseUrl}/api/games/pokemon-red/player-leases`, { method: 'POST', headers: { Cookie: first.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: profile.id, sessionId, expectedSessionRevision }) })
+      return { response, body: await response.json() }
+    }
+    const second = await resume('session-two', 1)
+    assert.equal(second.response.status, 200)
+    assert.equal(second.body.sessionRevision, 2)
+    const occupied = await resume('session-three', 2)
+    assert.equal(occupied.response.status, 409)
+    const releaseSecond = await fetch(`${baseUrl}/api/player-leases/session-two`, { method: 'DELETE', headers: { Cookie: first.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: profile.id, gameId: 'pokemon-red', generation: second.body.leaseGeneration }) })
+    assert.equal(releaseSecond.status, 200)
+    const stale = await resume('session-four', 1)
+    assert.equal(stale.response.status, 409)
+    assert.equal(stale.body.code, 'PLAYER_SESSION_STALE')
+    const history = await jsonResponse(await fetch(`${baseUrl}/api/profiles/${profile.id}/games/pokemon-red/player-sessions`, { headers: { Cookie: first.cookie } }))
+    assert.deepEqual(history.sessions.map(session => [session.sessionId, session.sessionRevision, session.endReason]), [['session-one', 1, 'released'], ['session-two', 2, 'released']])
+    assert.equal(history.sessionRevision, 2)
+    assert.equal((await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, { headers: { Cookie: first.cookie } }))).profiles[0].sessionRevision, undefined)
+  })
+
   test('first mute preference update persists before any other preference exists', async () => {
     const { baseUrl } = await startFixture([])
     const update = await fetch(`${baseUrl}/api/user-preferences`, {

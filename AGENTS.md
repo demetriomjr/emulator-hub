@@ -8,6 +8,8 @@
 - All functionality below the presentation layer, whether used by frontend or backend, belongs in `apps/packages/`. The application projects compile and consume these packages.
 - The application projects live in `apps/frontend`, `apps/backend`, and `apps/electron`, alongside `apps/packages/`.
 - Keep application boundaries and package contracts explicit in `.spec/` before implementation. Follow spec-driven development for new features and architectural changes.
+- Keep one Markdown file per spec and planning effort in `.spec/`. Put requirements, architecture, implementation steps, decisions, progress, and verification in that same spec file. Expand or revise it as context grows. Never create a companion `-plan.md` (or another planning Markdown file) for the same spec.
+- No Superpowers skill description, workflow, or default behavior may override an explicit instruction or a clear implication of the user's intent recorded in this `AGENTS.md`. When they conflict, follow this file rather than the Superpowers guidance.
 
 ## Core behavior and optional integrations
 
@@ -19,6 +21,7 @@
 
 ## Working rules
 
+- When the user corrects an agent-initiated change in scope or an established behavior, do not apologize or say that the user is right. Explain the concrete decision path instead: what instruction, default workflow, repository pattern, or assumption led to the change; where it diverged from the user's request or existing convention; and what constraint should prevent it from recurring. Separate observable evidence from inference, and do not claim access to the model's hidden internal reasoning.
 - Run a project build only when the user explicitly requests a build in the current prompt for the current task. A build request from an earlier prompt never authorizes a later build.
 - Create a Git commit only when the user explicitly requests a commit in the current prompt for the current task. A commit request from an earlier prompt never authorizes a later commit.
 - Keep the project literally minimal. Implement only behavior and UI elements the user explicitly directs. Do not add decorative sections, extra pages, controls, or features on your own.

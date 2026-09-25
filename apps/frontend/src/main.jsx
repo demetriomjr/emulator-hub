@@ -14,6 +14,8 @@ import { isMobileLandscapeViewport, isNarrowPortraitViewport } from '../../packa
 import { shouldReloadForFrontendRevision } from '../../packages/frontend-revision.mjs'
 import { readFastForwardSpeed } from '../../packages/fast-forward-preference.mjs'
 import { createIndexedDbRecoveryStorage, createLocalRuntimeRecoveryStore } from '../../packages/local-runtime-recovery-store.mjs'
+import { buildCompletePlayerSessionBundle, createLocalPlayerSessionStore } from '../../packages/local-player-session-store.mjs'
+import { acquireResumeLeases } from '../../packages/player-session-resume.mjs'
 import { canReconcileLateSnapshotDelete, createSnapshotDeleteWatchdog, restorePromptAfterChoiceTimeout, restorePromptAfterDeleteTimeout } from '../../packages/snapshot-restore-routing.mjs'
 import { createPlayerTriggerActions, playerTriggerActionOptions } from '../../packages/player-trigger-actions.mjs'
 import { requestPlayerFrame } from '../../packages/player-frame-request.mjs'
@@ -73,6 +75,7 @@ try { playerOriginPorts = parsePlayerOriginPorts(window.location, import.meta.en
 catch (error) { console.warn('[player-origins] Invalid port configuration; using the Hub origin', { error: error.message }) }
 const localRecoveryStorage = createIndexedDbRecoveryStorage()
 const localRecoveryStore = createLocalRuntimeRecoveryStore({ storage: localRecoveryStorage })
+const interruptedPlayerStore = createLocalPlayerSessionStore()
 
 function reportHubSnapshot(session, level, event, details = {}) {
   if (!session) return
@@ -105,12 +108,14 @@ function playerFrameUrl(session) {
     profileId: session.profileId,
     sessionId: session.sessionId,
     leaseGeneration: String(session.leaseGeneration),
+    sessionRevision: String(session.sessionRevision ?? 0),
     fastForward: session.initialFastForwardEnabled ? '1' : '0',
     fastForwardSpeed: String(session.initialFastForwardSpeed),
     muted: session.initialMuted ? '1' : '0',
     restoreRecovery: session.restoreRecovery ? '1' : '0',
     localRecoveryPrompt: session.localRecoveryPrompt ? '1' : '0',
     ...(session.localRecoveryPrompt?.candidateId ? { localRecoveryCandidateId: session.localRecoveryPrompt.candidateId } : {}),
+    ...(session.resumeBundleId ? { resumeBundleId: session.resumeBundleId, resumeOriginalSessionId: session.resumeOriginalSessionId } : {}),
   }), clientDiagnosticsOptions)
   if (playerOriginPorts.length === 0 || !Number.isInteger(session.playerOriginSlot)) return `/player.html?${parameters}`
   parameters.set('hubOrigin', window.location.origin)
@@ -218,8 +223,15 @@ function App() {
   const [, setCatalogLoading] = useState(true)
   const [, setCatalogError] = useState('')
   const [activeSessions, setActiveSessions] = useState([])
+  const [resumeOffers, setResumeOffers] = useState([])
+  const [resumeBusy, setResumeBusy] = useState(false)
   const activeSessionsRef = useRef(activeSessions)
   activeSessionsRef.current = activeSessions
+  const checkpointCapturesRef = useRef(new Map())
+  const checkpointBundleIdRef = useRef(null)
+  const checkpointExpectedNewSessionRef = useRef(null)
+  const interruptedWrapperRef = useRef(false)
+  const resumingRef = useRef(null)
   const [focusedSessionId, setFocusedSessionId] = useState(null)
   const [userStateAvailable, setUserStateAvailable] = useState({})
   const [playerActionErrors, setPlayerActionErrors] = useState({})
@@ -287,6 +299,21 @@ function App() {
   const oddsSyncRef = useRef(new Map())
   const oddsClockReadyRef = useRef(new Map())
   const oddsResetQueueRef = useRef(new Map())
+
+  useEffect(() => {
+    if (activeSessions.length > 0 || resumeBusy) return
+    let current = true
+    interruptedPlayerStore.list().then(bundles => { if (current) setResumeOffers(bundles) }).catch(error => console.warn('[player-resume] local offers unavailable', error))
+    return () => { current = false }
+  }, [activeSessions.length, resumeBusy])
+
+  useEffect(() => {
+    if (resumeOffers.length === 0) return
+    const timer = window.setTimeout(() => {
+      void interruptedPlayerStore.list().then(setResumeOffers).catch(() => setResumeOffers([]))
+    }, Math.max(0, Math.min(...resumeOffers.map(bundle => bundle.expiresAt)) - Date.now()))
+    return () => window.clearTimeout(timer)
+  }, [resumeOffers])
 
   useEffect(() => {
     if (activeSessions.length === 0) lastInstanceGameIdRef.current = null
@@ -386,7 +413,33 @@ function App() {
       if (!trustedFrame) return
       if (event.data?.type === 'emulator-hub:local-storage-request') {
         const session = activeSessionsRef.current.find(candidate => trustedFrame.closest('.player-cell')?.dataset.sessionId === candidate.sessionId)
-        if (session) void respondToPlayerStorageRequest(event, { frame: trustedFrame, session, storage: localRecoveryStorage, installationIdentity: event.data.operation === 'installation-identity' ? getInstallationIdentity() : null, origin: event.origin })
+        if (session) void respondToPlayerStorageRequest(event, { frame: trustedFrame, session, storage: localRecoveryStorage, resumeStore: interruptedPlayerStore, installationIdentity: event.data.operation === 'installation-identity' ? getInstallationIdentity() : null, origin: event.origin })
+        return
+      }
+      if (event.data?.type === 'emulator-hub:session-checkpoint') {
+        const session = activeSessionsRef.current.find(candidate => candidate.sessionId === event.data.sessionId)
+        if (!session || trustedFrame.closest('.player-cell')?.dataset.sessionId !== session.sessionId || event.data.gameId !== session.gameId || event.data.profileId !== session.profileId || event.data.sessionRevision !== session.sessionRevision || resumingRef.current || interruptedWrapperRef.current || closeLockRef.current) return
+        if (checkpointExpectedNewSessionRef.current && checkpointExpectedNewSessionRef.current !== session.sessionId) return
+        checkpointExpectedNewSessionRef.current = null
+        checkpointCapturesRef.current.set(session.sessionId, event.data)
+        const bundle = buildCompletePlayerSessionBundle({ bundleId: checkpointBundleIdRef.current, sessions: activeSessionsRef.current, captures: checkpointCapturesRef.current, settings: { fastForwardEnabled, fastForwardSpeed, muted, oddsManipulatorEnabled, focusedSessionId, triggerActions: { l2: l2TriggerAction, r2: r2TriggerAction } }, now: Date.now() })
+        if (bundle) void interruptedPlayerStore.put(bundle).catch(error => console.warn('[player-resume] checkpoint unavailable', error))
+        return
+      }
+      if (event.data?.type === 'emulator-hub:player-ready') {
+        const pending = resumingRef.current
+        if (pending && pending.sessionIds.has(event.data.sessionId) && trustedFrame.closest('.player-cell')?.dataset.sessionId === event.data.sessionId) {
+          pending.ready.add(event.data.sessionId)
+          if (pending.ready.size === pending.sessionIds.size) {
+            window.clearTimeout(pending.timer)
+            resumingRef.current = null
+            checkpointCapturesRef.current.clear()
+            checkpointBundleIdRef.current = crypto.randomUUID()
+            interruptedWrapperRef.current = false
+            setResumeBusy(false)
+            void interruptedPlayerStore.clear(pending.bundleId).then(() => setResumeOffers(current => current.filter(bundle => bundle.bundleId !== pending.bundleId))).catch(error => console.warn('[player-resume] old bundle cleanup failed', error))
+          }
+        }
         return
       }
       if (event.data?.type === 'emulator-hub:snapshot-restore-request') {
@@ -491,6 +544,12 @@ function App() {
         return
       }
       if (event.data?.type !== 'emulator-hub:lease-lost') return
+      if (!activeSessionsRef.current.some(session => session.sessionId === event.data.sessionId)) return
+      if (resumingRef.current?.sessionIds.has(event.data.sessionId)) {
+        void abortResume('Não foi possível restaurar todos os emuladores da sessão anterior.')
+        return
+      }
+      interruptedWrapperRef.current = true
       if (!event.data.unavailable && event.data.sessionId && event.data.profileId && event.data.gameId && Number.isInteger(event.data.generation)) {
         void releasePlayerLease(event.data.sessionId, { profileId: event.data.profileId, gameId: event.data.gameId, generation: event.data.generation, preserveRecovery: true }).catch(() => {})
       }
@@ -504,7 +563,7 @@ function App() {
     }
     window.addEventListener('message', receive)
     return () => window.removeEventListener('message', receive)
-  }, [activeSessions])
+  }, [activeSessions, fastForwardEnabled, fastForwardSpeed, muted, oddsManipulatorEnabled, focusedSessionId, l2TriggerAction, r2TriggerAction])
 
   useEffect(() => () => {
     snapshotDeleteWatchdogRef.current?.clear()
@@ -892,6 +951,13 @@ function App() {
   async function finishSelectedPlayerClose() {
     const closing = new Set(closeBatchSessionIdsRef.current)
     const remaining = activeSessionsRef.current.filter(session => !closing.has(session.sessionId))
+    const previousBundleId = checkpointBundleIdRef.current
+    checkpointCapturesRef.current.clear()
+    checkpointBundleIdRef.current = remaining.length ? crypto.randomUUID() : null
+    checkpointExpectedNewSessionRef.current = null
+    interruptedWrapperRef.current = false
+    if (previousBundleId) await interruptedPlayerStore.clear(previousBundleId).catch(error => console.warn('[player-resume] normal-close cleanup failed', error))
+    setResumeOffers(current => current.filter(bundle => bundle.bundleId !== previousBundleId))
     for (const sessionId of closing) {
       snapshotDeleteWatchdogRef.current.cancel(sessionId)
       clearRestoreChoiceTimer(sessionId)
@@ -990,7 +1056,12 @@ function App() {
         if (playerOriginSlot === null) console.warn('[player-origins] No player port responded; using the Hub origin')
       }
       const lease = await acquirePlayerLease(game.id, profile.id, sessionId)
-      if (activeSessions.length === 0) disableOddsManipulator()
+      if (activeSessions.length === 0) {
+        disableOddsManipulator()
+        checkpointBundleIdRef.current = crypto.randomUUID()
+        checkpointCapturesRef.current.clear()
+        interruptedWrapperRef.current = false
+      }
       if (profilePurpose !== 'add-instance' || activeSessions.length + 1 >= MAX_PLAYER_INSTANCES) {
         setProfileGame(null)
         setInstancePicker(false)
@@ -1004,6 +1075,7 @@ function App() {
         oddsResetCount: profile.oddsResetCount ?? 0,
         sessionId,
         leaseGeneration: lease.leaseGeneration,
+        sessionRevision: lease.sessionRevision,
         initialFastForwardEnabled: fastForwardEnabled,
         initialFastForwardSpeed: fastForwardSpeed,
         initialMuted: muted,
@@ -1017,6 +1089,12 @@ function App() {
         onEvent: (event, context) => clientDiagnostics?.capture({ kind: 'odds-manipulator', message: event, gameId: game.id, profileId: profile.id, sessionId, ...context }),
       }))
       if (profilePurpose === 'add-instance') {
+        const previousBundleId = checkpointBundleIdRef.current
+        checkpointBundleIdRef.current = crypto.randomUUID()
+        checkpointCapturesRef.current.clear()
+        checkpointExpectedNewSessionRef.current = sessionId
+        interruptedWrapperRef.current = false
+        if (previousBundleId) void interruptedPlayerStore.clear(previousBundleId).catch(error => console.warn('[player-resume] membership cleanup failed', error))
         setActiveSessions(current => current.length >= MAX_PLAYER_INSTANCES ? current : [...current, session])
       } else {
         setActiveSessions([session])
@@ -1171,6 +1249,87 @@ function App() {
     openProfilePicker(game, 'add-instance')
   }
 
+  async function abortResume(message) {
+    const pending = resumingRef.current
+    if (!pending) return
+    resumingRef.current = null
+    window.clearTimeout(pending.timer)
+    activeSessionsRef.current = []
+    setActiveSessions([])
+    setOddsManipulatorEnabled(false)
+    setFocusedSessionId(null)
+    checkpointCapturesRef.current.clear()
+    checkpointBundleIdRef.current = null
+    interruptedWrapperRef.current = false
+    for (const item of pending.acquired) {
+      oddsSyncRef.current.get(item.sessionId)?.stop()
+      oddsSyncRef.current.delete(item.sessionId)
+      oddsClockReadyRef.current.delete(item.sessionId)
+      oddsResetQueueRef.current.delete(item.sessionId)
+    }
+    await Promise.allSettled(pending.acquired.map(item => releasePlayerLease(item.sessionId, { profileId: item.member.profileId, gameId: item.member.gameId, generation: item.lease.leaseGeneration, preserveRecovery: true })))
+    await interruptedPlayerStore.clear(pending.bundleId).catch(error => console.warn('[player-resume] failed bundle cleanup', error))
+    setResumeOffers(current => current.filter(bundle => bundle.bundleId !== pending.bundleId))
+    setResumeBusy(false)
+    setError(message)
+  }
+
+  async function resumePreviousSession(bundleId) {
+    if (resumeBusy || activeSessionsRef.current.length) return
+    setResumeBusy(true)
+    setError('')
+    let acquired = []
+    try {
+      const bundle = await interruptedPlayerStore.get(bundleId)
+      if (!bundle) throw new Error('A sessão anterior expirou ou não está mais disponível.')
+      acquired = await acquireResumeLeases({
+        members: bundle.members,
+        createSessionId: () => crypto.randomUUID(),
+        acquire: (member, newSessionId) => acquirePlayerLease(member.gameId, member.profileId, newSessionId, { expectedSessionRevision: member.sessionRevision }),
+        release: item => releasePlayerLease(item.sessionId, { profileId: item.member.profileId, gameId: item.member.gameId, generation: item.lease.leaseGeneration, preserveRecovery: true }),
+      })
+      const sessions = []
+      const freshProfiles = new Map()
+      for (const item of acquired) {
+        if (!freshProfiles.has(item.member.gameId)) freshProfiles.set(item.member.gameId, await getProfiles(item.member.gameId))
+        const profile = freshProfiles.get(item.member.gameId).find(candidate => candidate.id === item.member.profileId)
+        if (!profile) throw new Error('Um perfil da sessão anterior não está mais disponível.')
+        const playerOriginSlot = playerOriginPorts.length > 0 ? await findReachablePlayerOriginSlot(sessions, window.location, playerOriginPorts) : null
+        sessions.push({ gameId: item.member.gameId, gameTitle: item.member.gameTitle, profileId: item.member.profileId, profileName: profile.name, sessionId: item.sessionId, leaseGeneration: item.lease.leaseGeneration, sessionRevision: item.lease.sessionRevision, oddsResetCount: Math.max(profile.oddsResetCount ?? 0, item.member.oddsResetCount), initialFastForwardEnabled: bundle.settings.fastForwardEnabled, initialFastForwardSpeed: bundle.settings.fastForwardSpeed, initialMuted: bundle.settings.muted, restoreRecovery: false, localRecoveryPrompt: null, resumeBundleId: bundle.bundleId, resumeOriginalSessionId: item.member.sessionId, ...(playerOriginSlot !== null ? { playerOriginSlot } : {}) })
+      }
+      for (const session of sessions) oddsSyncRef.current.set(session.sessionId, createOddsManipulatorSync({
+        send: count => syncOddsResetCount(session.gameId, session.profileId, count),
+        onError: cause => console.warn('[odds-manipulator] sync failed', { gameId: session.gameId, profileId: session.profileId, error: cause.message }),
+        onEvent: (event, context) => clientDiagnostics?.capture({ kind: 'odds-manipulator', message: event, gameId: session.gameId, profileId: session.profileId, sessionId: session.sessionId, ...context }),
+      }))
+      const focusedIndex = bundle.members.findIndex(member => member.sessionId === bundle.settings.focusedSessionId)
+      resumingRef.current = { bundleId, acquired, sessionIds: new Set(sessions.map(session => session.sessionId)), ready: new Set(), timer: window.setTimeout(() => void abortResume('A retomada da sessão anterior demorou demais.'), 90_000) }
+      checkpointCapturesRef.current.clear()
+      setFastForwardEnabled(bundle.settings.fastForwardEnabled)
+      setFastForwardSpeed(bundle.settings.fastForwardSpeed)
+      setMuted(bundle.settings.muted)
+      setOddsManipulatorEnabled(bundle.settings.oddsManipulatorEnabled)
+      if (bundle.settings.triggerActions) {
+        setL2TriggerAction(bundle.settings.triggerActions.l2)
+        setR2TriggerAction(bundle.settings.triggerActions.r2)
+      }
+      setFocusedSessionId(sessions[Math.max(focusedIndex, 0)].sessionId)
+      setActiveSessions(sessions)
+    } catch (error) {
+      if (acquired.length) await Promise.allSettled(acquired.map(item => releasePlayerLease(item.sessionId, { profileId: item.member.profileId, gameId: item.member.gameId, generation: item.lease.leaseGeneration, preserveRecovery: true })))
+      for (const item of acquired) { oddsSyncRef.current.get(item.sessionId)?.stop(); oddsSyncRef.current.delete(item.sessionId) }
+      if (error.code === 'PLAYER_LEASE_HELD' && error.acquiredCount === 0) {
+        setResumeBusy(false)
+        setError('Um perfil da sessão anterior ainda está em uso. Aguarde a lease expirar e tente novamente.')
+        return
+      }
+      await interruptedPlayerStore.clear(bundleId).catch(cause => console.warn('[player-resume] failed bundle cleanup', cause))
+      setResumeOffers(current => current.filter(bundle => bundle.bundleId !== bundleId))
+      setResumeBusy(false)
+      setError(error.message)
+    }
+  }
+
   function broadcastPlayerMessage(type, payload = {}) {
     for (const frame of document.querySelectorAll('.player-grid iframe')) {
       configurePlayerFrame(frame, { type, ...payload })
@@ -1212,6 +1371,9 @@ function App() {
         <section className="hub-section hub-section-internal" aria-labelledby="internal-applications-heading">
           <header className="hub-section-header"><h2 id="internal-applications-heading">Aplicações internas</h2></header>
           <div className="boxes">
+          {activeSessions.length === 0 && resumeOffers.map(offer => <button className="box resume-session-card" type="button" key={offer.bundleId} onClick={() => resumePreviousSession(offer.bundleId)} disabled={resumeBusy}>
+            <div className="cover"><span>Continuar sessão anterior</span><small>{offer.members.map(member => member.profileName || member.profileId).join(', ')} · {offer.members.length} {offer.members.length === 1 ? 'emulador' : 'emuladores'} · {new Date(offer.capturedAt).toLocaleTimeString('pt-BR')}</small></div>
+          </button>)}
           <button className="box pokemon-hub-card" type="button" aria-label="Abrir Pokémon Hub" onClick={() => setPokemonHubOpen(true)}>
             <div className="cover">
               <img className="cover-image" src="/pokemon-hub-icon.png" alt="Pokémon Hub" />

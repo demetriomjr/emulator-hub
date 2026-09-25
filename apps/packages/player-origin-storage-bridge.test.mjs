@@ -37,3 +37,15 @@ test('player storage client sends to exact hub origin and resolves only matching
   assert.deepEqual(await pending, { candidateId: 'a' })
   client.dispose()
 })
+
+test('private resume checkpoint is returned only to its newly leased matching member', async () => {
+  const messages = []
+  const frame = { contentWindow: { postMessage: message => messages.push(message) } }
+  const session = { sessionId: 'new-session', profileId: 'profile', gameId: 'game', resumeBundleId: 'bundle', resumeOriginalSessionId: 'old-session' }
+  const resumeStore = { async get(bundleId) { assert.equal(bundleId, 'bundle'); return { bundleId, members: [{ sessionId: 'old-session', profileId: 'profile', gameId: 'game', state: new Uint8Array([7]) }] } } }
+  const context = { frame, session, resumeStore, origin: 'http://localhost:5175' }
+  const request = { type: 'emulator-hub:local-storage-request', requestId: 'resume', sessionId: 'new-session', operation: 'resume-checkpoint', key: 'profile\0game', bundleId: 'bundle', originalSessionId: 'old-session' }
+  assert.equal(await respondToPlayerStorageRequest({ data: request }, context), true)
+  assert.deepEqual([...messages.at(-1).value.state], [7])
+  assert.equal(await respondToPlayerStorageRequest({ data: { ...request, bundleId: 'other' } }, context), false)
+})

@@ -10,11 +10,13 @@ const end = source.indexOf('    watchBatterySaveChanges()', begin)
 assert.ok(begin > 0 && end > begin)
 const restoreStartup = `async function restoreStartup() {\n${source.slice(begin, end)}\n}\nrestoreStartup`
 
-function harness({ selection, localRecoveryPrompt = false, localRecovery = null, cloudRecovery = null, getLocal = async () => localRecovery, restart = () => {}, loadState = () => {}, restoreSave = async () => true } = {}) {
+function harness({ selection, localRecoveryPrompt = false, localRecovery = null, cloudRecovery = null, resumeCheckpoint = null, getLocal = async () => localRecovery, restart = () => {}, loadState = () => {}, restoreSave = async () => true } = {}) {
   const actions = []
   const telemetryEvents = []
   const context = {
     closeRequested: false,
+    resumeCheckpoint,
+    sessionId: 'session', hubOrigin: 'http://localhost',
     interactionLock: { isLocked: () => false, apply() {} },
     runtimeReady: false,
     setPlayerReady() {},
@@ -34,13 +36,14 @@ function harness({ selection, localRecoveryPrompt = false, localRecovery = null,
     },
     profileId: 'profile', id: 'game',
     launchDescriptor: { core: 'gba', romSha256: 'rom', runtimeId: 'runtime' },
-    window: { EJS_emulator: { pause() {}, play() {}, gameManager: {
+    window: { parent: { postMessage() {} }, EJS_emulator: { pause() {}, play() {}, gameManager: {
       loadState() { actions.push('load-state'); return loadState() },
       restart() { actions.push('restart'); return restart() },
       getSaveFile() { actions.push('read-runtime-save'); return new Uint8Array([2]) },
     } } },
     cloudSaveSynchronizer: { getRevision() { return 2 }, async restore() { actions.push('restore-save'); return restoreSave() }, ignoreRuntimeStateSave(bytes) { actions.push(`ignore-runtime:${bytes[0]}`) } },
     reportPlayerActionFailure(action) { actions.push(`failed:${action}`) },
+    loseLease() { actions.push('lose-lease') },
     offerPolicy: { recordRuntimeRestore() { actions.push('record-restore') } },
     scheduleCloudRecoveryDeleteAfterChoice() { actions.push('schedule-cloud-delete') },
     scheduleLocalRecoveryDeleteAfterChoice() { actions.push('schedule-local-delete') },
@@ -59,6 +62,34 @@ function harness({ selection, localRecoveryPrompt = false, localRecovery = null,
   }
   return { context, actions, telemetryEvents, run: runInNewContext(restoreStartup, context) }
 }
+
+test('private session resume applies its state and then the canonical game save without a chooser', async () => {
+  const { actions, run } = harness({ resumeCheckpoint: { state: new Uint8Array([7]) } })
+  await run()
+  assert.deepEqual(actions.slice(0, 3), ['load-state', 'restore-save', 'record-restore'])
+})
+
+test('a broken private session checkpoint fails startup before canonical save restore', async () => {
+  const { context, actions, run } = harness({ resumeCheckpoint: { state: new Uint8Array([7]) }, loadState: () => { throw new Error('broken checkpoint') } })
+  await run()
+  assert.equal(actions.includes('restore-save'), false)
+  assert.equal(actions.includes('lose-lease'), true)
+  assert.equal(context.runtimeReady, false)
+})
+
+test('a private checkpoint that requires a canonical save cannot start when the save is missing', async () => {
+  const { context, actions, run } = harness({ resumeCheckpoint: { state: new Uint8Array([7]), saveRevision: 2 }, restoreSave: async () => false })
+  context.loseLease = () => { actions.push('lose-lease') }
+  await run()
+  assert.equal(context.runtimeReady, false)
+  assert.deepEqual(actions, ['load-state', 'restore-save', 'lose-lease'])
+})
+
+test('private resume without a canonical save suppresses state-derived save bytes', async () => {
+  const { actions, run } = harness({ resumeCheckpoint: { state: new Uint8Array([7]), saveRevision: 0 }, restoreSave: async () => false })
+  await run()
+  assert.deepEqual(actions.slice(0, 5), ['load-state', 'restore-save', 'read-runtime-save', 'ignore-runtime:2', 'record-restore'])
+})
 
 test('startup reports the offered candidates, selected state and canonical save decision once', async () => {
   const cloudRecovery = { revision: 4, metadata: { saveRevision: 2 }, state: new Uint8Array([9]) }
@@ -281,6 +312,7 @@ test('automatic captures cannot replace old recovery before the runtime is ready
   const actions = []
   const context = {
     leaseLost: false, closeRequested: false, runtimeReady: false,
+    sessionRevision: 0,
     measureSynchronousOperation, performanceTimings: null,
     interactionLock: { isLocked: () => false },
     localRecoveryCapture: null, snapshotCapture: null, userSnapshotCapture: null,
@@ -301,6 +333,59 @@ test('automatic captures cannot replace old recovery before the runtime is ready
   assert.deepEqual(actions, ['read-state', 'write-local', 'write-remote'])
 })
 
+test('a failed private checkpoint message still persists ordinary local recovery', async () => {
+  const begin = source.indexOf('async function captureLocalRecovery()')
+  const end = source.indexOf('async function clearLocalRecovery()', begin)
+  const actions = []
+  const capture = runInNewContext(`${source.slice(begin, end)}\ncaptureLocalRecovery`, {
+    leaseLost: false, closeRequested: false, runtimeReady: true, localRecoveryCapture: null, sessionRevision: 1,
+    measureSynchronousOperation, performanceTimings: null, interactionLock: { isLocked: () => false },
+    launchDescriptor: { core: 'gba', romSha256: 'a'.repeat(64), runtimeId: 'runtime' },
+    window: { EJS_emulator: { gameManager: { getState: () => new Uint8Array([1]) } }, parent: { postMessage() { throw new Error('channel unavailable') } } },
+    localRecoveryStore: { async put() { actions.push('write-local') } },
+    snapshotTelemetry: { warn(event) { actions.push(event) } },
+    cloudSaveSynchronizer: { getRevision: () => 0 },
+    pendingSaveSyncCount: 0, saveSyncUncertain: false,
+    sessionId: 'session', profileId: 'profile', id: 'game', hubOrigin: 'http://localhost', Uint8Array, Date,
+  })
+  assert.equal(await capture(), true)
+  assert.deepEqual(actions, ['session-checkpoint-unavailable', 'write-local'])
+})
+
+test('an uncertain save skips private checkpoint but retains ordinary recovery', async () => {
+  const begin = source.indexOf('async function captureLocalRecovery()')
+  const end = source.indexOf('async function clearLocalRecovery()', begin)
+  const actions = []
+  const capture = runInNewContext(`${source.slice(begin, end)}\ncaptureLocalRecovery`, {
+    leaseLost: false, closeRequested: false, runtimeReady: true, localRecoveryCapture: null, sessionRevision: 1,
+    measureSynchronousOperation, performanceTimings: null, interactionLock: { isLocked: () => false },
+    launchDescriptor: { core: 'gba', romSha256: 'a'.repeat(64), runtimeId: 'runtime' },
+    window: { EJS_emulator: { gameManager: { getState: () => new Uint8Array([1]) } }, parent: { postMessage() { actions.push('checkpoint') } } },
+    localRecoveryStore: { async put() { actions.push('write-local') } },
+    cloudSaveSynchronizer: { getRevision: () => 0 }, pendingSaveSyncCount: 0, saveSyncUncertain: true,
+    sessionId: 'session', profileId: 'profile', id: 'game', hubOrigin: 'http://localhost', Uint8Array, Date,
+  })
+  assert.equal(await capture(), true)
+  assert.deepEqual(actions, ['write-local'])
+})
+
+test('save validation exceptions mark private checkpoints uncertain', async () => {
+  const begin = source.indexOf('async function queueCloudSave(')
+  const end = source.indexOf('function watchBatterySaveChanges()', begin)
+  const context = {
+    leaseLost: false, cloudSaveSynchronizer: { syncBytes: async () => true }, Uint8Array,
+    pendingSaveSyncCount: 0, saveSyncUncertain: false, pendingSaveSync: Promise.resolve(),
+    launchDescriptor: { saveAdapter: 'gen3-gba-v1' }, crypto: { randomUUID: () => 'trace' },
+    selectNewestPokemonGen3SaveCopy() {},
+    validateSaveWithRetry: async () => { throw new Error('validation failed') },
+    logSavePipeline() {},
+  }
+  const queue = runInNewContext(`${source.slice(begin, end)}\nqueueCloudSave`, context)
+  await assert.rejects(queue(new Uint8Array([1])), /validation failed/)
+  assert.equal(context.saveSyncUncertain, true)
+  assert.equal(context.pendingSaveSyncCount, 0)
+})
+
 test('close interaction lock skips automatic local and cloud capture while runtime remains ready', async () => {
   const captureBegin = source.indexOf('async function captureLocalRecovery()')
   const captureEnd = source.indexOf('async function clearLocalRecovery()', captureBegin)
@@ -309,6 +394,7 @@ test('close interaction lock skips automatic local and cloud capture while runti
   const actions = []
   const context = {
     leaseLost: false, closeRequested: false, runtimeReady: true,
+    sessionRevision: 0,
     interactionLock: { isLocked: () => true },
     localRecoveryCapture: null, snapshotCapture: null, userSnapshotCapture: null,
     launchDescriptor: { core: 'gba', romSha256: 'rom', runtimeId: 'runtime' },

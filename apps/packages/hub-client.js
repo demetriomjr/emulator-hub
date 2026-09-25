@@ -88,8 +88,8 @@ async function postJson(url, body) {
   return result
 }
 
-export async function acquirePlayerLease(gameId, profileId, sessionId) {
-  return postJson(`/api/games/${encodeURIComponent(gameId)}/player-leases`, { profileId, sessionId })
+export async function acquirePlayerLease(gameId, profileId, sessionId, { expectedSessionRevision } = {}) {
+  return postJson(`/api/games/${encodeURIComponent(gameId)}/player-leases`, { profileId, sessionId, ...(expectedSessionRevision === undefined ? {} : { expectedSessionRevision }) })
 }
 
 export async function heartbeatPlayerLease(sessionId, lease) {

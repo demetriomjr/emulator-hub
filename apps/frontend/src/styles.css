@@ -26,6 +26,10 @@ button { font: inherit; }
 .cover::before { content: ''; position: absolute; width: 70%; aspect-ratio: 1; border: 1px solid #b6f7dc35; border-radius: 50%; box-shadow: 0 0 0 26px #b6f7dc0a, 0 0 0 52px #b6f7dc08; }
 .cover-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #15332f; }
 .cover:has(.cover-image)::before { display: none; }
+.resume-session-card .cover { align-content: center; gap: 10px; padding: 20px; text-align: center; }
+.resume-session-card .cover span, .resume-session-card .cover small { z-index: 1; }
+.resume-session-card .cover span { font-size: 19px; font-weight: 750; line-height: 1.2; }
+.resume-session-card .cover small { color: #c5e5d5; font-size: 12px; }
 .title { position: absolute; right: 0; bottom: 0; left: 0; z-index: 1; padding: 20px 14px 10px; background: linear-gradient(transparent, #061014db); color: #d8f8e7; text-align: center; line-height: 1; pointer-events: none; }
 .title small { font-size: 11px; font-weight: 650; }
 .profile-overlay { position: fixed; inset: 0; z-index: 20; display: grid; place-items: start center; padding: clamp(28px, 8vh, 88px) 16px; background: #02090de6; }

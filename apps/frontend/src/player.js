@@ -22,6 +22,7 @@ import { createEmulatorAudioMute } from '../../packages/emulator-audio-mute.mjs'
 import { createPlayerInteractionLock } from '../../packages/player-interaction-lock.mjs'
 import { playerThreadFallbackUrl, selectPlayerThreadMode } from '../../packages/player-thread-policy.mjs'
 import { createPlayerOriginStorageClient } from '../../packages/player-origin-storage-bridge.mjs'
+import { assertResumeCheckpointCompatible } from '../../packages/player-session-resume.mjs'
 
 const parameters = new URLSearchParams(location.search)
 const suppliedHubOrigin = parameters.get('hubOrigin')
@@ -31,6 +32,9 @@ const id = parameters.get('id')
 const profileId = parameters.get('profileId')
 const sessionId = parameters.get('sessionId')
 const leaseGeneration = Number(parameters.get('leaseGeneration'))
+const sessionRevision = Number(parameters.get('sessionRevision'))
+const resumeBundleId = parameters.get('resumeBundleId')
+const resumeOriginalSessionId = parameters.get('resumeOriginalSessionId')
 const restoreLocalRecovery = parameters.get('restoreRecovery') === '1'
 const localRecoveryPrompt = parameters.get('localRecoveryPrompt') === '1'
 const audioMute = createEmulatorAudioMute(parameters.get('muted') === '1')
@@ -105,6 +109,8 @@ let cloudRecoveryDeleteTimer = null
 let cloudRecoveryDeletion = null
 let stopBatterySavePolling = null
 let pendingSaveSync = Promise.resolve()
+let pendingSaveSyncCount = 0
+let saveSyncUncertain = false
 let snapshotCapture = null
 let latestSaveBytes = null
 let localRecoveryInterval = null
@@ -113,6 +119,7 @@ let localRecoveryCapture = null
 let localRecovery = null
 let restoreCandidates = []
 const originStorageClient = hubOrigin === location.origin ? null : createPlayerOriginStorageClient({ browser: window, parent: window.parent, hubOrigin, sessionId, profileId, gameId: id })
+const resumeStorageClient = resumeBundleId ? createPlayerOriginStorageClient({ browser: window, parent: window.parent, hubOrigin, sessionId, profileId, gameId: id }) : null
 const localRecoveryStore = originStorageClient ? createLocalRuntimeRecoveryStore({ storage: originStorageClient.storage }) : createLocalRuntimeRecoveryStore()
 const snapshotTelemetry = createSnapshotTelemetry({ browser: window, source: 'player', sessionId, gameId: id, profileId })
 let removeAudioResumeGesture = null
@@ -233,36 +240,51 @@ function stopEmulatedFpsOverlay() {
 
 async function queueCloudSave(bytes, { onUncertain = () => {} } = {}) {
   if (leaseLost || !cloudSaveSynchronizer || !(bytes instanceof Uint8Array) || bytes.byteLength === 0) {
+    saveSyncUncertain = true
     onUncertain()
     logSavePipeline('save.front.bytes-ignored', { reason: leaseLost ? 'lease-lost' : !cloudSaveSynchronizer ? 'synchronizer-unavailable' : 'invalid-or-empty-payload', sizeBytes: bytes?.byteLength ?? 0 })
     return Promise.resolve(false)
   }
-  const traceId = crypto.randomUUID()
-  let saveBytes = bytes
-  if (launchDescriptor?.saveAdapter === 'gen3-gba-v1') {
-    const validated = await validateSaveWithRetry(saveBytes, {
-      validate: selectNewestPokemonGen3SaveCopy,
-      readCurrent: () => window.EJS_emulator?.gameManager?.getSaveFile?.(false),
-      wait: milliseconds => new Promise(resolve => window.setTimeout(resolve, milliseconds)),
-      onAttempt: async ({ attempt, bytes: attemptedBytes, valid, validation, error }) => {
-        const context = { traceId, attempt, sizeBytes: attemptedBytes?.byteLength ?? 0 }
-        if (attemptedBytes instanceof Uint8Array && attemptedBytes.byteLength > 0) context.sha256 = await hashSave(attemptedBytes)
-        if (valid) {
-          logSavePipeline('save.front.validation-accepted', { ...context, saveIndex: validation.saveIndex, copyOffset: validation.copyOffset })
-        } else {
-          logSavePipeline('save.front.validation-rejected', { ...context, code: error?.code ?? null, error: error?.message ?? String(error) })
-        }
-      },
+  pendingSaveSyncCount += 1
+  try {
+    const traceId = crypto.randomUUID()
+    let saveBytes = bytes
+    if (launchDescriptor?.saveAdapter === 'gen3-gba-v1') {
+      const validated = await validateSaveWithRetry(saveBytes, {
+        validate: selectNewestPokemonGen3SaveCopy,
+        readCurrent: () => window.EJS_emulator?.gameManager?.getSaveFile?.(false),
+        wait: milliseconds => new Promise(resolve => window.setTimeout(resolve, milliseconds)),
+        onAttempt: async ({ attempt, bytes: attemptedBytes, valid, validation, error }) => {
+          const context = { traceId, attempt, sizeBytes: attemptedBytes?.byteLength ?? 0 }
+          if (attemptedBytes instanceof Uint8Array && attemptedBytes.byteLength > 0) context.sha256 = await hashSave(attemptedBytes)
+          if (valid) {
+            logSavePipeline('save.front.validation-accepted', { ...context, saveIndex: validation.saveIndex, copyOffset: validation.copyOffset })
+          } else {
+            logSavePipeline('save.front.validation-rejected', { ...context, code: error?.code ?? null, error: error?.message ?? String(error) })
+          }
+        },
+      })
+      if (!validated) { saveSyncUncertain = true; onUncertain(); return false }
+      saveBytes = validated.bytes
+    }
+    const copy = new Uint8Array(saveBytes)
+    latestSaveBytes = copy
+    logSavePipeline('save.front.bytes-observed', { traceId, sizeBytes: copy.byteLength })
+    const upload = pendingSaveSync.then(() => cloudSaveSynchronizer.syncBytes(copy, traceId)).then(changed => {
+      if (changed) saveSyncUncertain = false
+      return changed
+    }, error => {
+      saveSyncUncertain = true
+      throw error
     })
-    if (!validated) { onUncertain(); return false }
-    saveBytes = validated.bytes
+    pendingSaveSync = upload.catch(() => {})
+    return await upload
+  } catch (error) {
+    saveSyncUncertain = true
+    throw error
+  } finally {
+    pendingSaveSyncCount -= 1
   }
-  const copy = new Uint8Array(saveBytes)
-  latestSaveBytes = copy
-  logSavePipeline('save.front.bytes-observed', { traceId, sizeBytes: copy.byteLength })
-  const upload = pendingSaveSync.then(() => cloudSaveSynchronizer.syncBytes(copy, traceId))
-  pendingSaveSync = upload.catch(() => {})
-  return upload
 }
 
 function watchBatterySaveChanges() {
@@ -297,6 +319,13 @@ async function captureLocalRecovery() {
     }
     if (leaseLost) return false
     const stateCopy = measureSynchronousOperation(performanceTimings, 'copyState.local', () => new Uint8Array(state))
+    if (Number.isInteger(sessionRevision) && sessionRevision > 0 && pendingSaveSyncCount === 0 && !saveSyncUncertain) {
+      try {
+        window.parent.postMessage({ type: 'emulator-hub:session-checkpoint', sessionId, profileId, gameId: id, sessionRevision, capturedAt: Date.now(), saveRevision: cloudSaveSynchronizer.getRevision(), core: launchDescriptor.core, romSha256: launchDescriptor.romSha256, runtimeId: launchDescriptor.runtimeId, ...(launchDescriptor.patchSha256 ? { patchSha256: launchDescriptor.patchSha256 } : {}), state: stateCopy }, hubOrigin)
+      } catch (error) {
+        snapshotTelemetry.warn('session-checkpoint-unavailable', { code: error.code, error: error.message }, { repeating: true })
+      }
+    }
     await localRecoveryStore.put({ profileId, gameId: id, core: launchDescriptor.core, romSha256: launchDescriptor.romSha256, runtimeId: launchDescriptor.runtimeId, ...(launchDescriptor.patchSha256 ? { patchSha256: launchDescriptor.patchSha256 } : {}), state: stateCopy })
     return true
   })().finally(() => { localRecoveryCapture = null })
@@ -901,6 +930,10 @@ async function start() {
   snapshotRevision = snapshot?.revision ?? null
   userSnapshot = userCompatible ? receivedUserSnapshot : null
   userSnapshotRevision = receivedUserSnapshot?.revision ?? null
+  const resumeCheckpoint = resumeBundleId && resumeOriginalSessionId
+    ? await resumeStorageClient.getResumeCheckpoint(resumeBundleId, resumeOriginalSessionId)
+    : null
+  if (resumeBundleId) assertResumeCheckpointCompatible(resumeCheckpoint, launchDescriptor, cloudSaveSynchronizer.getRevision())
   announceUserStateAvailability()
   offerPolicy = createSnapshotOfferPolicy()
   threadDecision = selectPlayerThreadMode({ core: launch.core, protocol: location.protocol, crossOriginIsolated: window.crossOriginIsolated === true, sharedArrayBufferAvailable: typeof window.SharedArrayBuffer === 'function', retryWithoutThreads: parameters.get('threadFallback') === '1', mode: 'ordinary' })
@@ -995,7 +1028,7 @@ async function start() {
     window.addEventListener('keydown', event => { if (event.isTrusted) { offerPolicy.recordInput(); focusPlayer() } }, { capture: true })
     game.addEventListener('pointerdown', event => { if (event.isTrusted) { offerPolicy.recordInput(); focusPlayer() } }, { capture: true })
     game.addEventListener('touchstart', event => { if (event.isTrusted) { offerPolicy.recordInput(); focusPlayer() } }, { capture: true, passive: true })
-    restoreCandidates = sortRestoreCandidates([
+    restoreCandidates = resumeCheckpoint ? [] : sortRestoreCandidates([
       ...(localRecoveryPrompt && localRecovery?.candidateId === localRecoveryCandidateId ? [localCandidateSummary(localRecovery, { currentSaveRevision: cloudSaveSynchronizer.getRevision() })] : []),
       ...(savedSnapshot ? [remoteCandidateSummary(savedSnapshot, { currentSaveRevision: cloudSaveSynchronizer.getRevision(), installationId: installationIdentity.comparisonId })] : []),
       ...(userSnapshot ? [remoteCandidateSummary(userSnapshot, { currentSaveRevision: cloudSaveSynchronizer.getRevision(), installationId: installationIdentity.comparisonId })] : []),
@@ -1011,7 +1044,10 @@ async function start() {
     if (restoreChoice?.explicit) snapshotTelemetry.info('restore-choice', { candidateId: selectedCandidateId ?? undefined, snapshotKind: selected?.kind, revision: selectedRevision, reason: selectedCandidateId ? 'user-selected' : 'continue' })
     let restoreError = null
     try {
-      if (selected?.kind === 'local-recovery' || (restoreLocalRecovery && selectedCandidateId === localRecovery?.candidateId)) {
+      if (resumeCheckpoint) {
+        window.EJS_emulator.gameManager.loadState(new Uint8Array(resumeCheckpoint.state))
+        restoredRuntimeState = true
+      } else if (selected?.kind === 'local-recovery' || (restoreLocalRecovery && selectedCandidateId === localRecovery?.candidateId)) {
         const current = await localRecoveryStore.get(profileId, id)
         if (closeRequested) return
         if (current?.candidateId === selectedCandidateId && current.core === launchDescriptor.core && current.romSha256 === launchDescriptor.romSha256 && current.runtimeId === launchDescriptor.runtimeId && current.patchSha256 === launchDescriptor.patchSha256) {
@@ -1027,6 +1063,11 @@ async function start() {
         }
       }
     } catch (error) {
+      if (resumeCheckpoint) {
+        snapshotTelemetry.error('startup-failed', { phase: 'resume-state', code: error.code, error: error.message })
+        loseLease()
+        return
+      }
       restoreError = error
       console.error('[emulator-snapshot] selected state could not be loaded', error)
     }
@@ -1041,20 +1082,27 @@ async function start() {
         if (closeRequested) return
       }
       const saveLoaded = await cloudSaveSynchronizer.restore(window.EJS_emulator.gameManager)
+      if (resumeCheckpoint && resumeCheckpoint.saveRevision > 0 && !saveLoaded) {
+        snapshotTelemetry.error('startup-failed', { phase: 'resume-save', code: 'CANONICAL_SAVE_MISSING' })
+        loseLease()
+        return
+      }
       if (selectedCandidateId) snapshotTelemetry[saveLoaded ? 'info' : 'warn'](saveLoaded ? 'canonical-save-loaded' : 'canonical-save-missing', { candidateId: selectedCandidateId, snapshotKind: selected?.kind, saveRevision: cloudSaveSynchronizer.getRevision() })
-      if (saveLoaded === false && selectedCandidateId) {
+      if (saveLoaded === false && (selectedCandidateId || resumeCheckpoint)) {
         cloudSaveSynchronizer.ignoreRuntimeStateSave(window.EJS_emulator.gameManager.getSaveFile?.())
       }
       if (saveLoaded === false && Math.max(savedSnapshot?.metadata?.saveRevision ?? 0, userSnapshot?.metadata?.saveRevision ?? 0) > 0) reportPlayerActionFailure('game-save-missing')
     } catch (error) {
       console.error('[save-pipeline] canonical game save could not be loaded', error)
       reportPlayerActionFailure('game-save-load')
+      if (resumeCheckpoint) loseLease()
       return
     }
     if (restoredRuntimeState) offerPolicy.recordRuntimeRestore()
     if (closeRequested) return
     setPlayerReady()
     runtimeReady = true
+    window.parent.postMessage({ type: 'emulator-hub:player-ready', sessionId, profileId, gameId: id }, hubOrigin)
     startEmulatedFpsOverlay()
     if (restoreCandidates.length && !interactionLock.isLocked()) window.EJS_emulator.play()
     interactionLock.apply()
@@ -1078,6 +1126,7 @@ async function start() {
     const message = 'EmulatorJS loader could not be reached.'
     clientDiagnostics?.capture({ kind: 'emulator-failure', message })
     game.textContent = message
+    if (resumeBundleId) loseLease()
   }
   document.body.appendChild(loader)
   monitorThreadedCoreStartup()

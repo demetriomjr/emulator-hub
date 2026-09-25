@@ -31,6 +31,8 @@ function harness(sessions, { preferenceFailure = false } = {}) {
     playerShellRef: { current: null },
     oddsSyncRef: { current: new Map(sessions.map(session => [session.sessionId, { flush: async () => {}, stop: () => calls.push(['stop', session.sessionId]) }])) },
     oddsClockReadyRef: { current: new Map() }, oddsResetQueueRef: { current: new Map() },
+    checkpointCapturesRef: { current: new Map() }, checkpointBundleIdRef: { current: 'bundle-a' }, checkpointExpectedNewSessionRef: { current: null }, interruptedWrapperRef: { current: false },
+    interruptedPlayerStore: { async clear(bundleId) { calls.push(['clear-bundle', bundleId]) } }, setResumeOffers() {}, crypto: { randomUUID: () => 'bundle-b' },
     fastForwardSpeed: 5, fastForwardEnabled: true, muted: true, l2TriggerAction: 'save-state', r2TriggerAction: 'soft-reset',
     saveUserPreferences: async partial => {
       calls.push(['preferences', JSON.parse(JSON.stringify(partial))])
@@ -90,6 +92,8 @@ test('partial completion keeps survivor and global odds state', async () => {
   assert.deepEqual(context.activeSessions.map(session => session.sessionId), ['a'])
   assert.equal(calls.some(call => call[0] === 'odds'), false)
   assert.equal(context.focusUpdate('b'), 'a')
+  assert.deepEqual(calls.filter(call => call[0] === 'clear-bundle'), [['clear-bundle', 'bundle-a']])
+  assert.equal(context.checkpointBundleIdRef.current, 'bundle-b')
 })
 
 test('closing every emulator confirms the visible header preferences while partial close does not', async () => {

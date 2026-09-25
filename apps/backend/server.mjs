@@ -223,6 +223,7 @@ async function handleRequest(request, response, config) {
   const saveRoute = parseSaveRoute(route.pathname)
   const snapshotRoute = parseSnapshotRoute(route.pathname)
   const playerLeaseRoute = parsePlayerLeaseRoute(route.pathname)
+  const playerSessionHistoryRoute = parsePlayerSessionHistoryRoute(route.pathname)
   const pokemonHubRoute = parsePokemonHubRoute(route.pathname)
   const pokemonHubSessionRoute = parsePokemonHubSessionRoute(route.pathname)
   const pokemonHubSessionRequestLogger = ['snapshot', 'heartbeat'].includes(pokemonHubSessionRoute?.kind)
@@ -333,6 +334,12 @@ async function handleRequest(request, response, config) {
   if (playerLeaseRoute) {
     await handlePlayerLease(request, response, config, playerLeaseRoute, route.searchParams)
     return
+  }
+
+  if (playerSessionHistoryRoute) {
+    const identity = { profileId: playerSessionHistoryRoute.profileId, gameId: playerSessionHistoryRoute.gameId }
+    if (await config.profileStore.get(identity.gameId, identity.profileId) === null) return json(response, 404, { error: 'Profile was not found.' })
+    return json(response, 200, { sessionRevision: await config.gameSaveLeases.getSessionRevision(identity), sessions: await config.gameSaveLeases.getSessionHistory(identity) })
   }
 
   if (pokemonHubSessionRoute) {
@@ -1686,6 +1693,11 @@ function parsePlayerLeaseRoute(pathname) {
   return { kind: session[2] ?? 'release', sessionId: session[1] }
 }
 
+function parsePlayerSessionHistoryRoute(pathname) {
+  const match = /^\/api\/profiles\/([^/]+)\/games\/([^/]+)\/player-sessions$/.exec(pathname)
+  return match ? { profileId: decodeId(match[1]), gameId: decodeId(match[2]) } : null
+}
+
 function parsePatchRoute(pathname) {
   const match = /^\/roms\/([^/]+)\/patch$/.exec(pathname)
   return match ? { id: match[1] } : null
@@ -1705,12 +1717,12 @@ async function handlePlayerLease(request, response, config, route, searchParams)
     if (!patchVerification.ok) return json(response, 409, { error: patchVerification.reason })
     try {
       const minimumGeneration = await nextPlayerLeaseGeneration(config, body.profileId, entry.id)
-      const lease = await config.playerLeases.acquire({ profileId: body.profileId, gameId: entry.id, deviceId, sessionId: body.sessionId, minimumGeneration })
+      const lease = await config.playerLeases.acquire({ profileId: body.profileId, gameId: entry.id, deviceId, sessionId: body.sessionId, minimumGeneration, ...(body.expectedSessionRevision === undefined ? {} : { expectedSessionRevision: body.expectedSessionRevision }) })
       try { await config.saveStore.advanceFence(body.profileId, entry.id, lease.generation) } catch (error) { if (error.code !== 'SAVE_MISSING') throw error }
       try { await config.snapshotStore.advanceFence(body.profileId, entry.id, lease.generation) } catch (error) { if (error.code !== 'SNAPSHOT_MISSING') throw error }
       try { await config.snapshotStore.advanceFence(body.profileId, entry.id, lease.generation, { kind: 'user-state' }) } catch (error) { if (error.code !== 'SNAPSHOT_MISSING') throw error }
-      return json(response, 200, { ...launchDescriptor(entry, body.profileId, patchVerification.patch), leaseGeneration: lease.generation })
-    } catch (error) { return json(response, error.code === 'PLAYER_LEASE_HELD' ? 409 : 400, { error: error.message, code: error.code }) }
+      return json(response, 200, { ...launchDescriptor(entry, body.profileId, patchVerification.patch), leaseGeneration: lease.generation, sessionRevision: lease.sessionRevision, startedAt: lease.startedAt })
+    } catch (error) { return json(response, ['PLAYER_LEASE_HELD', 'PLAYER_SESSION_STALE'].includes(error.code) ? 409 : 400, { error: error.message, code: error.code }) }
   }
   let body
   try { body = request.method === 'GET' ? Object.fromEntries(searchParams) : await readJsonBody(request) } catch (error) { return json(response, 400, { error: error.message }) }
