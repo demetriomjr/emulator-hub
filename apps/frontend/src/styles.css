@@ -230,6 +230,15 @@ button { font: inherit; }
 .player-action-errors { position: absolute; z-index: 4; right: 8px; bottom: 8px; left: 8px; display: grid; gap: 4px; padding: 8px 10px; border: 1px solid #b9787e; border-radius: 8px; color: #ffe5e7; background: #532d32f2; font-size: 12px; pointer-events: none; }
 .player-action-errors p { margin: 0; }
 .player-grid iframe { display: block; min-width: 0; width: 100%; height: 100%; border: 0; background: #000; }
+.profile-info-overlay { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; padding: 12px; background: #02090dcc; }
+.profile-info-card { display: grid; gap: 10px; width: min(360px, 100%); max-height: 100%; overflow-y: auto; padding: 18px; border: 1px solid #398269; border-radius: 12px; color: #e8f5ef; background: #102b30; box-shadow: 0 18px 48px #000b; }
+.profile-info-card h2 { margin: 0; font-size: 17px; }
+.profile-info-card label { font-size: 13px; }
+.profile-info-card input { min-width: 0; min-height: 38px; padding: 8px 10px; border: 1px solid #397c67; border-radius: 6px; color: #effff5; background: #0a191f; font: inherit; }
+.profile-info-card p { margin: 0; color: #ffe5e7; font-size: 12px; }
+.profile-info-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.profile-info-actions button { min-height: 36px; padding: 0 12px; border: 1px solid #70c99e; border-radius: 6px; color: #e8fff1; background: #174b3c; font: inherit; cursor: pointer; }
+.profile-info-actions button:disabled { opacity: .55; cursor: wait; }
 .snapshot-restore-overlay { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; padding: clamp(12px, 3vw, 28px); background: #02090dcc; }
 .snapshot-restore-card { width: min(470px, 100%); max-height: 100%; overflow-y: auto; padding: 22px; border: 1px solid #398269; border-radius: 14px; color: #e8f5ef; background: linear-gradient(145deg, #123f38, #10262a); box-shadow: 0 18px 48px #000b, inset 0 1px #bff2da1c; text-align: center; }
 .snapshot-restore-card h2 { margin: 0 0 9px; color: #effff5; font-size: 18px; }

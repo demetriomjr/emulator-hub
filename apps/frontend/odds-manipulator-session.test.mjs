@@ -59,7 +59,7 @@ test('a newly loaded iframe receives the already enabled wrapper odds clock', ()
   const configure = runInNewContext(`${hub.slice(begin, end)}\nconfigurePlayerFrameOnLoad`, {
     hubPerformance: null,
     fastForwardEnabled: false, fastForwardSpeed: 1.5, muted: false, oddsManipulatorEnabled: true,
-    closeLockRef: { current: false }, window: { location: { origin: 'http://localhost' } },
+    closeLockRef: { current: false }, profileInfoSessionId: null, window: { location: { origin: 'http://localhost' } },
     sendPlayerInteractionLock() {},
     configurePlayerFrame: (frame, message) => actions.push(['frame', frame, { ...message }]),
     configureOddsClock: (frame, session, count, timestamp) => { actions.push(['odds', frame, session, count, timestamp]); return Promise.resolve(true) },

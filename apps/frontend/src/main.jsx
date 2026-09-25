@@ -221,6 +221,11 @@ function App() {
   const activeSessionsRef = useRef(activeSessions)
   activeSessionsRef.current = activeSessions
   const [focusedSessionId, setFocusedSessionId] = useState(null)
+  const selectedPlayerSessionId = activeSessions.some(session => session.sessionId === focusedSessionId) ? focusedSessionId : activeSessions[0]?.sessionId
+  const [profileInfoSessionId, setProfileInfoSessionId] = useState(null)
+  const [profileInfoName, setProfileInfoName] = useState('')
+  const [profileInfoError, setProfileInfoError] = useState('')
+  const [profileInfoBusy, setProfileInfoBusy] = useState(false)
   const [userStateAvailable, setUserStateAvailable] = useState({})
   const [playerActionErrors, setPlayerActionErrors] = useState({})
   const [instancePicker, setInstancePicker] = useState(false)
@@ -276,6 +281,8 @@ function App() {
   const closeLockRef = useRef(false)
   const closeLockRevisionRef = useRef(0)
   const awaitGamepadNeutralRef = useRef(false)
+  const profileInfoLockSessionIdRef = useRef(null)
+  const profileInfoNeutralSessionIdRef = useRef(null)
   const [viewport, setViewport] = useState(readViewport)
   const playerShellRef = useRef(null)
   const profilePickerRequestRef = useRef(0)
@@ -292,14 +299,21 @@ function App() {
     if (activeSessions.length === 0) lastInstanceGameIdRef.current = null
   }, [activeSessions.length])
 
+  useEffect(() => {
+    if (profileInfoNeutralSessionIdRef.current && !activeSessions.some(session => session.sessionId === profileInfoNeutralSessionIdRef.current)) profileInfoNeutralSessionIdRef.current = null
+    if (profileInfoSessionId && !activeSessions.some(session => session.sessionId === profileInfoSessionId)) setProfileInfoSessionId(null)
+  }, [activeSessions, profileInfoSessionId])
+
   function setPlayerInteractionLocked(locked) {
-    if (closeLockRef.current !== locked) closeLockRevisionRef.current += 1
+    if (closeLockRef.current !== locked || profileInfoLockSessionIdRef.current !== profileInfoSessionId) closeLockRevisionRef.current += 1
     closeLockRef.current = locked
+    profileInfoLockSessionIdRef.current = profileInfoSessionId
     if (locked) awaitGamepadNeutralRef.current = true
     else if (activeSessionsRef.current.length === 0) awaitGamepadNeutralRef.current = false
     for (const frame of document.querySelectorAll('.player-grid iframe')) {
-      sendPlayerInteractionLock(frame, locked)
-      if (locked) configurePlayerFrame(frame, { type: 'emulator-hub:gamepad', bindings: [] })
+      const frameLocked = locked || frame.closest('.player-cell')?.dataset.sessionId === profileInfoSessionId
+      sendPlayerInteractionLock(frame, frameLocked)
+      if (frameLocked) configurePlayerFrame(frame, { type: 'emulator-hub:gamepad', bindings: [] })
     }
   }
 
@@ -312,7 +326,7 @@ function App() {
 
   useLayoutEffect(() => {
     setPlayerInteractionLocked(closeChooserOpen || saveCloseRows !== null)
-  }, [closeChooserOpen, saveCloseRows !== null, activeSessions.length])
+  }, [closeChooserOpen, saveCloseRows !== null, activeSessions.length, profileInfoSessionId])
 
   useEffect(() => {
     if (!closeChooserOpen) return
@@ -635,7 +649,9 @@ function App() {
     }, toggleFastForward: () => { void toggleFastForwardFromFirstFrame() } })
     const broadcast = bindings => {
       for (const frame of document.querySelectorAll('.player-grid iframe')) {
-        configurePlayerFrame(frame, { type: 'emulator-hub:gamepad', bindings })
+        const sessionId = frame.closest('.player-cell')?.dataset.sessionId
+        const frameBindings = sessionId === profileInfoSessionId || sessionId === profileInfoNeutralSessionIdRef.current ? [] : bindings
+        configurePlayerFrame(frame, { type: 'emulator-hub:gamepad', bindings: frameBindings })
       }
     }
     // Poll the parent document so changing window focus does not silence
@@ -644,9 +660,11 @@ function App() {
       const startedAt = hubPerformance ? performance.now() : 0
       const observedBindings = activeGamepadBindings(readGamepadSnapshot())
       if (awaitGamepadNeutralRef.current && observedBindings.length === 0) awaitGamepadNeutralRef.current = false
+      if (profileInfoNeutralSessionIdRef.current && observedBindings.length === 0) profileInfoNeutralSessionIdRef.current = null
       const bindings = controlPanelOpen || profileGame || instancePicker || closeLockRef.current || awaitGamepadNeutralRef.current
         ? [] : observedBindings
-      triggerActions.update(bindings, { l2: l2TriggerAction, r2: r2TriggerAction }, triggerBindings)
+      const actionBindings = selectedPlayerSessionId === profileInfoSessionId || selectedPlayerSessionId === profileInfoNeutralSessionIdRef.current ? [] : bindings
+      triggerActions.update(actionBindings, { l2: l2TriggerAction, r2: r2TriggerAction }, triggerBindings)
       broadcast(bindings)
       hubPerformance?.recordGamepad(performance.now() - startedAt)
     }
@@ -658,7 +676,7 @@ function App() {
       document.removeEventListener('visibilitychange', poll)
       broadcast([])
     }
-  }, [activeSessions.length, controlPanelOpen, profileGame, instancePicker, l2TriggerAction, r2TriggerAction, triggerBindings, oddsManipulatorEnabled])
+  }, [activeSessions.length, controlPanelOpen, profileGame, instancePicker, l2TriggerAction, r2TriggerAction, triggerBindings, oddsManipulatorEnabled, profileInfoSessionId, selectedPlayerSessionId])
 
   useEffect(() => {
     const message = { type: 'emulator-hub:fast-forward', enabled: fastForwardEnabled, speed: fastForwardSpeed }
@@ -799,7 +817,7 @@ function App() {
 
   function configurePlayerFrameOnLoad(frame, session) {
     hubPerformance?.frameLoaded(session.sessionId)
-    sendPlayerInteractionLock(frame, closeLockRef.current)
+    sendPlayerInteractionLock(frame, closeLockRef.current || profileInfoSessionId === session.sessionId)
     configurePlayerFrame(frame, { type: 'emulator-hub:fast-forward', enabled: fastForwardEnabled, speed: fastForwardSpeed })
     configurePlayerFrame(frame, { type: 'emulator-hub:mute', muted })
     if (oddsManipulatorEnabled) void configureOddsClock(frame, session, session.oddsResetCount ?? 0, (session.oddsResetCount ?? 0) * 60_000)
@@ -1119,6 +1137,42 @@ function App() {
     }
   }
 
+  function openProfileInfo() {
+    const session = activeSessions.find(candidate => candidate.sessionId === focusedSessionId) ?? activeSessions[0]
+    if (!session) return
+    setProfileInfoName(session.profileName ?? '')
+    setProfileInfoError('')
+    setProfileInfoSessionId(session.sessionId)
+  }
+
+  function closeProfileInfo() {
+    if (profileInfoBusy) return
+    profileInfoNeutralSessionIdRef.current = profileInfoSessionId
+    setProfileInfoSessionId(null)
+    setProfileInfoError('')
+  }
+
+  async function submitProfileInfo(event) {
+    event.preventDefault()
+    if (profileInfoBusy) return
+    const session = activeSessions.find(candidate => candidate.sessionId === profileInfoSessionId)
+    if (!session) return
+    setProfileInfoError('')
+    setProfileInfoBusy(true)
+    try {
+      const updated = await updateProfile(session.gameId, session.profileId, profileInfoName)
+      setActiveSessions(current => current.map(candidate => candidate.sessionId === session.sessionId ? { ...candidate, profileName: updated.name } : candidate))
+      setProfiles(current => current.map(candidate => candidate.id === updated.id ? updated : candidate))
+      updateCachedProfiles(session.gameId, current => replaceCatalogProfile(current, updated))
+      profileInfoNeutralSessionIdRef.current = session.sessionId
+      setProfileInfoSessionId(null)
+    } catch (cause) {
+      setProfileInfoError(cause.message)
+    } finally {
+      setProfileInfoBusy(false)
+    }
+  }
+
   function openInstancePicker() {
     if (isMobileLandscape || activeSessions.length >= MAX_PLAYER_INSTANCES) return
     setError('')
@@ -1187,7 +1241,6 @@ function App() {
   }
 
   const activeProfileIds = new Set(activeSessions.map(session => `${session.gameId}:${session.profileId}`))
-  const selectedPlayerSessionId = activeSessions.some(session => session.sessionId === focusedSessionId) ? focusedSessionId : activeSessions[0]?.sessionId
   const gameSections = groupGamesByLayout(games, hubLayout)
   const isStandalone = window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true
   const isNarrowPortrait = isNarrowPortraitViewport(viewport)
@@ -1402,6 +1455,9 @@ function App() {
             <button className={`player-control-button${oddsManipulatorEnabled ? ' is-active' : ''}`} type="button" aria-label="Manipulador de odds" title="Manipulador de odds" aria-pressed={oddsManipulatorEnabled} onClick={toggleOddsManipulator}>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M5 8.5h14M5 15.5h14M8 5.5v14M16 5.5v14" /></svg>
             </button>
+            <button className="player-control-button" type="button" aria-label="Informações do perfil" title="Informações do perfil" disabled={closeChooserOpen || saveCloseRows !== null || profileInfoSessionId !== null} onClick={openProfileInfo}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 10.5v6M12 7.5h.01" /></svg>
+            </button>
           </div>
           <div className="player-actions">
             {!isMobileLandscape && <>
@@ -1420,7 +1476,19 @@ function App() {
         <div className={`player-panel player-panel-${activeSessions.length}`} inert={closeChooserOpen || saveCloseRows !== null ? true : undefined}>
           <div className="player-grid">
             {activeSessions.map(session => <div className="player-cell" data-session-id={session.sessionId} key={`${session.gameId}:${session.profileId}`} onPointerDown={() => setFocusedSessionId(session.sessionId)}>
-              <iframe src={playerFrameUrl(session)} title="EmulatorJS" allow="fullscreen; gamepad" onLoad={event => configurePlayerFrameOnLoad(event.currentTarget, session)} />
+              <iframe src={playerFrameUrl(session)} title="EmulatorJS" allow="fullscreen; gamepad" inert={profileInfoSessionId === session.sessionId ? true : undefined} onLoad={event => configurePlayerFrameOnLoad(event.currentTarget, session)} />
+              {profileInfoSessionId === session.sessionId && <div className="profile-info-overlay" role="dialog" aria-modal="true" aria-labelledby={`profile-info-title-${session.sessionId}`}>
+                <form className="profile-info-card" onSubmit={submitProfileInfo}>
+                  <h2 id={`profile-info-title-${session.sessionId}`}>Informações do perfil</h2>
+                  <label htmlFor={`profile-info-name-${session.sessionId}`}>Nome</label>
+                  <input id={`profile-info-name-${session.sessionId}`} value={profileInfoName} onChange={event => setProfileInfoName(event.target.value)} maxLength="32" required disabled={profileInfoBusy} autoFocus />
+                  {profileInfoError && <p role="alert">{profileInfoError}</p>}
+                  <div className="profile-info-actions">
+                    <button type="button" onClick={closeProfileInfo} disabled={profileInfoBusy}>Fechar</button>
+                    <button type="submit" disabled={profileInfoBusy}>{profileInfoBusy ? 'Salvando...' : 'Salvar'}</button>
+                  </div>
+                </form>
+              </div>}
               {snapshotRestoreRequests[session.sessionId] && <SnapshotRestorePrompt key={snapshotRestoreRequests[session.sessionId].requestId ?? 'pending'} request={snapshotRestoreRequests[session.sessionId]} onRestore={candidateId => snapshotRestoreRequests[session.sessionId].requestId && respondToRestore(session.sessionId, snapshotRestoreRequests[session.sessionId].requestId, candidateId)} onContinue={() => snapshotRestoreRequests[session.sessionId].requestId && respondToRestore(session.sessionId, snapshotRestoreRequests[session.sessionId].requestId, null)} />}
               {playerActionErrors[session.sessionId]?.length > 0 && <div className="player-action-errors" role="alert">{playerActionErrors[session.sessionId].map((message, index) => <p key={`${index}:${message}`}>{message}</p>)}</div>}
             </div>)}

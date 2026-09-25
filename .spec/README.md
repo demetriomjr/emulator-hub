@@ -1,5 +1,7 @@
 # Specifications
 
+- [Spec 066 — Running profile information editor](066-running-profile-info-editor.md): edit the focused emulator's profile name during play and persist it immediately without changing the close payload.
+
 - [Spec 062 — EmulatorJS threads per player iframe](062-player-scoped-emulatorjs-threads.md): player-only document isolation, per-instance threaded mGBA selection with fallback, message contracts, and save/state compatibility gates.
 
 - [Spec 061 — Selective closing of multiple emulators](061-selective-multi-emulator-close.md): choose which ROM/profile sessions to close, lock all emulator input and pause while close overlays are open, then reflow surviving instances without restarting them.

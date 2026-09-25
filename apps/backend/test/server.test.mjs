@@ -1574,6 +1574,25 @@ describe('hub backend HTTP contract', () => {
     assert.deepEqual(await jsonResponse(missingProfile), { error: 'Profile was not found.' })
   })
 
+  test('renames a running save profile while its active lease still protects deletion', async () => {
+    const rom = Buffer.from('running profile rename')
+    const { baseUrl } = await startFixture([{
+      id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom),
+    }], { 'pokemon-red.gb': rom })
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Antes' }),
+    }))
+    const lease = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'rename-active-session')
+    assert.equal(lease.response.status, 200)
+    const renamed = await fetch(`${baseUrl}/api/games/pokemon-red/profiles/${profile.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: lease.cookie }, body: JSON.stringify({ name: 'Depois' }),
+    })
+    assert.equal(renamed.status, 200)
+    assert.deepEqual(await jsonResponse(renamed), { ...profile, name: 'Depois' })
+    const deletion = await fetch(`${baseUrl}/api/games/pokemon-red/profiles/${profile.id}`, { method: 'DELETE', headers: { Cookie: lease.cookie } })
+    assert.equal(deletion.status, 409)
+  })
+
   test('keeps equally named profiles and saves isolated by ROM', async () => {
     const redRom = Buffer.from('profile isolation red rom')
     const blueRom = Buffer.from('profile isolation blue rom')

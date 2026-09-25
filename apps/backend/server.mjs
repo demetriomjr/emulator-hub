@@ -481,7 +481,7 @@ async function handleGameProfiles(request, response, config, encodedGameId) {
 async function handleGameProfile(request, response, config, route) {
   const entry = await findProfileGame(response, config, route.gameId)
   if (entry === null) return
-  if (await isGameSaveLeased(config, { profileId: route.profileId, gameId: entry.id })) {
+  if (request.method === 'DELETE' && await isGameSaveLeased(config, { profileId: route.profileId, gameId: entry.id })) {
     return json(response, 409, { error: 'This profile is open in an active game save session.', code: 'GAME_SAVE_LEASE_HELD' })
   }
   if (request.method === 'PATCH') await updateProfile(request, response, config, entry.id, route.profileId)
