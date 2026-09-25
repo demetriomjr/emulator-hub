@@ -33,7 +33,7 @@ Game `.sav` bytes and their adjacent revision/SHA-256 metadata remain in the exi
 
 The backend requires a reachable Redis connection before it serves application requests. It must not fall back to local JSON persistence when Redis is unavailable. Redis connection failures are visible at startup and request failures retain the existing safe HTTP error surface.
 
-Redis values are JSON documents behind `apps/packages/` store contracts. Store methods preserve their existing public behavior, validation, copy semantics, duplicate-name checks, and optimistic revision conflicts. Existing Pokémon Hub session leases and snapshot bindings remain intentionally ephemeral runtime coordination rather than durable database records.
+Redis values are JSON documents behind `apps/packages/` store contracts. Store methods preserve their public behavior, validation, copy semantics, and optimistic revision conflicts. Game save profile names may repeat under [Spec 068](068-profile-names-and-gamepad-unlock.md); Pokémon Hub profile rules remain separate. Existing Pokémon Hub session leases and snapshot bindings remain intentionally ephemeral runtime coordination rather than durable database records.
 
 ## Legacy migration
 

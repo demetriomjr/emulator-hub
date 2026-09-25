@@ -4,6 +4,8 @@ import { createRoot } from 'react-dom/client'
 import { ConfigProvider, Select } from 'antd'
 import { acquirePlayerLease, createProfile, deleteProfile as deleteProfileRequest, getControlProfile, getGames, getProfiles, getUserPreferences, releasePlayerLease, syncOddsResetCount, updateControlProfile, updateProfile, updateUserPreferences } from '../../packages/hub-client.js'
 import { activeGamepadBindings, readGamepadBinding, readGamepadSnapshot } from '../../packages/gamepad-input.mjs'
+import { createGamepadInputGate } from '../../packages/gamepad-input-gate.mjs'
+import { deliverPlayerInteractionLock } from '../../packages/player-interaction-lock-delivery.mjs'
 import { replaceCatalogProfile } from '../../packages/save-profile-catalog.mjs'
 import { groupGamesByLayout } from '../../packages/hub-layout.mjs'
 import { getProfilePickerPlacement } from '../../packages/profile-picker-placement.mjs'
@@ -282,9 +284,10 @@ function App() {
   const [selectedCloseSessionIds, setSelectedCloseSessionIds] = useState(new Set())
   const closeLockRef = useRef(false)
   const closeLockRevisionRef = useRef(0)
-  const awaitGamepadNeutralRef = useRef(false)
+  const globalGamepadGateRef = useRef(null)
+  if (!globalGamepadGateRef.current) globalGamepadGateRef.current = createGamepadInputGate()
   const profileInfoLockSessionIdRef = useRef(null)
-  const profileInfoNeutralSessionIdRef = useRef(null)
+  const profileInfoGamepadGatesRef = useRef(new Map())
   const [viewport, setViewport] = useState(readViewport)
   const playerShellRef = useRef(null)
   const profilePickerRequestRef = useRef(0)
@@ -302,16 +305,21 @@ function App() {
   }, [activeSessions.length])
 
   useEffect(() => {
-    if (profileInfoNeutralSessionIdRef.current && !activeSessions.some(session => session.sessionId === profileInfoNeutralSessionIdRef.current)) profileInfoNeutralSessionIdRef.current = null
+    const live = new Set(activeSessions.map(session => session.sessionId))
+    for (const sessionId of profileInfoGamepadGatesRef.current.keys()) if (!live.has(sessionId)) profileInfoGamepadGatesRef.current.delete(sessionId)
     if (profileInfoSessionId && !activeSessions.some(session => session.sessionId === profileInfoSessionId)) setProfileInfoSessionId(null)
   }, [activeSessions, profileInfoSessionId])
 
   function setPlayerInteractionLocked(locked) {
     if (closeLockRef.current !== locked || profileInfoLockSessionIdRef.current !== profileInfoSessionId) closeLockRevisionRef.current += 1
+    if (locked && !closeLockRef.current) globalGamepadGateRef.current.lock()
+    else if (!locked && closeLockRef.current) {
+      if (activeSessionsRef.current.length === 0) globalGamepadGateRef.current.reset()
+      else globalGamepadGateRef.current.unlock(activeGamepadBindings(readGamepadSnapshot()))
+    }
+    else if (!locked && activeSessionsRef.current.length === 0) globalGamepadGateRef.current.reset()
     closeLockRef.current = locked
     profileInfoLockSessionIdRef.current = profileInfoSessionId
-    if (locked) awaitGamepadNeutralRef.current = true
-    else if (activeSessionsRef.current.length === 0) awaitGamepadNeutralRef.current = false
     for (const frame of document.querySelectorAll('.player-grid iframe')) {
       const frameLocked = locked || frame.closest('.player-cell')?.dataset.sessionId === profileInfoSessionId
       sendPlayerInteractionLock(frame, frameLocked)
@@ -322,7 +330,9 @@ function App() {
   function sendPlayerInteractionLock(frame, locked) {
     const sessionId = frame.closest('.player-cell')?.dataset.sessionId
     if (!sessionId) return
-    void requestPlayerFrame({ frame, browser: window, sessionId, type: 'emulator-hub:interaction-lock', replyType: 'emulator-hub:interaction-lock-applied', details: { locked, revision: closeLockRevisionRef.current }, timeoutMs: 3000 })
+    const revision = closeLockRevisionRef.current
+    const isCurrent = () => frame.isConnected !== false && frame.closest('.player-cell')?.dataset.sessionId === sessionId && closeLockRevisionRef.current === revision
+    void deliverPlayerInteractionLock({ revision, isCurrent, send: () => requestPlayerFrame({ frame, browser: window, sessionId, type: 'emulator-hub:interaction-lock', replyType: 'emulator-hub:interaction-lock-applied', details: { locked, revision }, timeoutMs: 1000 }) })
       .catch(error => reportHubSnapshot(activeSessionsRef.current.find(session => session.sessionId === sessionId), 'warn', 'interaction-lock-unconfirmed', { reason: error.message }))
   }
 
@@ -653,7 +663,8 @@ function App() {
     const broadcast = bindings => {
       for (const frame of document.querySelectorAll('.player-grid iframe')) {
         const sessionId = frame.closest('.player-cell')?.dataset.sessionId
-        const frameBindings = sessionId === profileInfoSessionId || sessionId === profileInfoNeutralSessionIdRef.current ? [] : bindings
+        const gate = profileInfoGamepadGatesRef.current.get(sessionId)
+        const frameBindings = sessionId === profileInfoSessionId ? [] : gate ? gate.filter(bindings) : bindings
         configurePlayerFrame(frame, { type: 'emulator-hub:gamepad', bindings: frameBindings })
       }
     }
@@ -662,11 +673,10 @@ function App() {
     const poll = () => {
       const startedAt = hubPerformance ? performance.now() : 0
       const observedBindings = activeGamepadBindings(readGamepadSnapshot())
-      if (awaitGamepadNeutralRef.current && observedBindings.length === 0) awaitGamepadNeutralRef.current = false
-      if (profileInfoNeutralSessionIdRef.current && observedBindings.length === 0) profileInfoNeutralSessionIdRef.current = null
-      const bindings = controlPanelOpen || profileGame || instancePicker || closeLockRef.current || awaitGamepadNeutralRef.current
-        ? [] : observedBindings
-      const actionBindings = selectedPlayerSessionId === profileInfoSessionId || selectedPlayerSessionId === profileInfoNeutralSessionIdRef.current ? [] : bindings
+      const globallyAllowed = globalGamepadGateRef.current.filter(observedBindings)
+      const bindings = controlPanelOpen || profileGame || instancePicker || closeLockRef.current ? [] : globallyAllowed
+      const selectedGate = profileInfoGamepadGatesRef.current.get(selectedPlayerSessionId)
+      const actionBindings = selectedPlayerSessionId === profileInfoSessionId ? [] : selectedGate ? selectedGate.filter(bindings) : bindings
       triggerActions.update(actionBindings, { l2: l2TriggerAction, r2: r2TriggerAction }, triggerBindings)
       broadcast(bindings)
       hubPerformance?.recordGamepad(performance.now() - startedAt)
@@ -677,7 +687,7 @@ function App() {
     return () => {
       window.clearInterval(interval)
       document.removeEventListener('visibilitychange', poll)
-      broadcast([])
+      for (const frame of document.querySelectorAll('.player-grid iframe')) configurePlayerFrame(frame, { type: 'emulator-hub:gamepad', bindings: [] })
     }
   }, [activeSessions.length, controlPanelOpen, profileGame, instancePicker, l2TriggerAction, r2TriggerAction, triggerBindings, oddsManipulatorEnabled, profileInfoSessionId, selectedPlayerSessionId])
 
@@ -1151,14 +1161,23 @@ function App() {
   function openProfileInfo() {
     const session = activeSessions.find(candidate => candidate.sessionId === focusedSessionId) ?? activeSessions[0]
     if (!session) return
+    if (profileInfoSessionId && profileInfoSessionId !== session.sessionId) {
+      profileInfoGamepadGatesRef.current.get(profileInfoSessionId)?.unlock(activeGamepadBindings(readGamepadSnapshot()))
+    }
     setProfileInfoName(session.profileName ?? '')
     setProfileInfoError('')
+    let gate = profileInfoGamepadGatesRef.current.get(session.sessionId)
+    if (!gate) {
+      gate = createGamepadInputGate()
+      profileInfoGamepadGatesRef.current.set(session.sessionId, gate)
+    }
+    gate.lock()
     setProfileInfoSessionId(session.sessionId)
   }
 
   function closeProfileInfo() {
     if (profileInfoBusy) return
-    profileInfoNeutralSessionIdRef.current = profileInfoSessionId
+    profileInfoGamepadGatesRef.current.get(profileInfoSessionId)?.unlock(activeGamepadBindings(readGamepadSnapshot()))
     setProfileInfoSessionId(null)
     setProfileInfoError('')
   }
@@ -1175,7 +1194,7 @@ function App() {
       setActiveSessions(current => current.map(candidate => candidate.sessionId === session.sessionId ? { ...candidate, profileName: updated.name } : candidate))
       setProfiles(current => current.map(candidate => candidate.id === updated.id ? updated : candidate))
       updateCachedProfiles(session.gameId, current => replaceCatalogProfile(current, updated))
-      profileInfoNeutralSessionIdRef.current = session.sessionId
+      profileInfoGamepadGatesRef.current.get(session.sessionId)?.unlock(activeGamepadBindings(readGamepadSnapshot()))
       setProfileInfoSessionId(null)
     } catch (cause) {
       setProfileInfoError(cause.message)

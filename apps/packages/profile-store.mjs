@@ -6,7 +6,7 @@ export function createProfileStore({ dataPath }) {
   let queue = Promise.resolve()
 
   return {
-    list: async gameId => (await readProfiles(dataPath, gameId)).map(copyProfile),
+    list: async gameId => sortByCreation(await readProfiles(dataPath, gameId)).map(copyProfile),
     get: async (gameId, id) => id === undefined
       ? findProfile(dataPath, gameId)
       : (await readProfiles(dataPath, gameId)).find(profile => profile.id === id) ?? null,
@@ -27,10 +27,6 @@ export function createProfileStore({ dataPath }) {
       const operation = queue.then(async () => {
         const normalizedName = normalizeProfileName(name)
         const profiles = await readProfiles(dataPath, gameId)
-        if (profiles.some(profile => profile.name.localeCompare(normalizedName, undefined, { sensitivity: 'accent' }) === 0)) {
-          throw profileError('PROFILE_NAME_DUPLICATE', 'A profile with this name already exists.')
-        }
-
         const profile = { id: randomUUID(), name: normalizedName, createdAt: new Date().toISOString(), oddsResetCount: 0 }
         await writeProfiles(dataPath, gameId, [...profiles, profile])
         return copyProfile(profile)
@@ -44,10 +40,7 @@ export function createProfileStore({ dataPath }) {
         const profiles = await readProfiles(dataPath, gameId)
         const index = profiles.findIndex(profile => profile.id === id)
         if (index === -1) return null
-        if (profiles.some(profile => profile.id !== id && profile.name.localeCompare(normalizedName, undefined, { sensitivity: 'accent' }) === 0)) {
-          throw profileError('PROFILE_NAME_DUPLICATE', 'A profile with this name already exists.')
-        }
-
+        if (profiles[index].name === normalizedName) return copyProfile(profiles[index])
         const profile = { ...profiles[index], name: normalizedName, oddsResetCount: profiles[index].oddsResetCount ?? 0 }
         profiles[index] = profile
         await writeProfiles(dataPath, gameId, profiles)
@@ -76,7 +69,7 @@ export function createRedisProfileStore({ persistence }) {
   let queue = Promise.resolve()
 
   return {
-    list: async gameId => (await readRedisProfiles(persistence, gameId)).map(copyProfile),
+    list: async gameId => sortByCreation(await readRedisProfiles(persistence, gameId)).map(copyProfile),
     get: async (gameId, id) => id === undefined
       ? findRedisProfile(persistence, gameId)
       : (await readRedisProfiles(persistence, gameId)).find(profile => profile.id === id) ?? null,
@@ -97,7 +90,6 @@ export function createRedisProfileStore({ persistence }) {
       const operation = queue.then(async () => {
         const normalizedName = normalizeProfileName(name)
         const profiles = await readRedisProfiles(persistence, gameId)
-        if (profiles.some(profile => profile.name.localeCompare(normalizedName, undefined, { sensitivity: 'accent' }) === 0)) throw profileError('PROFILE_NAME_DUPLICATE', 'A profile with this name already exists.')
         const profile = { id: randomUUID(), name: normalizedName, createdAt: new Date().toISOString(), oddsResetCount: 0 }
         await writeRedisProfiles(persistence, gameId, [...profiles, profile])
         return copyProfile(profile)
@@ -111,7 +103,7 @@ export function createRedisProfileStore({ persistence }) {
         const profiles = await readRedisProfiles(persistence, gameId)
         const index = profiles.findIndex(profile => profile.id === id)
         if (index === -1) return null
-        if (profiles.some(profile => profile.id !== id && profile.name.localeCompare(normalizedName, undefined, { sensitivity: 'accent' }) === 0)) throw profileError('PROFILE_NAME_DUPLICATE', 'A profile with this name already exists.')
+        if (profiles[index].name === normalizedName) return copyProfile(profiles[index])
         const profile = { ...profiles[index], name: normalizedName, oddsResetCount: profiles[index].oddsResetCount ?? 0 }
         profiles[index] = profile
         await writeRedisProfiles(persistence, gameId, profiles)
@@ -241,6 +233,10 @@ function validProfile(profile) {
 
 function copyProfile(profile) {
   return { id: profile.id, name: profile.name, createdAt: profile.createdAt, oddsResetCount: profile.oddsResetCount ?? 0 }
+}
+
+function sortByCreation(profiles) {
+  return [...profiles].sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt))
 }
 
 function validOddsResetCount(value) {

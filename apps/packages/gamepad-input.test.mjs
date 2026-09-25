@@ -28,9 +28,10 @@ test('capture waits for a new press or axis direction, ignoring held inputs and 
 
 test('snapshots copy mutable browser objects and include all connected controllers', () => {
   const first = pad([1])
-  const snapshot = readGamepadSnapshot([first, null, pad([], [0, 1], 2)])
+  const snapshot = readGamepadSnapshot([first, null, { ...pad([1], [], 1), connected: false }, pad([], [0, 1], 2)])
   first.buttons[0].pressed = false
   first.buttons[0].value = 0
+  assert.deepEqual(snapshot.map(gamepad => gamepad.index), [0, 2])
   assert.deepEqual(activeGamepadBindings(snapshot), ['BUTTON_1', 'LEFT_STICK_Y:+1'])
 })
 

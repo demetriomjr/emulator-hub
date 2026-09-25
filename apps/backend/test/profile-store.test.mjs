@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, test } from 'node:test'
 
-import { createProfileStore } from '../../packages/profile-store.mjs'
+import { createProfileStore, createRedisProfileStore } from '../../packages/profile-store.mjs'
+import { createMemoryRedisPersistence } from '../../packages/redis-persistence.mjs'
 
 const roots = new Set()
 
@@ -81,17 +82,71 @@ test('renames a durable profile without changing its identity', async () => {
   assert.deepEqual(await createProfileStore({ dataPath }).list('pokemon-emerald'), [renamed])
 
   await profiles.create('pokemon-emerald', 'Erika')
-  await assert.rejects(() => profiles.update('pokemon-emerald', created.id, 'Erika'), { code: 'PROFILE_NAME_DUPLICATE' })
+  assert.equal((await profiles.update('pokemon-emerald', created.id, 'Erika')).name, 'Erika')
   assert.equal(await profiles.update('pokemon-emerald', '00000000-0000-0000-0000-000000000000', 'Lorelei'), null)
 })
 
-test('rejects empty, oversized, and duplicate profile names within one game', async () => {
+test('rejects invalid names but allows repeated display names within one game', async () => {
   const profiles = createProfileStore({ dataPath: await profilePath() })
   await assert.rejects(() => profiles.create('pokemon-emerald', '   '), { code: 'PROFILE_NAME_INVALID' })
   await assert.rejects(() => profiles.create('pokemon-emerald', 'x'.repeat(33)), { code: 'PROFILE_NAME_INVALID' })
-  await profiles.create('pokemon-emerald', 'May')
-  await assert.rejects(() => profiles.create('pokemon-emerald', ' may '), { code: 'PROFILE_NAME_DUPLICATE' })
+  const first = await profiles.create('pokemon-emerald', 'May')
+  const second = await profiles.create('pokemon-emerald', ' may ')
+  assert.notEqual(first.id, second.id)
+  assert.deepEqual((await profiles.list('pokemon-emerald')).map(profile => profile.name), ['May', 'may'])
+  assert.equal((await profiles.get('pokemon-emerald', first.id)).name, 'May')
+  assert.equal((await profiles.get('pokemon-emerald', second.id)).name, 'may')
   const fireredProfile = await profiles.create('pokemon-firered', 'May')
   assert.equal(await profiles.get('pokemon-emerald', fireredProfile.id), null)
   assert.deepEqual(await profiles.list('pokemon-firered'), [fireredProfile])
+})
+
+test('unchanged normalized names succeed without rewriting filesystem or Redis storage', async () => {
+  const dataPath = await profilePath()
+  const fileProfiles = createProfileStore({ dataPath })
+  const fileProfile = await fileProfiles.create('pokemon-emerald', 'May')
+  const filePath = join(dataPath, 'pokemon-emerald.json')
+  const oldTime = new Date('2020-01-01T00:00:00.000Z')
+  await utimes(filePath, oldTime, oldTime)
+  assert.deepEqual(await fileProfiles.update('pokemon-emerald', fileProfile.id, '  May  '), fileProfile)
+  assert.equal((await stat(filePath)).mtime.toISOString(), oldTime.toISOString())
+
+  const persistence = createMemoryRedisPersistence()
+  let writes = 0
+  const originalSet = persistence.set.bind(persistence)
+  persistence.set = (...args) => { writes += 1; return originalSet(...args) }
+  const redisProfiles = createRedisProfileStore({ persistence })
+  const redisProfile = await redisProfiles.create('pokemon-emerald', 'May')
+  const writesAfterCreate = writes
+  assert.deepEqual(await redisProfiles.update('pokemon-emerald', redisProfile.id, 'May'), redisProfile)
+  assert.equal(writes, writesAfterCreate)
+})
+
+test('lists existing filesystem profiles by creation date and keeps their order after rename', async () => {
+  const dataPath = await profilePath()
+  await mkdir(dataPath, { recursive: true })
+  const later = { id: '00000000-0000-0000-0000-000000000002', name: 'Same', createdAt: '2026-09-25T12:00:00.000Z' }
+  const earlier = { id: '00000000-0000-0000-0000-000000000001', name: 'Same', createdAt: '2026-09-24T12:00:00.000Z' }
+  const sameTime = { id: '00000000-0000-0000-0000-000000000003', name: 'Same', createdAt: later.createdAt }
+  await writeFile(join(dataPath, 'pokemon-emerald.json'), JSON.stringify([later, sameTime, earlier]))
+  const profiles = createProfileStore({ dataPath })
+  assert.deepEqual((await profiles.list('pokemon-emerald')).map(profile => profile.id), [earlier.id, later.id, sameTime.id])
+  await profiles.update('pokemon-emerald', later.id, 'Same')
+  assert.deepEqual((await profiles.list('pokemon-emerald')).map(profile => profile.id), [earlier.id, later.id, sameTime.id])
+})
+
+test('Redis profiles allow repeated names and list by creation date without changing IDs', async () => {
+  const persistence = createMemoryRedisPersistence()
+  const later = { id: '00000000-0000-0000-0000-000000000002', name: 'Same', createdAt: '2026-09-25T12:00:00.000Z' }
+  const earlier = { id: '00000000-0000-0000-0000-000000000001', name: 'Same', createdAt: '2026-09-24T12:00:00.000Z' }
+  await persistence.set('profiles:game:pokemon-emerald', JSON.stringify([later, earlier]))
+  const profiles = createRedisProfileStore({ persistence })
+  assert.deepEqual((await profiles.list('pokemon-emerald')).map(profile => profile.id), [earlier.id, later.id])
+  const created = await profiles.create('pokemon-emerald', 'Same')
+  assert.notEqual(created.id, earlier.id)
+  const renamed = await profiles.update('pokemon-emerald', created.id, 'Same')
+  assert.equal(renamed.id, created.id)
+  assert.deepEqual((await profiles.list('pokemon-emerald')).map(profile => profile.id), [earlier.id, later.id, created.id])
+  assert.equal((await profiles.get('pokemon-emerald', earlier.id)).name, 'Same')
+  assert.equal((await profiles.get('pokemon-emerald', created.id)).name, 'Same')
 })

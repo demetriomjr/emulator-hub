@@ -1592,6 +1592,11 @@ describe('hub backend HTTP contract', () => {
     const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Antes' }),
     }))
+    const sameName = await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Depois' }),
+    })
+    assert.equal(sameName.status, 201)
+    const otherProfile = await jsonResponse(sameName)
     const lease = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'rename-active-session')
     assert.equal(lease.response.status, 200)
     const detail = await fetch(`${baseUrl}/api/games/pokemon-red/profiles/${profile.id}`, { headers: { Cookie: lease.cookie } })
@@ -1601,6 +1606,9 @@ describe('hub backend HTTP contract', () => {
     })
     assert.equal(renamed.status, 200)
     assert.deepEqual(await jsonResponse(renamed), { ...profile, name: 'Depois' })
+    const listed = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`))
+    assert.deepEqual(listed.profiles.map(candidate => [candidate.id, candidate.name]), [[profile.id, 'Depois'], [otherProfile.id, 'Depois']])
+    assert.equal((await fetch(`${baseUrl}/api/games/pokemon-red/launch?profileId=${otherProfile.id}`)).status, 200)
     const deletion = await fetch(`${baseUrl}/api/games/pokemon-red/profiles/${profile.id}`, { method: 'DELETE', headers: { Cookie: lease.cookie } })
     assert.equal(deletion.status, 409)
   })

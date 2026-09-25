@@ -10,7 +10,7 @@ const buttonLabels = Object.freeze([
 const axisLabels = Object.freeze(['LEFT_STICK_X', 'LEFT_STICK_Y', 'RIGHT_STICK_X', 'RIGHT_STICK_Y'])
 
 export function readGamepadSnapshot(gamepads = globalThis.navigator?.getGamepads?.() ?? []) {
-  return Array.from(gamepads).filter(Boolean).map(gamepad => ({
+  return Array.from(gamepads).filter(gamepad => gamepad && gamepad.connected !== false).map(gamepad => ({
     index: gamepad.index,
     buttons: Array.from(gamepad.buttons, button => ({ pressed: button.pressed, value: button.value })),
     axes: Array.from(gamepad.axes),

@@ -3,7 +3,7 @@
 ## Current system
 
 - The hub sidebar has a global **Configurar controles** button. The catalog comes from `GET /api/games` and includes every registered game, its title, cover when verified, status, and cached profiles. The main grid disables launch for unavailable ROMs.
-- Save profiles belong to a game ID. `GET /api/games/:gameId/profiles` lists current profiles and lease state. `PATCH /api/games/:gameId/profiles/:profileId` immediately persists a name, with the profile store enforcing printable 1–32 character names and uniqueness within the game. Renaming remains allowed during an active save lease; deletion does not.
+- Save profiles belong to a game ID. `GET /api/games/:gameId/profiles` lists current profiles and lease state. `PATCH /api/games/:gameId/profiles/:profileId` immediately persists a printable 1–32 character name. Names may repeat as corrected in [Spec 068](068-profile-names-and-gamepad-unlock.md). Renaming remains allowed during an active save lease; deletion does not.
 - The launch picker and running player both keep profile names in client state. The player close payload contains save/session identity and does not transport profile metadata. A rename must update visible client state immediately, without waiting for player close.
 - Ant Design is already installed and themed in the frontend through `ConfigProvider`. Its controlled `Modal` supports `open`, `onCancel`, a custom or absent footer, and a wide `width`; `Input` and `Button` support the edit form.
 
@@ -21,3 +21,11 @@
 - Backend route tests for current profile, missing game/profile, malformed ID, and method handling.
 - Frontend contract/state tests for selection, stale request protection, immediate save, and error behavior; lint and relevant existing tests.
 - No project build, commit, push, or deploy in this task.
+
+## UI and save corrections (2026-09-25)
+
+- Give the global sidebar actions a small vertical gap so adjacent buttons do not touch.
+- Render the game titles in the first column as square cover cards in a two-column grid at desktop modal width, with readable title labels and a usable narrow layout. Keep the selected game's profile names in the middle column.
+- Keep fetching the selected game's profiles and the selected profile's current record from the API.
+- Keep **Salvar** enabled whenever a valid profile is loaded, including when the name has not changed. The backend validates and normalizes every submission; if the normalized name equals the stored name, it returns the existing profile successfully without writing storage. A successful submission shows a visible saved confirmation. While a request is in flight, prevent duplicate submits.
+- Style the editor's input and save button to match the existing dark green UI, with readable button text and hover/focus states.

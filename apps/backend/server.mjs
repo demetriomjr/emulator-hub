@@ -559,10 +559,6 @@ async function createProfile(request, response, config, gameId) {
       json(response, 400, { error: error.message })
       return
     }
-    if (error.code === 'PROFILE_NAME_DUPLICATE') {
-      json(response, 409, { error: error.message })
-      return
-    }
     throw error
   }
 }
@@ -597,10 +593,6 @@ async function updateProfile(request, response, config, gameId, id) {
   } catch (error) {
     if (error.code === 'PROFILE_NAME_INVALID') {
       json(response, 400, { error: error.message })
-      return
-    }
-    if (error.code === 'PROFILE_NAME_DUPLICATE') {
-      json(response, 409, { error: error.message })
       return
     }
     throw error

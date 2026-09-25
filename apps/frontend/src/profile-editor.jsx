@@ -15,6 +15,7 @@ export function ProfileEditor({ games, onCatalog, onSaved, onClose }) {
   const [profileError, setProfileError] = useState('')
   const [draftName, setDraftName] = useState('')
   const [saving, setSaving] = useState(false)
+  const [saveMessage, setSaveMessage] = useState('')
 
   useEffect(() => {
     let current = true
@@ -62,6 +63,7 @@ export function ProfileEditor({ games, onCatalog, onSaved, onClose }) {
     setProfile(null)
     setProfileError('')
     setDraftName('')
+    setSaveMessage('')
   }
 
   function selectProfile(profileId) {
@@ -70,6 +72,7 @@ export function ProfileEditor({ games, onCatalog, onSaved, onClose }) {
     setProfile(null)
     setProfileError('')
     setDraftName('')
+    setSaveMessage('')
   }
 
   async function save(event) {
@@ -77,12 +80,14 @@ export function ProfileEditor({ games, onCatalog, onSaved, onClose }) {
     if (!profile || saving) return
     setSaving(true)
     setProfileError('')
+    setSaveMessage('')
     try {
       const updated = await updateProfile(selectedGameId, profile.id, draftName)
       setProfile(updated)
       setDraftName(updated.name)
       setProfiles(current => current.map(candidate => candidate.id === updated.id ? { ...candidate, ...updated } : candidate))
       onSaved(selectedGameId, updated)
+      setSaveMessage('Perfil salvo.')
     } catch (error) {
       setProfileError(error.message)
     } finally {
@@ -118,8 +123,9 @@ export function ProfileEditor({ games, onCatalog, onSaved, onClose }) {
         {profileError && <p role="alert">{profileError}</p>}
         {profile && !profileLoading && <form onSubmit={save}>
           <label htmlFor="global-profile-editor-name">Nome</label>
-          <Input id="global-profile-editor-name" value={draftName} onChange={event => setDraftName(event.target.value)} maxLength={32} required disabled={saving} autoFocus />
-          <Button type="primary" htmlType="submit" loading={saving} disabled={!draftName.trim() || draftName === profile.name}>Salvar</Button>
+          <Input id="global-profile-editor-name" value={draftName} onChange={event => { setDraftName(event.target.value); setSaveMessage('') }} maxLength={32} required disabled={saving} autoFocus />
+          <Button className="global-profile-editor-save" type="primary" htmlType="submit" loading={saving}>Salvar</Button>
+          {saveMessage && <p className="global-profile-editor-saved" role="status">{saveMessage}</p>}
         </form>}
       </section>
     </div>
