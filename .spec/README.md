@@ -1,5 +1,6 @@
 # Specifications
 
+- [Spec 067 — Global profile editor](067-global-profile-editor.md): browse games and profiles in a three-column modal and edit profile metadata immediately.
 - [Spec 066 — Running profile information editor](066-running-profile-info-editor.md): edit the focused emulator's profile name during play and persist it immediately without changing the close payload.
 
 - [Spec 062 — EmulatorJS threads per player iframe](062-player-scoped-emulatorjs-threads.md): player-only document isolation, per-instance threaded mGBA selection with fallback, message contracts, and save/state compatibility gates.

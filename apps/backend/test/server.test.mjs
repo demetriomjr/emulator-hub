@@ -1537,6 +1537,16 @@ describe('hub backend HTTP contract', () => {
     const listed = await fetch(`${baseUrl}/api/games/pokemon-red/profiles`)
     assert.deepEqual(await jsonResponse(listed), { profiles: [{ ...profile, leaseActive: false }] })
 
+    const detail = await fetch(`${baseUrl}/api/games/pokemon-red/profiles/${profile.id}`)
+    assert.equal(detail.status, 200)
+    assert.deepEqual(await jsonResponse(detail), { ...profile, leaseActive: false })
+    assert.equal((await fetch(`${baseUrl}/api/games/pokemon-red/profiles/missing`)).status, 404)
+    assert.equal((await fetch(`${baseUrl}/api/games/missing/profiles/${profile.id}`)).status, 404)
+    assert.equal((await fetch(`${baseUrl}/api/games/%ZZ/profiles/${profile.id}`)).status, 400)
+    const unsupported = await fetch(`${baseUrl}/api/games/pokemon-red/profiles/${profile.id}`, { method: 'PUT' })
+    assert.equal(unsupported.status, 405)
+    assert.equal(unsupported.headers.get('allow'), 'GET, PATCH, DELETE')
+
     const renamed = await fetch(`${baseUrl}/api/games/pokemon-red/profiles/${profile.id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Dawn II' }),
     })
@@ -1584,6 +1594,8 @@ describe('hub backend HTTP contract', () => {
     }))
     const lease = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'rename-active-session')
     assert.equal(lease.response.status, 200)
+    const detail = await fetch(`${baseUrl}/api/games/pokemon-red/profiles/${profile.id}`, { headers: { Cookie: lease.cookie } })
+    assert.deepEqual(await jsonResponse(detail), { ...profile, leaseActive: true })
     const renamed = await fetch(`${baseUrl}/api/games/pokemon-red/profiles/${profile.id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: lease.cookie }, body: JSON.stringify({ name: 'Depois' }),
     })
@@ -1691,6 +1703,14 @@ describe('hub backend HTTP contract', () => {
         },
       ],
     })
+    const created = await fetch(`${baseUrl}/api/games/pokemon-blue/profiles`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Blue' }),
+    })
+    assert.equal(created.status, 201)
+    const profile = await jsonResponse(created)
+    const detail = await fetch(`${baseUrl}/api/games/pokemon-blue/profiles/${profile.id}`)
+    assert.equal(detail.status, 200)
+    assert.deepEqual(await jsonResponse(detail), { ...profile, leaseActive: false })
   })
 
   test('projects occupied Hub grid entries from their owner profile snapshot when listing profiles', async () => {

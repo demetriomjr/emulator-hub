@@ -9,6 +9,29 @@ button { font: inherit; }
 .hub-sidebar-action:hover { background: #216553; }
 .hub-sidebar-action:focus-visible { outline: 3px solid #ddffe9; outline-offset: 3px; }
 .hub-sidebar-action svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.global-profile-editor .ant-modal-content { border: 1px solid #398269; background: #10262a; }
+.global-profile-editor .ant-modal-header { background: transparent; }
+.global-profile-editor-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); height: min(72dvh, 660px); border: 1px solid #397c67; border-radius: 8px; overflow: hidden; }
+.global-profile-editor-column { min-width: 0; overflow-y: auto; padding: 16px; }
+.global-profile-editor-column + .global-profile-editor-column { border-left: 1px solid #397c67; }
+.global-profile-editor-column h3 { margin: 0 0 14px; color: #d8f8e7; font-size: 16px; }
+.global-profile-editor-column p { color: #bfe6d3; }
+.global-profile-editor-column p[role='alert'] { color: #ffe5e7; }
+.global-profile-editor-games { display: grid; gap: 8px; }
+.global-profile-editor-game, .global-profile-editor-profile { display: flex; align-items: center; width: 100%; min-height: 54px; gap: 10px; padding: 7px; border: 1px solid #397c67; border-radius: 8px; color: #e8f5ef; text-align: left; background: #0d2026; cursor: pointer; }
+.global-profile-editor-game:hover, .global-profile-editor-profile:hover, .global-profile-editor-game.is-selected, .global-profile-editor-profile.is-selected { border-color: #77e2af; background: #1b473d; }
+.global-profile-editor-game:focus-visible, .global-profile-editor-profile:focus-visible { outline: 2px solid #ddffe9; outline-offset: 2px; }
+.global-profile-editor-game:disabled, .global-profile-editor-profile:disabled { opacity: .6; cursor: wait; }
+.global-profile-editor-cover { display: grid; place-items: center; flex: none; width: 42px; height: 42px; overflow: hidden; border-radius: 5px; background: #1b5847; }
+.global-profile-editor-cover img { width: 100%; height: 100%; object-fit: cover; }
+.global-profile-editor-game-label { display: grid; min-width: 0; gap: 2px; }
+.global-profile-editor-game-label strong { overflow-wrap: anywhere; }
+.global-profile-editor-game-label small { color: #bfe6d3; }
+.global-profile-editor-profile { padding: 10px 12px; }
+.global-profile-editor-column form { display: grid; gap: 10px; }
+.global-profile-editor-column form label { font-size: 13px; }
+.global-profile-editor-column form .ant-btn { justify-self: end; margin-top: 6px; }
+@media (max-width: 760px) { .global-profile-editor-columns { display: block; height: min(72dvh, 660px); overflow-y: auto; } .global-profile-editor-column { overflow: visible; } .global-profile-editor-column + .global-profile-editor-column { border-top: 1px solid #397c67; border-left: 0; } }
 .control-configuration-icon { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
 .hub-content { width: min(1400px, calc(100% - clamp(32px, 5vw, 96px))); margin: 0 auto; padding: clamp(24px, 5vw, 64px) 0; }
 .hub-section + .hub-section { margin-top: clamp(32px, 5vw, 56px); }

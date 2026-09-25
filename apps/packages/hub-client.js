@@ -32,6 +32,12 @@ export async function getProfiles(gameId) {
   return body.profiles
 }
 
+export async function getProfile(gameId, id) {
+  const profile = await getJson(`${profileCollectionUrl(gameId)}/${encodeURIComponent(id)}`)
+  if (!profile || typeof profile.id !== 'string' || typeof profile.name !== 'string') throw new Error('Invalid profile response')
+  return profile
+}
+
 export async function createProfile(gameId, name) {
   const response = await fetch(profileCollectionUrl(gameId), {
     method: 'POST',

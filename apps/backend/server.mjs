@@ -274,7 +274,7 @@ async function handleRequest(request, response, config) {
     || (isClientDiagnosticsRoute && request.method === 'POST')
     || (isBackupRoute && request.method === 'POST')
   if (!supportedMethod) {
-    response.setHeader('Allow', isClientDiagnosticsRoute ? 'GET, POST' : isUserPreferencesRoute ? 'GET, PATCH' : pokemonHubSessionRoute ? pokemonHubSessionRoute.kind === 'detach' || pokemonHubSessionRoute.kind === 'close' ? 'DELETE' : 'POST' : pokemonHubRoute ? ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute.kind) ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'PATCH, DELETE' : pokemonHubProfilesRoute || gameProfilesRoute ? 'GET, POST' : snapshotRoute ? 'GET, PUT, DELETE' : saveRoute || isControlProfileRoute ? 'GET, PUT' : gameProfileRoute ? 'PATCH, DELETE' : patchRoute ? 'GET' : isRomRoute ? 'GET, HEAD' : 'GET')
+    response.setHeader('Allow', isClientDiagnosticsRoute ? 'GET, POST' : isUserPreferencesRoute ? 'GET, PATCH' : pokemonHubSessionRoute ? pokemonHubSessionRoute.kind === 'detach' || pokemonHubSessionRoute.kind === 'close' ? 'DELETE' : 'POST' : pokemonHubRoute ? ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute.kind) ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'PATCH, DELETE' : pokemonHubProfilesRoute || gameProfilesRoute ? 'GET, POST' : snapshotRoute ? 'GET, PUT, DELETE' : saveRoute || isControlProfileRoute ? 'GET, PUT' : gameProfileRoute ? 'GET, PATCH, DELETE' : patchRoute ? 'GET' : isRomRoute ? 'GET, HEAD' : 'GET')
     json(response, 405, { error: 'Method is not supported for this route.' })
     return
   }
@@ -481,6 +481,11 @@ async function handleGameProfiles(request, response, config, encodedGameId) {
 async function handleGameProfile(request, response, config, route) {
   const entry = await findProfileGame(response, config, route.gameId)
   if (entry === null) return
+  if (request.method === 'GET') {
+    const profile = await config.profileStore.get(entry.id, route.profileId)
+    if (profile === null) return json(response, 404, { error: 'Profile was not found.' })
+    return json(response, 200, { ...profile, leaseActive: await isGameSaveLeased(config, { profileId: profile.id, gameId: entry.id }) })
+  }
   if (request.method === 'DELETE' && await isGameSaveLeased(config, { profileId: route.profileId, gameId: entry.id })) {
     return json(response, 409, { error: 'This profile is open in an active game save session.', code: 'GAME_SAVE_LEASE_HELD' })
   }

@@ -24,6 +24,7 @@ import { createOddsManipulatorSync } from '../../packages/odds-manipulator-sync.
 import { describeRestoreCandidate } from './restore-candidate-view.mjs'
 import { createSnapshotTelemetry } from '../../packages/snapshot-telemetry.mjs'
 import hubLayout from './hub-layout.json'
+import { ProfileEditor } from './profile-editor.jsx'
 import './styles.css'
 
 const PokemonHub = React.lazy(() => import('../../packages/pokemon-hub-ui.jsx'))
@@ -230,6 +231,7 @@ function App() {
   const [playerActionErrors, setPlayerActionErrors] = useState({})
   const [instancePicker, setInstancePicker] = useState(false)
   const [controlPanelOpen, setControlPanelOpen] = useState(false)
+  const [profileEditorOpen, setProfileEditorOpen] = useState(false)
   const [controlDraft, setControlDraft] = useState(null)
   const [controlError, setControlError] = useState('')
   const [controlSaving, setControlSaving] = useState(false)
@@ -579,7 +581,7 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!activeSessions.length && !profileGame && !instancePicker && !controlPanelOpen && !pokemonHubOpen) return
+    if (!activeSessions.length && !profileGame && !instancePicker && !controlPanelOpen && !profileEditorOpen && !pokemonHubOpen) return
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     const syncFullscreen = () => setFullscreen(document.fullscreenElement === playerShellRef.current)
@@ -590,7 +592,8 @@ function App() {
         if (controlPanelOpen) {
           setControlPanelOpen(false)
           setCaptureTarget(null)
-        } else if (pokemonHubOpen) setPokemonHubCloseSignal(current => current + 1)
+        } else if (profileEditorOpen) return
+        else if (pokemonHubOpen) setPokemonHubCloseSignal(current => current + 1)
         else if (profileGame) {
           setProfileGame(null)
           setInstancePicker(false)
@@ -608,7 +611,7 @@ function App() {
       document.removeEventListener('fullscreenchange', syncFullscreen)
       document.removeEventListener('keydown', onKeyDown)
     }
-  }, [activeSessions.length, controlPanelOpen, instancePicker, profileGame, pokemonHubOpen, closeChooserOpen])
+  }, [activeSessions.length, controlPanelOpen, profileEditorOpen, instancePicker, profileGame, pokemonHubOpen, closeChooserOpen])
 
   useEffect(() => {
     if (!captureTarget) return
@@ -1137,6 +1140,14 @@ function App() {
     }
   }
 
+  function handleGlobalProfileSaved(gameId, updated) {
+    updateCachedProfiles(gameId, current => replaceCatalogProfile(current, updated))
+    if (profileGame?.id === gameId) setProfiles(current => replaceCatalogProfile(current, updated))
+    setActiveSessions(current => current.map(session => session.gameId === gameId && session.profileId === updated.id
+      ? { ...session, profileName: updated.name }
+      : session))
+  }
+
   function openProfileInfo() {
     const session = activeSessions.find(candidate => candidate.sessionId === focusedSessionId) ?? activeSessions[0]
     if (!session) return
@@ -1250,13 +1261,16 @@ function App() {
     : content
 
   return <main className="hub">
-    <div className="hub-layout" inert={activeSessions.length || profileGame || instancePicker || controlPanelOpen || pokemonHubOpen ? true : undefined}>
+    <div className="hub-layout" inert={activeSessions.length || profileGame || instancePicker || controlPanelOpen || profileEditorOpen || pokemonHubOpen ? true : undefined}>
       <aside className="hub-sidebar" aria-label="Ações globais">
         <button className="hub-sidebar-action" type="button" aria-label="Configurar controles" title="Configurar controles" onClick={openControlPanel}>
           <svg viewBox="0 0 24 24" className="control-configuration-icon" aria-hidden="true">
             <path d="M7.1 8.5h9.8c1.5 0 2.8 1 3.2 2.45l1.08 4.15a2.35 2.35 0 0 1-4.08 2.1l-1.55-1.7H8.4l-1.55 1.7a2.35 2.35 0 0 1-4.08-2.1l1.08-4.15A3.3 3.3 0 0 1 7.1 8.5Z" />
             <path d="M7.3 11.15v3.1M5.75 12.7h3.1M16.35 11.8h.01M18.25 13.65h.01" />
           </svg>
+        </button>
+        <button className="hub-sidebar-action" type="button" aria-label="Editar perfis" title="Editar perfis" onClick={() => setProfileEditorOpen(true)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5" /><path d="M5 20v-1.5A5.5 5.5 0 0 1 10.5 13h3A5.5 5.5 0 0 1 19 18.5V20Z" /></svg>
         </button>
         {!isStandalone && <button className="hub-sidebar-action hub-sidebar-install" type="button" aria-label="Instalar no iPhone" title="Instalar no iPhone" onClick={() => setInstallHelpOpen(true)}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11M8 10l4 4 4-4M5 17v3h14v-3" /></svg>
@@ -1297,6 +1311,7 @@ function App() {
         {error && <p className="error" role="alert">{error}</p>}
       </section>
     </div>
+    {profileEditorOpen && <ProfileEditor games={games} onCatalog={setGames} onSaved={handleGlobalProfileSaved} onClose={() => setProfileEditorOpen(false)} />}
     {controlPanelOpen && renderLayer(<div className="profile-overlay" role="dialog" aria-modal="true" aria-label="Configurar controles">
       <div className="profile-panel control-panel">
         <header className="profile-header">
