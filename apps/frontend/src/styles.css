@@ -50,6 +50,7 @@ button { font: inherit; }
 .profile-header { display: flex; align-items: center; width: 100%; min-height: 72px; padding: 16px 18px 16px 22px; border-bottom: 1px solid #398269; background: linear-gradient(115deg, #1b5847, #123238); }
 .profile-header h2 { margin: 0; color: #f0fff5; font-size: 19px; line-height: 1.25; }
 .dialog-close { display: grid; place-items: center; width: 34px; height: 34px; margin-left: auto; padding: 0; border: 0; color: #e8f5ef; background: transparent; font-size: 25px; line-height: 1; cursor: pointer; }
+.instance-picker-close { width: auto; min-width: 64px; padding: 0 8px; font-size: 14px; }
 .dialog-close:hover { color: #fff; background: #ffffff18; }
 .dialog-close:focus-visible { outline: 2px solid #ddffe9; outline-offset: -4px; }
 .profile-body { padding: 18px 22px 22px; }

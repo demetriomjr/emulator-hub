@@ -853,6 +853,9 @@ function App() {
     const selected = activeSessionsRef.current.filter(session => sessionIds.includes(session.sessionId))
     if (selected.length === 0) return
     setPlayerInteractionLocked(true)
+    const preferenceSync = selected.length === activeSessionsRef.current.length
+      ? saveUserPreferences({ fastForwardSpeed, fastForwardEnabled, muted, triggerActions: { l2: l2TriggerAction, r2: r2TriggerAction } }).catch(() => {})
+      : Promise.resolve()
     closeBatchSessionIdsRef.current = selected.map(session => session.sessionId)
     const tasks = selected.map(session => ({
       id: `${session.gameId}:${session.profileId}`,
@@ -874,6 +877,7 @@ function App() {
     const coordinator = createMultiSaveCloseCoordinator({ tasks, onUpdate: rows => setSaveCloseRows(rows) })
     saveCloseCoordinatorRef.current = coordinator
     const result = await coordinator.run()
+    await preferenceSync
     if (result.every(row => row.status === 'saved')) await finishSelectedPlayerClose()
     return
   }
@@ -987,9 +991,11 @@ function App() {
       }
       const lease = await acquirePlayerLease(game.id, profile.id, sessionId)
       if (activeSessions.length === 0) disableOddsManipulator()
-      setProfileGame(null)
-      setInstancePicker(false)
-      setProfilePickerPlacement(null)
+      if (profilePurpose !== 'add-instance' || activeSessions.length + 1 >= MAX_PLAYER_INSTANCES) {
+        setProfileGame(null)
+        setInstancePicker(false)
+        setProfilePickerPlacement(null)
+      }
       const session = {
         gameId: game.id,
         gameTitle: game.title,
@@ -1282,7 +1288,7 @@ function App() {
       <div className={`profile-panel${profilePickerPlacement ? ' profile-picker-panel' : ''}${profilePurpose === 'add-instance' ? ' instance-picker-panel' : ''}`} style={profilePurpose === 'add-instance' ? { '--instance-picker-width': `${Math.max(560, gameSections.flatMap(section => section.games).filter(game => game.status === 'ready').length * 108 + 44)}px` } : profilePickerPlacement ? profilePickerPlacement : undefined}>
         <header className="profile-header">
           <h2>{profilePurpose === 'add-instance' ? 'Adicionar emulador' : profileGame.title}</h2>
-          <button className="dialog-close" type="button" aria-label="Fechar seleção de perfil" onClick={() => { setProfileGame(null); setProfilePickerPlacement(null); setInstancePicker(false); setCreatingProfile(false) }}>×</button>
+          <button className={`dialog-close${profilePurpose === 'add-instance' ? ' instance-picker-close' : ''}`} type="button" aria-label={profilePurpose === 'add-instance' ? 'Fechar' : 'Fechar seleção de perfil'} onClick={() => { setProfileGame(null); setProfilePickerPlacement(null); setInstancePicker(false); setCreatingProfile(false) }}>{profilePurpose === 'add-instance' ? 'Fechar' : '×'}</button>
         </header>
         <div className={`profile-body${profilePurpose === 'add-instance' ? ' instance-picker-body' : ''}`}>
           {profilePurpose === 'add-instance' && <div className="instance-rom-strip" aria-label="ROMs disponíveis">

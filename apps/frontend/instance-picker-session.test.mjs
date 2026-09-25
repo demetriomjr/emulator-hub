@@ -45,3 +45,7 @@ test('add-player picker remembers the last selected title only while the player 
   picker.openInstancePicker()
   assert.equal(opened.at(-1), 'first')
 })
+
+test('add-player picker has an explicit Fechar control', () => {
+  assert.match(hub, /profilePurpose === 'add-instance' \? 'Fechar' : '×'/)
+})

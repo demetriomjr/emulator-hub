@@ -9,7 +9,7 @@ const end = hub.indexOf('  function flushPlayerSave(', begin)
 assert.ok(begin > 0 && end > begin)
 const closeSource = `${hub.slice(begin, end)}\n({ closePlayer, closeSessions, finishSelectedPlayerClose })`
 
-function harness(sessions) {
+function harness(sessions, { preferenceFailure = false } = {}) {
   const calls = []
   const frames = sessions.map(session => ({ sessionId: session.sessionId, contentWindow: {} })).reverse()
   let tasks = []
@@ -31,6 +31,11 @@ function harness(sessions) {
     playerShellRef: { current: null },
     oddsSyncRef: { current: new Map(sessions.map(session => [session.sessionId, { flush: async () => {}, stop: () => calls.push(['stop', session.sessionId]) }])) },
     oddsClockReadyRef: { current: new Map() }, oddsResetQueueRef: { current: new Map() },
+    fastForwardSpeed: 5, fastForwardEnabled: true, muted: true, l2TriggerAction: 'save-state', r2TriggerAction: 'soft-reset',
+    saveUserPreferences: async partial => {
+      calls.push(['preferences', JSON.parse(JSON.stringify(partial))])
+      if (preferenceFailure) throw new Error('Preference write failed')
+    },
     flushPlayerSave: async frame => { calls.push(['flush', frame.sessionId]); return { preserveRecovery: false } },
     clearPlayerRecovery: async frame => calls.push(['clear-recovery', frame.sessionId]),
     releasePlayerLease: async sessionId => calls.push(['release', sessionId]),
@@ -85,4 +90,28 @@ test('partial completion keeps survivor and global odds state', async () => {
   assert.deepEqual(context.activeSessions.map(session => session.sessionId), ['a'])
   assert.equal(calls.some(call => call[0] === 'odds'), false)
   assert.equal(context.focusUpdate('b'), 'a')
+})
+
+test('closing every emulator confirms the visible header preferences while partial close does not', async () => {
+  const partial = harness(sessions)
+  await partial.api.closeSessions(['a'])
+  assert.equal(partial.calls.some(call => call[0] === 'preferences'), false)
+
+  const whole = harness(sessions)
+  await whole.api.closeSessions(['a', 'b'])
+  assert.deepEqual(whole.calls.find(call => call[0] === 'preferences'), ['preferences', {
+    fastForwardSpeed: 5,
+    fastForwardEnabled: true,
+    muted: true,
+    triggerActions: { l2: 'save-state', r2: 'soft-reset' },
+  }])
+})
+
+test('a failed final preference write does not prevent game save and lease release', async () => {
+  const { api, calls, getTasks } = harness(sessions, { preferenceFailure: true })
+  await api.closeSessions(['a', 'b'])
+  await Promise.all(getTasks().map(task => task.run()))
+  assert.deepEqual(calls.filter(call => call[0] === 'flush' || call[0] === 'release'), [
+    ['flush', 'a'], ['flush', 'b'], ['release', 'a'], ['release', 'b'],
+  ])
 })

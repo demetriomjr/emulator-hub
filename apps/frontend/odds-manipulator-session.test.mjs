@@ -10,6 +10,7 @@ assert.ok(launchStart > 0 && launchEnd > launchStart)
 
 function launchHarness(existingSessions, purpose) {
   const actions = []
+  const pickerUpdates = []
   const context = {
     activeSessions: existingSessions,
     profilePurpose: purpose,
@@ -21,7 +22,9 @@ function launchHarness(existingSessions, purpose) {
     async acquirePlayerLease() { return { leaseGeneration: 1 } },
     disableOddsManipulator() { actions.push('disable-odds') },
     setError() {}, setProfileError() {}, setProfileBusy() {},
-    setProfileGame() {}, setInstancePicker() {}, setProfilePickerPlacement() {},
+    setProfileGame(value) { pickerUpdates.push(['game', value]) },
+    setInstancePicker(value) { pickerUpdates.push(['picker', value]) },
+    setProfilePickerPlacement(value) { pickerUpdates.push(['placement', value]) },
     setActiveSessions(value) { actions.push('open-session'); context.activeSessions = typeof value === 'function' ? value(context.activeSessions) : value },
     setFocusedSessionId() {},
     oddsSyncRef: { current: new Map() },
@@ -31,7 +34,7 @@ function launchHarness(existingSessions, purpose) {
     console,
   }
   const launch = runInNewContext(`${hub.slice(launchStart, launchEnd)}\nstartPlayerWithProfile`, context)
-  return { launch, actions, context }
+  return { launch, actions, pickerUpdates, context }
 }
 
 test('opening the first emulator resets odds manipulation for the new wrapper', async () => {
@@ -92,6 +95,18 @@ test('closing the whole wrapper clears the odds toggle before a later first laun
   })
   await close()
   assert.deepEqual(actions, [['sessions', 0], ['odds', false]])
+})
+
+test('add-player picker stays open after a successful launch until the sixth instance', async () => {
+  const second = launchHarness([{ sessionId: 'session-1' }], 'add-instance')
+  await second.launch({ id: 'profile-2', oddsResetCount: 0 }, false)
+  assert.equal(second.context.activeSessions.length, 2)
+  assert.deepEqual(second.pickerUpdates, [])
+
+  const sixth = launchHarness(Array.from({ length: 5 }, (_, index) => ({ sessionId: `session-${index}` })), 'add-instance')
+  await sixth.launch({ id: 'profile-6', oddsResetCount: 0 }, false)
+  assert.equal(sixth.context.activeSessions.length, 6)
+  assert.deepEqual(sixth.pickerUpdates, [['game', null], ['picker', false], ['placement', null]])
 })
 
 test('controller resets advance the current session after React replaces its state object', async () => {
