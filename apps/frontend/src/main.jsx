@@ -1371,7 +1371,7 @@ function App() {
         </div>
       </div>
     </div>)}
-    {pokemonHubOpen && renderLayer(<React.Suspense fallback={<div className="pokemon-workspace" role="status">Carregando workspace...</div>}><PokemonHub onClose={() => setPokemonHubOpen(false)} closeSignal={pokemonHubCloseSignal} /></React.Suspense>)}
+    {pokemonHubOpen && renderLayer(<React.Suspense fallback={<div className="pokemon-workspace" role="status">Carregando workspace...</div>}><PokemonHub onClose={() => setPokemonHubOpen(false)} closeSignal={pokemonHubCloseSignal} layout={hubLayout} /></React.Suspense>)}
     {profileGame && renderLayer(<div className={`profile-overlay${profilePickerPlacement ? ' profile-picker-overlay' : ''} profile-picker-mobile`} role="dialog" aria-modal="true" aria-label="Selecionar perfil">
       <div className={`profile-panel${profilePickerPlacement ? ' profile-picker-panel' : ''}${profilePurpose === 'add-instance' ? ' instance-picker-panel' : ''}`} style={profilePurpose === 'add-instance' ? { '--instance-picker-width': `${Math.max(560, gameSections.flatMap(section => section.games).filter(game => game.status === 'ready').length * 108 + 44)}px` } : profilePickerPlacement ? profilePickerPlacement : undefined}>
         <header className="profile-header">

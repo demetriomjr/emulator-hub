@@ -112,7 +112,7 @@ test('isolates heartbeat in-flight state between old and newly opened sessions',
 test('derives Save selectors from the global catalog without a second Hub catalog request', async () => {
   const source = await readFile(sourceFile, 'utf8')
 
-  assert.match(source, /deriveSaveProfileCatalog\(games\)/)
+  assert.match(source, /deriveSaveProfileCatalog\(games, layout\)/)
   assert.doesNotMatch(source, /getSaveProfileGames/)
   assert.doesNotMatch(source, /loadableSaveCatalog/)
   assert.doesNotMatch(source, /loadPokemonHubSaveCatalog/)

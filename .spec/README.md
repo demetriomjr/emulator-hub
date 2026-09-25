@@ -65,6 +65,8 @@
 
 This directory holds the project's specifications. Define the architecture, shared package contracts, application responsibilities, and feature acceptance criteria here before implementing them.
 
+- [Spec 069 — Pokémon Hub source order](069-pokemon-hub-source-order.md): align ROM and save profile selectors with the main hub and launch picker ordering.
+
 - [Spec 059 — Canonical game save and snapshot independence](059-canonical-save-and-snapshot-independence.md): permanent `.sav` versus runtime-snapshot invariant, load order, and player-visible failure boundary.
 
 The initial direction is recorded in the root `AGENTS.md`.

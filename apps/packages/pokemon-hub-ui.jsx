@@ -17,7 +17,7 @@ import { createGameSessionSourceSnapshot, snapshotToSaveLayout, visiblePokemonHu
 import { deriveSaveProfileCatalog } from './save-profile-catalog.mjs'
 import { activePaneSourceKind, addWorkspacePane, choosePaneSource, createPokemonHubWorkspaceState, hasAvailableSaveProfile, isCompletePaneSource, isPaneSourceAvailable, removeWorkspacePane } from './pokemon-hub-workspace.mjs'
 
-export default function PokemonHub({ onClose, closeSignal = 0 }) {
+export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [catalogError, setCatalogError] = useState('')
   const [pokemonHubProfile, setPokemonHubProfile] = useState(null)
@@ -47,7 +47,7 @@ export default function PokemonHub({ onClose, closeSignal = 0 }) {
   const pokemonHubBusyRef = useRef(false)
   pokemonHubPanesRef.current = pokemonHubPanes
   const games = pokemonHubData?.games || []
-  const { profilesByGame: saveProfilesByGame, saveProfileGames } = deriveSaveProfileCatalog(games)
+  const { profilesByGame: saveProfilesByGame, saveProfileGames } = deriveSaveProfileCatalog(games, layout)
   const pokemonHubDragSensors = [PointerSensor.configure({
     activationConstraints: [new PointerActivationConstraints.Distance({ value: 6 })],
   })]
