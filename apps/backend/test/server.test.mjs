@@ -11,6 +11,7 @@ import { decodeSnapshotBundle, encodeSnapshotBundle } from '../../packages/emula
 import { createCloudSaveSynchronizer } from '../../packages/cloud-save-sync.mjs'
 import { observeEmulatorSaveFiles } from '../../packages/emulator-save-events.mjs'
 import { createSaveStore } from '../../packages/save-store.mjs'
+import { createSnapshotStore } from '../../packages/snapshot-store.mjs'
 
 const liveServers = new Set()
 const liveFixtures = new Set()
@@ -165,6 +166,30 @@ async function acquirePlayerLease(baseUrl, gameId, profileId, sessionId = 'playe
 }
 
 describe('hub backend HTTP contract', () => {
+  test('launch signals a Hub save and hides runtime states older than that save', async () => {
+    const rom = Buffer.from('hub-invalidated-state-rom')
+    const fixture = await createFixture([{ id: 'ruby', title: 'Ruby', system: 'gba', core: 'gba', file: 'ruby.gba', sha256: sha256(rom) }], { 'ruby.gba': rom })
+    const snapshotStore = createSnapshotStore({ dataPath: join(fixture.root, 'data', 'snapshots') })
+    const server = createHubServer({ ...fixture, snapshotStore })
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+    liveServers.add(server)
+    const baseUrl = `http://127.0.0.1:${server.address().port}`
+    const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/ruby/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'May' }) }))
+    const saves = createSaveStore({ dataPath: fixture.savesPath })
+    await saves.put(profile.id, 'ruby', Buffer.from([1]), null)
+    for (const kind of ['cloud-recovery', 'user-state']) {
+      await snapshotStore.put(profile.id, 'ruby', { metadata: { core: 'gba', romSha256: sha256(rom), runtimeId: 'emulatorjs-4.2.3', saveRevision: 1, kind }, state: new Uint8Array([1]) }, null, { kind })
+    }
+    await saves.put(profile.id, 'ruby', Buffer.from([2]), 1, { invalidateRuntimeStates: true })
+    const lease = await acquirePlayerLease(baseUrl, 'ruby', profile.id, 'hub-state-session')
+    assert.equal(lease.response.status, 200)
+    assert.equal(lease.body.runtimeStateInvalidatedAtRevision, 2)
+    const headers = { Cookie: lease.cookie, 'X-Player-Session-Id': 'hub-state-session', 'X-Player-Lease-Generation': String(lease.body.leaseGeneration) }
+    assert.equal((await fetch(`${baseUrl}${lease.body.snapshotUrl}`, { headers })).status, 404)
+    assert.equal((await fetch(`${baseUrl}${lease.body.snapshotUrl}?kind=user-state`, { headers })).status, 404)
+    const launch = await jsonResponse(await fetch(`${baseUrl}/api/player-leases/hub-state-session/launch?profileId=${profile.id}&gameId=ruby&generation=${lease.body.leaseGeneration}`, { headers }))
+    assert.equal(launch.runtimeStateInvalidatedAtRevision, 2)
+  })
   test('discovers and serves an IPS for an arbitrary game identity using the verified ROM hash', async () => {
     const rom = Buffer.from('arbitrary fixture ROM')
     const ips = validIps(42)

@@ -184,6 +184,10 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
         setPokemonHubError('A Pokémon cannot replace an occupied slot in another source.')
         return
       }
+      if (target.area === 'party' && (source.kind !== 'game' || source.area !== 'party')) {
+        setPokemonHubError('Um Pokémon do PC ou do Hub não pode entrar na Party.')
+        return
+      }
       if (target.area === 'party' && !targetSnapshot.placements?.[toSlot]?.pokemonInstanceId) {
         const firstVacantPartySlot = targetSnapshot.placements.findIndex(placement => placement.location.area === 'party' && !placement.pokemonInstanceId)
         if (target.slot !== firstVacantPartySlot) {
@@ -191,7 +195,7 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
           return
         }
       }
-      if (source.area === 'party' && target.area !== 'party' && sourceSnapshot.placements.filter(placement => placement.location.area === 'party' && placement.pokemonInstanceId).length === 1 && (sourceSnapshot.sourceKey !== targetSnapshot.sourceKey || !targetSnapshot.placements?.[toSlot]?.pokemonInstanceId)) {
+      if (source.area === 'party' && target.area !== 'party' && sourceSnapshot.placements.filter(placement => placement.location.area === 'party' && placement.pokemonInstanceId).length === 1) {
         setPokemonHubError('A save Party must keep at least one Pokémon.')
         return
       }

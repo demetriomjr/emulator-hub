@@ -9,6 +9,7 @@
   },
   "reasonMessages": {
     "TRANSFER_SOURCE_EMPTY_AFTER_MOVE": "Este movimento deixaria o save de origem sem nenhum Pokémon.",
+    "TRANSFER_PARTY_IMPORT_FORBIDDEN": "Um Pokémon do PC ou do Hub não pode entrar na Party.",
     "TRANSFER_TRADE_NOT_READY": "Os dois saves precisam estar prontos para trocar Pokémon.",
     "TRANSFER_NATIONAL_DEX_REQUIRED": "Este save ainda não pode enviar ou receber esse Pokémon sem a Pokédex Nacional.",
     "TRANSFER_NETWORK_MACHINE_REQUIRED": "FireRed ou LeafGreen precisa ter a Máquina de Rede restaurada para esta transferência.",

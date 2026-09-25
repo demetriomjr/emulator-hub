@@ -297,7 +297,7 @@ async function captureLocalRecovery() {
     }
     if (leaseLost) return false
     const stateCopy = measureSynchronousOperation(performanceTimings, 'copyState.local', () => new Uint8Array(state))
-    await localRecoveryStore.put({ profileId, gameId: id, core: launchDescriptor.core, romSha256: launchDescriptor.romSha256, runtimeId: launchDescriptor.runtimeId, ...(launchDescriptor.patchSha256 ? { patchSha256: launchDescriptor.patchSha256 } : {}), state: stateCopy })
+    await localRecoveryStore.put({ profileId, gameId: id, core: launchDescriptor.core, romSha256: launchDescriptor.romSha256, runtimeId: launchDescriptor.runtimeId, ...(launchDescriptor.patchSha256 ? { patchSha256: launchDescriptor.patchSha256 } : {}), ...(launchDescriptor.runtimeStateInvalidatedAtRevision ? { runtimeStateInvalidatedAtRevision: launchDescriptor.runtimeStateInvalidatedAtRevision } : {}), state: stateCopy })
     return true
   })().finally(() => { localRecoveryCapture = null })
   return localRecoveryCapture
@@ -843,7 +843,7 @@ async function start() {
   launchDescriptor = launch
   emulatorGameId = createEmulatorGameId(launch.gameId, profileId)
   if (restoreLocalRecovery || localRecoveryPrompt) {
-    const candidate = await localRecoveryStore.get(profileId, id)
+    const candidate = await localRecoveryStore.getForLaunch(profileId, id, launch.runtimeStateInvalidatedAtRevision)
     if (restoreLocalRecovery && !candidate) throw new Error('Local recovery is no longer available.')
     if (candidate && candidate.core === launch.core && candidate.romSha256 === launch.romSha256 && candidate.runtimeId === launch.runtimeId && candidate.patchSha256 === launch.patchSha256) localRecovery = candidate
     else if (restoreLocalRecovery) throw new Error('Local recovery is incompatible with this launch.')

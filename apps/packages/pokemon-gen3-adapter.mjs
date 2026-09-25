@@ -98,21 +98,10 @@ function readTransferCapabilities(saveBytes, newest, layout) {
     && readLargeUInt16LE(saveBytes, newest, profile.eventWorkBase + profile.nationalDexWorkIndex * 2) === profile.nationalDexWorkValue
   return {
     game: profile.game,
-    ordinaryTradeReady: readEventFlag(saveBytes, newest, profile, profile.ordinaryTradeFlag) && hasTwoNonEggPartyPokemon(saveBytes, newest, layout?.party),
+    ordinaryTradeReady: readEventFlag(saveBytes, newest, profile, profile.ordinaryTradeFlag),
     nationalDexUnlocked,
     networkMachineRestored: profile.networkMachineFlag === undefined ? null : readEventFlag(saveBytes, newest, profile, profile.networkMachineFlag),
   }
-}
-
-function hasTwoNonEggPartyPokemon(saveBytes, newest, party) {
-  if (!party) return false
-  const count = readPartyCount(saveBytes, newest, party)
-  let nonEgg = 0
-  for (let slot = 0; slot < count; slot += 1) {
-    const decoded = decodePcRecord(readPartyBytes(saveBytes, newest, party, slot).subarray(0, 80))
-    if (decoded?.canonical && !decoded.canonical.isEgg) nonEgg += 1
-  }
-  return nonEgg >= 2
 }
 
 function readSmallByte(bytes, save, offset) {

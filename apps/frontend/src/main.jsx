@@ -1001,12 +1001,6 @@ function App() {
 
   async function launchWithProfile(profile) {
     if (profilePurpose === 'add-instance' && activeSessions.length >= MAX_PLAYER_INSTANCES) return
-    const game = profileGame
-    let candidate = null
-    try { candidate = await localRecoveryStore.get(profile.id, game.id) } catch {}
-    if (candidate) {
-      return startPlayerWithProfile(profile, false, { reason: candidate.reason, candidateId: candidate.candidateId })
-    }
     return startPlayerWithProfile(profile, false)
   }
 
@@ -1023,6 +1017,9 @@ function App() {
         if (playerOriginSlot === null) console.warn('[player-origins] No player port responded; using the Hub origin')
       }
       const lease = await acquirePlayerLease(game.id, profile.id, sessionId)
+      let candidate = null
+      try { candidate = await localRecoveryStore.getForLaunch(profile.id, game.id, lease.runtimeStateInvalidatedAtRevision) } catch (error) { console.warn('[local-recovery] candidate lookup failed', error) }
+      localRecoveryPrompt = candidate ? { reason: candidate.reason, candidateId: candidate.candidateId } : null
       if (activeSessions.length === 0) disableOddsManipulator()
       if (profilePurpose !== 'add-instance' || activeSessions.length + 1 >= MAX_PLAYER_INSTANCES) {
         setProfileGame(null)

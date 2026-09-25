@@ -36,6 +36,7 @@ export function createRedisPersistence({ url, namespace = defaultNamespace, clie
     async close() { if (redis.isOpen) await redis.quit() },
     async eval(script, options) { return evalScript(script, options) },
     async get(name) { return call('get', key(name)) },
+    async type(name) { return call('type', key(name)) },
     async set(name, value, options) { return call('set', key(name), value, options) },
     async delete(name) { return call('del', key(name)) },
     async addToSet(name, member) { return call('sAdd', key(name), member) },
@@ -44,6 +45,7 @@ export function createRedisPersistence({ url, namespace = defaultNamespace, clie
     async addToSortedSet(name, member, score) { return call('zAdd', key(name), { score, value: member }) },
     async removeFromSortedSet(name, member) { return call('zRem', key(name), member) },
     async rangeByScore(name, minimum, maximum) { return call('zRangeByScore', key(name), minimum, maximum) },
+    async rangeWithScores(name) { return call('zRangeWithScores', key(name), 0, -1) },
     async keys(prefix) {
       await connect()
       const keys = []
@@ -88,6 +90,12 @@ export function createMemoryRedisPersistence({ namespace = defaultNamespace } = 
     async close() {},
     async eval(script, options) { return runEval(script, options) },
     async get(name) { return values.get(fullKey(name)) ?? null },
+    async type(name) {
+      const key = fullKey(name)
+      if (sortedSets.has(key)) return 'zset'
+      if (values.get(key) instanceof Set) return 'set'
+      return values.has(key) ? 'string' : 'none'
+    },
     async set(name, value, options = {}) {
       const key = fullKey(name)
       if (options.NX && values.has(key)) return null
@@ -141,7 +149,14 @@ export function createMemoryRedisPersistence({ namespace = defaultNamespace } = 
         .sort(([leftMember, leftScore], [rightMember, rightScore]) => leftScore - rightScore || leftMember.localeCompare(rightMember))
         .map(([member]) => member)
     },
-    async keys(prefix) { return [...values.keys()].filter(key => key.startsWith(fullKey(prefix))).map(logicalKey) },
+    async rangeWithScores(name) {
+      const members = sortedSets.get(fullKey(name))
+      if (!members) return []
+      return [...members.entries()]
+        .sort(([leftMember, leftScore], [rightMember, rightScore]) => leftScore - rightScore || leftMember.localeCompare(rightMember))
+        .map(([value, score]) => ({ value, score }))
+    },
+    async keys(prefix) { return [...new Set([...values.keys(), ...sortedSets.keys()])].filter(key => key.startsWith(fullKey(prefix))).map(logicalKey) },
   }
 }
 

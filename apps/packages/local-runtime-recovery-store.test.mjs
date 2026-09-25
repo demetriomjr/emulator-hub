@@ -66,3 +66,13 @@ test('records capture time for new local recovery without inventing one for lega
   const legacy = await store.get('p', 'g')
   assert.equal(legacy.capturedAt, undefined)
 })
+
+test('drops recovery from before a Hub save and accepts recovery captured after it', async () => {
+  const store = createLocalRuntimeRecoveryStore({ storage: createMemoryRecoveryStorage() })
+  await store.put(bundle())
+  assert.equal(await store.getForLaunch('may', 'emerald', 4), null)
+  assert.equal(await store.get('may', 'emerald'), null)
+  await store.put({ ...bundle(), runtimeStateInvalidatedAtRevision: 4 })
+  assert.equal((await store.getForLaunch('may', 'emerald', 4)).runtimeStateInvalidatedAtRevision, 4)
+  assert.equal(await store.getForLaunch('may', 'emerald', 5), null)
+})

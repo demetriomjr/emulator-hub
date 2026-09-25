@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path'
 const gzipAsync = promisify(gzip)
 
 export function createBackendStateBackup({ persistence, saveStore, backupsPath, namespace = null, now = () => new Date() } = {}) {
-  if (!persistence || typeof persistence.keys !== 'function' || typeof persistence.get !== 'function') throw new TypeError('Backup persistence is required.')
+  if (!persistence || ['keys', 'type', 'get', 'members', 'rangeWithScores'].some(method => typeof persistence[method] !== 'function')) throw new TypeError('Backup persistence is required.')
   if (!saveStore || typeof saveStore.listAll !== 'function') throw new TypeError('Backup save store is required.')
   if (typeof backupsPath !== 'string' || backupsPath.length === 0) throw new TypeError('Backup path is required.')
   let queue = Promise.resolve()
@@ -21,7 +21,13 @@ export function createBackendStateBackup({ persistence, saveStore, backupsPath, 
     const createdAt = new Date(now()).toISOString()
     const keys = [...await persistence.keys('')].sort()
     const records = []
-    for (const key of keys) records.push({ key, value: await persistence.get(key) })
+    for (const key of keys) {
+      const type = await persistence.type(key)
+      if (type === 'string') records.push({ key, value: await persistence.get(key) })
+      else if (type === 'set') records.push({ key, type, value: (await persistence.members(key)).sort() })
+      else if (type === 'zset') records.push({ key, type, value: await persistence.rangeWithScores(key) })
+      else if (type !== 'none') throw new Error(`Cannot back up Redis key type: ${type}`)
+    }
     const saves = (await saveStore.listAll()).map(save => ({
       profileId: save.profileId,
       gameId: save.gameId,
@@ -49,4 +55,3 @@ export function createBackendStateBackup({ persistence, saveStore, backupsPath, 
     return { schemaVersion: 1, createdAt, reason, fileName, sizeBytes: compressed.length, sha256: digest, recordCounts: { redis: records.length, saves: saves.length } }
   }
 }
-

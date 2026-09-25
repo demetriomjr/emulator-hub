@@ -28,7 +28,7 @@ export function createSaveStore({ dataPath, lockTimeoutMs = 5_000, lockRetryMs =
       }
       return saves
     },
-    async put(profileId, gameId, bytes, expectedRevision, { fenceGeneration = 0 } = {}) {
+    async put(profileId, gameId, bytes, expectedRevision, { fenceGeneration = 0, invalidateRuntimeStates = false } = {}) {
       return serialize(saveKey(profileId, gameId), async () => {
       const paths = savePaths(dataPath, profileId, gameId)
       return withSaveLock(paths, async () => {
@@ -47,8 +47,9 @@ export function createSaveStore({ dataPath, lockTimeoutMs = 5_000, lockRetryMs =
       const sha256 = createHash('sha256').update(bytes).digest('hex')
       await mkdir(dirname(paths.bytes), { recursive: true })
       await writeAtomically(paths.bytes, bytes)
-      await writeAtomically(paths.metadata, JSON.stringify({ revision, sha256, fenceGeneration }))
-      return { revision, sha256, fenceGeneration }
+      const runtimeStateInvalidatedAtRevision = invalidateRuntimeStates ? revision : current?.runtimeStateInvalidatedAtRevision
+      await writeAtomically(paths.metadata, JSON.stringify({ revision, sha256, fenceGeneration, ...(runtimeStateInvalidatedAtRevision ? { runtimeStateInvalidatedAtRevision } : {}) }))
+      return { revision, sha256, fenceGeneration, ...(runtimeStateInvalidatedAtRevision ? { runtimeStateInvalidatedAtRevision } : {}) }
       }, lockOptions)
       })
     },
@@ -61,7 +62,7 @@ export function createSaveStore({ dataPath, lockTimeoutMs = 5_000, lockRetryMs =
         if (!current) throw saveError('SAVE_MISSING', 'Save is missing.')
         if (nextGeneration < current.fenceGeneration) throw saveError('SAVE_FENCE_CONFLICT', 'Save fence generation cannot move backwards.')
         if (nextGeneration === current.fenceGeneration) return current
-        await writeAtomically(paths.metadata, JSON.stringify({ revision: current.revision, sha256: current.sha256, fenceGeneration: nextGeneration }))
+        await writeAtomically(paths.metadata, JSON.stringify({ revision: current.revision, sha256: current.sha256, fenceGeneration: nextGeneration, ...(current.runtimeStateInvalidatedAtRevision ? { runtimeStateInvalidatedAtRevision: current.runtimeStateInvalidatedAtRevision } : {}) }))
         return { ...current, fenceGeneration: nextGeneration }
         }, lockOptions)
       })
@@ -74,7 +75,7 @@ export function createSaveStore({ dataPath, lockTimeoutMs = 5_000, lockRetryMs =
       const [bytes, metadataSource] = await Promise.all([readFile(paths.bytes), readFile(paths.metadata, 'utf8')])
       const metadata = JSON.parse(metadataSource)
       if (!validMetadata(metadata, bytes)) throw new Error('Save metadata is invalid.')
-      return { bytes, revision: metadata.revision, sha256: metadata.sha256, fenceGeneration: metadata.fenceGeneration ?? 0 }
+      return { bytes, revision: metadata.revision, sha256: metadata.sha256, fenceGeneration: metadata.fenceGeneration ?? 0, ...(metadata.runtimeStateInvalidatedAtRevision ? { runtimeStateInvalidatedAtRevision: metadata.runtimeStateInvalidatedAtRevision } : {}) }
     } catch (error) {
       if (error.code === 'ENOENT') return null
       throw error
@@ -101,6 +102,7 @@ function validMetadata(metadata, bytes) {
   return metadata && Number.isInteger(metadata.revision) && metadata.revision > 0
     && typeof metadata.sha256 === 'string' && /^[a-f0-9]{64}$/.test(metadata.sha256)
     && (metadata.fenceGeneration === undefined || Number.isInteger(metadata.fenceGeneration) && metadata.fenceGeneration >= 0)
+    && (metadata.runtimeStateInvalidatedAtRevision === undefined || Number.isInteger(metadata.runtimeStateInvalidatedAtRevision) && metadata.runtimeStateInvalidatedAtRevision > 0 && metadata.runtimeStateInvalidatedAtRevision <= metadata.revision)
     && createHash('sha256').update(bytes).digest('hex') === metadata.sha256
 }
 

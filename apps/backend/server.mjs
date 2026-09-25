@@ -126,6 +126,7 @@ export function createHubServer(options = {}) {
   config.pokemonHubSaveFlush = options.pokemonHubSaveFlush ?? createPokemonHubSaveFlushService({
     coordinator: config.pokemonHubSnapshotCoordinator,
     saveStore: config.saveStore,
+    snapshotStore: config.snapshotStore,
     resolveSaveSource: request => resolvePokemonHubSaveSource(config, request),
   })
   config.pokemonHubService = options.pokemonHubService ?? createPokemonHubService({
@@ -1186,6 +1187,10 @@ async function handleSnapshot(request, response, config, { profileId, gameId }, 
     try { snapshot = await config.snapshotStore.get(profileId, gameId, { kind }) }
     catch (error) { log('error', 'read-failed', { code: error.code ?? null, error: error.message }); throw error }
     if (!snapshot) return json(response, 404, { error: 'Snapshot was not found.' })
+    const save = await config.saveStore.get(profileId, gameId)
+    if (save?.runtimeStateInvalidatedAtRevision && snapshot.metadata.saveRevision < save.runtimeStateInvalidatedAtRevision) {
+      return json(response, 404, { error: 'Snapshot was invalidated by a Pokémon Hub save.' })
+    }
     log('info', 'candidate-available', { revision: snapshot.metadata.revision, reason: snapshot.metadata.reasonCode, saveRevision: snapshot.metadata.saveRevision })
     const bytes = await encodeSnapshotBundle({ metadata: { ...snapshot.metadata, profileId, gameId }, state: snapshot.state })
     response.writeHead(200, { 'Cache-Control': 'no-store', 'Content-Length': bytes.length, 'Content-Type': 'application/vnd.emulator-hub.snapshot', ETag: `"${snapshot.metadata.revision}"`, 'X-Snapshot-Sha256': snapshot.metadata.sha256, 'X-Content-Type-Options': 'nosniff' })
@@ -1706,7 +1711,8 @@ async function handlePlayerLease(request, response, config, route, searchParams)
       try { await config.saveStore.advanceFence(body.profileId, entry.id, lease.generation) } catch (error) { if (error.code !== 'SAVE_MISSING') throw error }
       try { await config.snapshotStore.advanceFence(body.profileId, entry.id, lease.generation) } catch (error) { if (error.code !== 'SNAPSHOT_MISSING') throw error }
       try { await config.snapshotStore.advanceFence(body.profileId, entry.id, lease.generation, { kind: 'user-state' }) } catch (error) { if (error.code !== 'SNAPSHOT_MISSING') throw error }
-      return json(response, 200, { ...launchDescriptor(entry, body.profileId, patchVerification.patch), leaseGeneration: lease.generation })
+      const save = await config.saveStore.get(body.profileId, entry.id)
+      return json(response, 200, { ...launchDescriptor(entry, body.profileId, patchVerification.patch), leaseGeneration: lease.generation, ...(save?.runtimeStateInvalidatedAtRevision ? { runtimeStateInvalidatedAtRevision: save.runtimeStateInvalidatedAtRevision } : {}) })
     } catch (error) { return json(response, error.code === 'PLAYER_LEASE_HELD' ? 409 : 400, { error: error.message, code: error.code }) }
   }
   let body
@@ -1738,7 +1744,8 @@ async function handlePlayerLease(request, response, config, route, searchParams)
     if (!verification.ok) return json(response, 409, { error: verification.reason })
     const patchVerification = await verifyGamePatch(entry, config)
     if (!patchVerification.ok) return json(response, 409, { error: patchVerification.reason })
-    return json(response, 200, { ...launchDescriptor(entry, input.profileId, patchVerification.patch), leaseGeneration: input.generation })
+    const save = await config.saveStore.get(input.profileId, entry.id)
+    return json(response, 200, { ...launchDescriptor(entry, input.profileId, patchVerification.patch), leaseGeneration: input.generation, ...(save?.runtimeStateInvalidatedAtRevision ? { runtimeStateInvalidatedAtRevision: save.runtimeStateInvalidatedAtRevision } : {}) })
   } catch (error) { return json(response, error.code === 'PLAYER_LEASE_INVALID' ? 410 : error.code === 'PLAYER_LEASE_HELD' ? 409 : 400, { error: error.message, code: error.code }) }
 }
 

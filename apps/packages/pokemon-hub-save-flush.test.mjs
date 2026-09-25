@@ -65,7 +65,7 @@ test('commits a materialized save with the fence generation read from the store'
 
   await service.flushSource({ profileId: 'profile-may', sourceKey: 'save:profile-may:emerald' })
 
-  assert.deepEqual(writes, [{ profileId: 'profile-may', gameId: 'emerald', bytes: Buffer.from([2]), revision: 3, options: { fenceGeneration: 8 } }])
+  assert.deepEqual(writes, [{ profileId: 'profile-may', gameId: 'emerald', bytes: Buffer.from([2]), revision: 3, options: { fenceGeneration: 8, invalidateRuntimeStates: true } }])
 })
 
 test('installs the close generation before replacing a save', async () => {
@@ -85,7 +85,7 @@ test('installs the close generation before replacing a save', async () => {
 
   assert.deepEqual(calls, [
     ['fence', 'profile-may', 'emerald', 5],
-    ['put', 'profile-may', 'emerald', 3, { fenceGeneration: 5 }],
+    ['put', 'profile-may', 'emerald', 3, { fenceGeneration: 5, invalidateRuntimeStates: true }],
   ])
 })
 
@@ -155,6 +155,50 @@ test('recovers a durable pending flush after a backend restart', async () => {
   assert.equal(writes.length, 1)
   assert.deepEqual(flushed, [{ profileId: 'profile-may', sourceKey: 'save:profile-may:emerald', sourceRevision: 7, saveRevision: 4 }])
   assert.equal(released.length, 1)
+})
+
+test('invalidates both runtime state slots before acknowledging a changed Hub save', async () => {
+  const calls = []
+  const service = createPokemonHubSaveFlushService({
+    coordinator: {
+      async getSaveFlushPlan() { return { source: { sourceRevision: 7, needsSaveFlush: true }, records: new Map() } },
+      async markSaveFlushed() { calls.push('ack') },
+    },
+    saveStore: {
+      async get() { return { bytes: Buffer.from([1]), revision: 3 } },
+      async put(profileId, gameId, bytes, revision, options) { calls.push(['put', profileId, gameId, options]); return { revision: 4 } },
+    },
+    snapshotStore: { async delete(profileId, gameId, options) { calls.push(['delete', profileId, gameId, options.kind]) } },
+    resolveSaveSource: async () => ({ sourceProfileId: 'actual-source', gameId: 'ruby', adapter: {}, layout: {} }),
+    materialize: () => ({ bytes: Buffer.from([2]), changed: true }),
+  })
+  assert.deepEqual(await service.flushSource({ profileId: 'hub-profile', sourceKey: 'save:actual-source:ruby' }), { status: 'flushed' })
+  assert.deepEqual(calls, [
+    ['put', 'actual-source', 'ruby', { fenceGeneration: 0, invalidateRuntimeStates: true }],
+    ['delete', 'actual-source', 'ruby', 'cloud-recovery'],
+    ['delete', 'actual-source', 'ruby', 'user-state'],
+    'ack',
+  ])
+})
+
+test('snapshot deletion failure leaves the Hub flush unacknowledged for retry', async () => {
+  let attempts = 0
+  const acknowledged = []
+  const service = createPokemonHubSaveFlushService({
+    coordinator: {
+      async getSaveFlushPlan() { return { source: { sourceRevision: 7, needsSaveFlush: true }, records: new Map() } },
+      async markSaveFlushed(value) { acknowledged.push(value) },
+    },
+    saveStore: { async get() { return { bytes: Buffer.from([2]), revision: 4 } }, async put() { throw new Error('unexpected rewrite') } },
+    snapshotStore: { async delete() { if (++attempts === 1) throw new Error('storage unavailable') } },
+    resolveSaveSource: async () => ({ gameId: 'ruby', adapter: {}, layout: {} }),
+    materialize: () => ({ bytes: Buffer.from([2]), changed: false }),
+    onError: () => {},
+  })
+  assert.equal((await service.flushSource({ profileId: 'profile', sourceKey: 'save:profile:ruby' })).status, 'failed')
+  assert.deepEqual(acknowledged, [])
+  assert.equal((await service.flushSource({ profileId: 'profile', sourceKey: 'save:profile:ruby' })).status, 'unchanged')
+  assert.equal(acknowledged.length, 1)
 })
 
 test('passes the Gen III adapter PC to Party converter into the save materializer', async () => {

@@ -60,14 +60,14 @@ test('projects Emerald transfer capabilities from the newest validated save copy
   })
 })
 
-test('does not call a Gen III save trade-ready without two non-Egg party Pokémon', () => {
+test('uses the in-game trade flag even with only one Party Pokémon', () => {
   const bytes = buildGen3Save({ firstIndex: 3, secondIndex: 7 })
   writeCapability(bytes, 0xe000, { smallOffset: 0x1a, magic: 0xda, eventFlagBase: 0x1270, eventWorkBase: 0x139c, ordinaryTradeFlag: 0x861, nationalDexFlag: 0x896, nationalDexWork: { index: 0x46, value: 0x0302 } })
   writePartyCount(bytes, 0xe000, 0x234, 1)
   writePartyRecord(bytes, 0xe000, 0x238, 0, buildPcRecord({ personality: 0, originalTrainerId: 0x56781234, species: 25 }))
   refreshCopyChecksums(bytes, 0xe000)
 
-  assert.equal(pokemonGen3Adapter.inspect(bytes, { id: 'pokemon-emerald-gba', pokemonSaveTitle: 'pokemon-emerald', party: { sectionId: 1, countOffset: 0x234, offset: 0x238, slots: 6, recordBytes: 100 } }).transferCapabilities.ordinaryTradeReady, false)
+  assert.equal(pokemonGen3Adapter.inspect(bytes, { id: 'pokemon-emerald-gba', pokemonSaveTitle: 'pokemon-emerald', party: { sectionId: 1, countOffset: 0x234, offset: 0x238, slots: 6, recordBytes: 100 } }).transferCapabilities.ordinaryTradeReady, true)
 })
 
 test('requires every National Dex signal and reads FireRed Network Machine separately', () => {

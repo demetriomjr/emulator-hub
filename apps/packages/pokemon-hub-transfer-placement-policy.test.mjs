@@ -40,6 +40,54 @@ test('uses the shared Gen III evaluator for a verified save-to-Hub export', () =
   })
 })
 
+test('never permits a PC or Hub Pokemon to enter any Party', () => {
+  const validate = createPokemonHubTransferPlacementPolicy()
+  for (const originLocation of [gameBox, hub]) {
+    for (const sameSource of [true, false]) {
+      const result = validate({
+        origin: { location: originLocation }, destination: { location: gameParty },
+        source: { sourceKey: sameSource ? 'save:may:ruby' : 'save:other:ruby' },
+        destinationSource: { sourceKey: 'save:may:ruby' },
+        record: { display: { species: 25, isEgg: false } },
+      })
+      assert.equal(result.allowed, false)
+      assert.equal(result.reason.code, 'TRANSFER_PARTY_IMPORT_FORBIDDEN')
+    }
+  }
+})
+
+test('allows Party to PC movements subject to the existing transfer rules', () => {
+  const validate = createPokemonHubTransferPlacementPolicy()
+  assert.deepEqual(validate({
+    origin: { location: gameParty }, destination: { location: gameBox },
+    source: { sourceKey: 'save:may:ruby' }, destinationSource: { sourceKey: 'save:may:ruby' },
+    record: { display: { species: 25, isEgg: false } },
+  }), { allowed: true })
+})
+
+test('allows a cross-title PC transfer with one Party Pokemon and one PC Pokemon', () => {
+  const validate = createPokemonHubTransferPlacementPolicy()
+  const result = validate({
+    origin: { location: gameBox }, destination: { location: { ...gameBox, slot: 1 } },
+    source: { sourceKey: 'save:may:ruby', transferCapability: { title: 'pokemon-ruby', ordinaryTradeReady: true, nationalDexUnlocked: false } },
+    destinationSource: { sourceKey: 'save:may:sapphire', transferCapability: { title: 'pokemon-sapphire', ordinaryTradeReady: true, nationalDexUnlocked: false } },
+    sourcePokemonCount: 2,
+    record: { display: { species: 25, isEgg: false } },
+  })
+  assert.deepEqual(result, { allowed: true })
+})
+
+test('allows Party to another save PC while the source retains a Pokemon', () => {
+  const decision = createPokemonHubTransferPlacementPolicy()({
+    origin: { location: gameParty }, destination: { location: gameBox },
+    source: { sourceKey: 'save:may:ruby', transferCapability: { title: 'pokemon-ruby', ordinaryTradeReady: true, nationalDexUnlocked: false } },
+    destinationSource: { sourceKey: 'save:may:sapphire', transferCapability: { title: 'pokemon-sapphire', ordinaryTradeReady: true, nationalDexUnlocked: false } },
+    sourcePokemonCount: 2,
+    record: { display: { species: 25, isEgg: false } },
+  })
+  assert.deepEqual(decision, { allowed: true })
+})
+
 test('creates an immutable first-admission Hub passport from a verified source title', () => {
   const validatePlacementChange = createPokemonHubTransferPlacementPolicy()
   const decision = validatePlacementChange({

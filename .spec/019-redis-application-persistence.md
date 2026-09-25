@@ -47,3 +47,6 @@ The first production startup imports existing local JSON-backed application data
 4. After a Redis restart with its mounted volume intact, durable application records remain available.
 5. Game saves continue to use the local save store unchanged.
 6. Automated tests cover Redis key isolation, profile and Hub-store revision behavior, session TTL behavior, and idempotent legacy import. No project build is run.
+# Startup backup Redis value types (2026-09-25)
+
+The backend's startup archive must read every key in its Redis namespace without assuming a string value. Pokémon Hub lease indexes use sets and sorted sets; calling `GET` on them returns `WRONGTYPE` and prevents the backend from listening. Preserve string records in their existing archive form, and record set members and sorted-set members with scores under explicit type labels. Include all three key types in the memory persistence test double and fail visibly on any unsupported type rather than producing an incomplete backup. A successful archive remains a prerequisite for startup.

@@ -14,6 +14,15 @@ export function createLocalRuntimeRecoveryStore({ storage = createIndexedDbRecov
       if (!record.candidateId) await storage.put(storageKey, normalized)
       return normalized
     },
+    async getForLaunch(profileId, gameId, runtimeStateInvalidatedAtRevision) {
+      const record = await this.get(profileId, gameId)
+      if (!record) return null
+      if (runtimeStateInvalidatedAtRevision && record.runtimeStateInvalidatedAtRevision !== runtimeStateInvalidatedAtRevision) {
+        await this.deleteIfMatches(profileId, gameId, record.candidateId)
+        return null
+      }
+      return record
+    },
     async markRuntimeBreak(profileId, gameId) {
       const record = await storage.get(key(profileId, gameId))
       if (!record) return false
@@ -84,14 +93,15 @@ function transaction(database, mode, operation) {
 
 function normalize(bundle) {
   if (!bundle || typeof bundle !== 'object') throw new TypeError('Recovery bundle is invalid.')
-  const { profileId, gameId, core, romSha256, runtimeId, patchSha256, candidateId, capturedAt } = bundle
+  const { profileId, gameId, core, romSha256, runtimeId, patchSha256, candidateId, capturedAt, runtimeStateInvalidatedAtRevision } = bundle
   if (![profileId, gameId, core, romSha256, runtimeId].every(value => typeof value === 'string' && value.length > 0) || !/^[a-f0-9]{64}$/.test(romSha256)) throw new TypeError('Recovery bundle identity is invalid.')
   if (!(bundle.state instanceof Uint8Array) || bundle.state.byteLength === 0 || bundle.state.byteLength > maximumStateBytes) throw new TypeError('Recovery state is invalid.')
   if (bundle.reason !== undefined && bundle.reason !== 'active' && bundle.reason !== 'runtime-break' && bundle.reason !== 'possible-recovery') throw new TypeError('Recovery reason is invalid.')
   if (candidateId !== undefined && (typeof candidateId !== 'string' || candidateId.length === 0 || candidateId.length > 128)) throw new TypeError('Recovery candidate ID is invalid.')
   if (capturedAt !== undefined && (typeof capturedAt !== 'string' || !Number.isFinite(Date.parse(capturedAt)))) throw new TypeError('Recovery capture time is invalid.')
   if (patchSha256 !== undefined && (typeof patchSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(patchSha256))) throw new TypeError('Recovery patch hash is invalid.')
-  return { profileId, gameId, core, romSha256, runtimeId, ...(patchSha256 ? { patchSha256 } : {}), ...(candidateId ? { candidateId } : {}), ...(capturedAt ? { capturedAt } : {}), state: new Uint8Array(bundle.state), reason: bundle.reason ?? 'active' }
+  if (runtimeStateInvalidatedAtRevision !== undefined && (!Number.isInteger(runtimeStateInvalidatedAtRevision) || runtimeStateInvalidatedAtRevision < 1)) throw new TypeError('Recovery invalidation revision is invalid.')
+  return { profileId, gameId, core, romSha256, runtimeId, ...(patchSha256 ? { patchSha256 } : {}), ...(candidateId ? { candidateId } : {}), ...(capturedAt ? { capturedAt } : {}), ...(runtimeStateInvalidatedAtRevision ? { runtimeStateInvalidatedAtRevision } : {}), state: new Uint8Array(bundle.state), reason: bundle.reason ?? 'active' }
 }
 
 function key(profileId, gameId) { return `${profileId}\u0000${gameId}` }

@@ -6,6 +6,22 @@ import { join } from 'node:path'
 
 import { createSaveStore } from './save-store.mjs'
 
+test('persists a Hub runtime-state invalidation through fence and ordinary save writes', async () => {
+  const dataPath = await mkdtemp(join(tmpdir(), 'emulator-hub-save-store-'))
+  try {
+    const store = createSaveStore({ dataPath })
+    await store.put('may', 'ruby', Buffer.from([1]), null, { fenceGeneration: 1 })
+    const hub = await store.put('may', 'ruby', Buffer.from([2]), 1, { fenceGeneration: 1, invalidateRuntimeStates: true })
+    assert.equal(hub.runtimeStateInvalidatedAtRevision, 2)
+    await store.advanceFence('may', 'ruby', 2)
+    assert.equal((await store.get('may', 'ruby')).runtimeStateInvalidatedAtRevision, 2)
+    await store.put('may', 'ruby', Buffer.from([3]), 2, { fenceGeneration: 2 })
+    assert.equal((await createSaveStore({ dataPath }).get('may', 'ruby')).runtimeStateInvalidatedAtRevision, 2)
+  } finally {
+    await rm(dataPath, { recursive: true, force: true })
+  }
+})
+
 test('rejects a stale fence generation without replacing the save', async () => {
   const dataPath = await mkdtemp(join(tmpdir(), 'emulator-hub-save-store-'))
   try {

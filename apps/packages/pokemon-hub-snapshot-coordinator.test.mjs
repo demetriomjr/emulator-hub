@@ -419,6 +419,36 @@ test('persists a first-admission Hub passport only after the rule policy permits
   assert.deepEqual((await coordinator.getSnapshot({ profileId, sourceKey: hubSource.sourceKey })).pokemonDisplay[pokemonInstanceId].hubPassport, { sourceTitle: 'pokemon-ruby', sourceFamily: 'hoenn-rs' })
 })
 
+test('rejects PC to Party and refuses to empty the last Party slot', async () => {
+  const { coordinator } = await fixture({ validatePlacementChange: createPokemonHubTransferPlacementPolicy() })
+  const box = slot => ({ kind: 'game', area: 'box', box: 0, slot })
+  const source = await coordinator.adopt({
+    profileId, sourceKey: 'save:profile-may:ruby', sourceRevision: 1, adapter: 'gen3-gba-v1',
+    slots: [
+      { location: party(0), record: record(1, { species: 25, isEgg: false }) },
+      { location: party(1), record: null },
+      { location: box(0), record: record(2, { species: 252, isEgg: false }) },
+      { location: box(1), record: null },
+    ],
+  })
+  const lease = await coordinator.acquire({ profileId, sourceKey: source.sourceKey, workspaceId: 'workspace-party-guard' })
+  const submit = (placements, idempotencyKey) => coordinator.sync({
+    profileId, workspaceId: 'workspace-party-guard', clientSequence: 1, idempotencyKey,
+    sources: [{ sourceKey: source.sourceKey, sourceSessionId: lease.sourceSessionId, leaseToken: lease.leaseToken, baseRevision: source.sourceRevision, placements }],
+  })
+  const pcIntoParty = source.placements.map(placement => ({ ...placement }))
+  pcIntoParty[1].pokemonInstanceId = source.placements[2].pokemonInstanceId
+  pcIntoParty[2].pokemonInstanceId = null
+  const corrected = await submit(pcIntoParty, 'pc-into-party')
+  assert.equal(corrected.status, 'corrected')
+  assert.equal(corrected.code, 'TRANSFER_PARTY_IMPORT_FORBIDDEN')
+
+  const emptyParty = source.placements.map(placement => ({ ...placement }))
+  emptyParty[0].pokemonInstanceId = null
+  emptyParty[3].pokemonInstanceId = source.placements[0].pokemonInstanceId
+  await assert.rejects(submit(emptyParty, 'empty-party'), error => error.code === 'SNAPSHOT_INVALID')
+})
+
 test('returns an authoritative correction with a placement-rule reason without changing either source', async () => {
   const reason = { code: 'TRANSFER_NATIONAL_DEX_REQUIRED', message: 'Este save ainda não pode enviar ou receber esse Pokémon sem a Pokédex Nacional.' }
   const { coordinator } = await fixture({ validatePlacementChange: () => ({ allowed: false, reason }) })

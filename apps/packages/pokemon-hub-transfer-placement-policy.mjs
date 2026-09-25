@@ -11,6 +11,9 @@ export function createPokemonHubTransferPlacementPolicy() {
     validatePokemonHubTransferPlacement({ origin, destination, sourceAdapter, destinationAdapter })
     const sourceLocation = origin.location
     const destinationLocation = destination.location
+    if (destinationLocation.kind === 'game' && destinationLocation.area === 'party' && (sourceLocation.kind !== 'game' || sourceLocation.area !== 'party')) {
+      return { allowed: false, reason: { code: 'TRANSFER_PARTY_IMPORT_FORBIDDEN', message: 'Um Pokémon do PC ou do Hub não pode entrar na Party.' } }
+    }
     if (source?.sourceKey && source.sourceKey === destinationSource?.sourceKey) return { allowed: true }
     if (sourceLocation.kind === 'hub' && destinationLocation.kind === 'hub') return { allowed: true }
     const pokemon = pokemonForRules(record)

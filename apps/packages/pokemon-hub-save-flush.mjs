@@ -1,6 +1,6 @@
 import { materializePokemonHubSave } from './pokemon-hub-save-materializer.mjs'
 
-export function createPokemonHubSaveFlushService({ coordinator, saveStore, resolveSaveSource, materialize = materializePokemonHubSave, onError = console.error } = {}) {
+export function createPokemonHubSaveFlushService({ coordinator, saveStore, snapshotStore, resolveSaveSource, materialize = materializePokemonHubSave, onError = console.error } = {}) {
   if (!coordinator || typeof coordinator.getSaveFlushPlan !== 'function' || typeof coordinator.markSaveFlushed !== 'function') throw new TypeError('Pokemon Hub snapshot coordinator is invalid')
   if (!saveStore || typeof saveStore.get !== 'function' || typeof saveStore.put !== 'function') throw new TypeError('Pokemon Hub save store is invalid')
   if (typeof resolveSaveSource !== 'function' || typeof materialize !== 'function') throw new TypeError('Pokemon Hub save flush configuration is invalid')
@@ -68,8 +68,12 @@ export function createPokemonHubSaveFlushService({ coordinator, saveStore, resol
       })
       let saveRevision = stored.revision
       if (materialized.changed) {
-        const saved = await saveStore.put(sourceProfileId, target.gameId, materialized.bytes, stored.revision, { fenceGeneration })
+        const saved = await saveStore.put(sourceProfileId, target.gameId, materialized.bytes, stored.revision, { fenceGeneration, invalidateRuntimeStates: true })
         saveRevision = saved.revision
+      }
+      if (snapshotStore) {
+        await snapshotStore.delete(sourceProfileId, target.gameId, { kind: 'cloud-recovery' })
+        await snapshotStore.delete(sourceProfileId, target.gameId, { kind: 'user-state' })
       }
       await coordinator.markSaveFlushed({ profileId: job.profileId, sourceKey: job.sourceKey, sourceRevision: plan.source.sourceRevision, saveRevision })
       loggedFailures.delete(JSON.stringify([job.profileId, job.sourceKey]))
