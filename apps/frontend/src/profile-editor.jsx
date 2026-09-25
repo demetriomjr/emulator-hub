@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Button, Input, Modal } from 'antd'
 import { getGames, getProfile, getProfiles, updateProfile } from '../../packages/hub-client.js'
+import { formatGameProfileLabel, orderGameProfiles } from '../../packages/save-profile-display.mjs'
 
 export function ProfileEditor({ games, onCatalog, onSaved, onClose }) {
   const [catalog, setCatalog] = useState(games)
@@ -114,7 +115,7 @@ export function ProfileEditor({ games, onCatalog, onSaved, onClose }) {
         {profilesLoading && <p role="status">Carregando perfis...</p>}
         {profilesError && <p role="alert">{profilesError}</p>}
         {selectedGameId && !profilesLoading && !profilesError && profiles.length === 0 && <p>Nenhum perfil neste jogo.</p>}
-        {profiles.map(candidate => <button key={candidate.id} type="button" className={`global-profile-editor-profile${selectedProfileId === candidate.id ? ' is-selected' : ''}`} aria-pressed={selectedProfileId === candidate.id} disabled={saving} onClick={() => selectProfile(candidate.id)}>{candidate.name}</button>)}
+        {orderGameProfiles(profiles).map(candidate => <button key={candidate.id} type="button" className={`global-profile-editor-profile${selectedProfileId === candidate.id ? ' is-selected' : ''}`} aria-pressed={selectedProfileId === candidate.id} disabled={saving} onClick={() => selectProfile(candidate.id)}>{formatGameProfileLabel(candidate, profiles)}</button>)}
       </section>
       <section className="global-profile-editor-column" aria-label="Dados do perfil">
         <h3>Dados do perfil</h3>

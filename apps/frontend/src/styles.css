@@ -95,6 +95,7 @@ button { font: inherit; }
 .profile-edit svg, .profile-delete svg, .profile-add svg, .profile-edit-form svg, .profile-running { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .profile-running { width: 17px; height: 17px; margin-left: auto; color: #72dba9; animation: profile-spin 1.1s linear infinite; }
 .profile-edit-form { display: flex; min-width: 0; flex: 1; min-height: 46px; }
+.profile-display-number { display: flex; align-items: center; padding: 8px 0 8px 12px; color: #e8f5ef; background: #0a191f; }
 .profile-edit-form input { min-width: 0; flex: 1; border: 0; padding: 8px 12px; color: #effff5; background: #0a191f; }
 .profile-edit-form button { display: grid; place-items: center; width: 46px; border: 0; border-left: 1px solid #397c67; color: #e7fff2; background: #1c664e; cursor: pointer; }
 .profile-edit-form button:hover:not(:disabled) { background: #22a367; }

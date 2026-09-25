@@ -7,6 +7,7 @@ import { activeGamepadBindings, readGamepadBinding, readGamepadSnapshot } from '
 import { createGamepadInputGate } from '../../packages/gamepad-input-gate.mjs'
 import { deliverPlayerInteractionLock } from '../../packages/player-interaction-lock-delivery.mjs'
 import { replaceCatalogProfile } from '../../packages/save-profile-catalog.mjs'
+import { formatGameProfileLabel, getGameProfileNumber, orderGameProfiles } from '../../packages/save-profile-display.mjs'
 import { groupGamesByLayout } from '../../packages/hub-layout.mjs'
 import { getProfilePickerPlacement } from '../../packages/profile-picker-placement.mjs'
 import { createHubPerformanceRecorder } from '../../packages/emulator-performance-probe.mjs'
@@ -1387,20 +1388,22 @@ function App() {
           <div className="profile-picker-content">
           <div className="profile-picker-profiles">
           {profiles.length > 0 && <div className="profile-list">
-            {profiles.map(profile => {
+            {orderGameProfiles(profiles).map(profile => {
               const isRunning = activeProfileIds.has(`${profileGame.id}:${profile.id}`)
               const isLeased = isRunning || profile.leaseActive === true
               const isEditing = editingProfileId === profile.id
+              const displayName = formatGameProfileLabel(profile, profiles)
               return <div className="profile-row" key={profile.id}>
               {isEditing
                 ? <form className="profile-edit-form" onSubmit={event => submitProfileEdit(event, profile)}>
+                  <span className="profile-display-number">#{getGameProfileNumber(profile, profiles)}</span>
                   <input aria-label={`Novo nome para ${profile.name}`} value={profileEditName} onChange={event => setProfileEditName(event.target.value)} maxLength="32" required disabled={profileBusy} autoFocus />
                   <button type="submit" aria-label={`Salvar nome de ${profile.name}`} disabled={profileBusy}>
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4L19 6" /></svg>
                   </button>
                 </form>
-                : <button className="profile-select" type="button" aria-label={isLeased ? `${profile.name} em execução` : profile.name} disabled={profileBusy || isLeased} onClick={() => launchWithProfile(profile)}>
-                  <span>{profile.name}</span>
+                : <button className="profile-select" type="button" aria-label={isLeased ? `${displayName} em execução` : displayName} disabled={profileBusy || isLeased} onClick={() => launchWithProfile(profile)}>
+                  <span>{displayName}</span>
                   {isLeased && <svg className="profile-running" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 1-6.4 2.7M4 3v5h5" /></svg>}
                 </button>}
               <button className="profile-edit" type="button" aria-label={`Editar perfil ${profile.name}`} disabled={profileBusy || isEditing || isLeased} onClick={() => startEditingProfile(profile)}>

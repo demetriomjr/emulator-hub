@@ -15,6 +15,7 @@ import { getNextSaveBoxIndex, getPreviousSaveBoxIndex, getSaveBoxSlotPosition, g
 import { getPokemonSlotSprite, hidePokemonSlotSprite } from './pokemon-slot-sprite.mjs'
 import { createGameSessionSourceSnapshot, snapshotToSaveLayout, visiblePokemonHubPanes } from './pokemon-hub-session-view.mjs'
 import { deriveSaveProfileCatalog } from './save-profile-catalog.mjs'
+import { formatGameProfileLabel } from './save-profile-display.mjs'
 import { activePaneSourceKind, addWorkspacePane, choosePaneSource, createPokemonHubWorkspaceState, hasAvailableSaveProfile, isCompletePaneSource, isPaneSourceAvailable, removeWorkspacePane } from './pokemon-hub-workspace.mjs'
 
 export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
@@ -528,6 +529,7 @@ function PokemonHubPaneControls({ side, panes, source, hubProfiles, profilesLoad
   const activeSourceKind = activePaneSourceKind(source, selectionDraft)
   const selectedGameId = selectedSaveSource?.gameId ?? null
   const saveProfiles = selectedGameId ? saveProfilesByGame[selectedGameId] ?? [] : []
+  const allSaveProfiles = saveProfileGames.find(game => game.id === selectedGameId)?.profiles ?? []
   const availableSaveProfileGames = saveProfileGames.filter(game => hasAvailableSaveProfile(panes, side, game.id, saveProfilesByGame[game.id]))
   return <div className="pokemon-pane-controls">
     <div className="pokemon-pane-source-toggle" role="group" aria-label="Tipo de perfil">
@@ -540,7 +542,7 @@ function PokemonHubPaneControls({ side, panes, source, hubProfiles, profilesLoad
         if (!profileId) { setSelectionDraft({ kind: 'game', gameId: selectedGameId }); return }
         setSelectionDraft(null)
         onSourceChange({ kind: 'game', gameId: selectedGameId, profileId })
-      }} options={saveProfiles.filter(profile => isPaneSourceAvailable(panes, side, { kind: 'game', gameId: selectedGameId, profileId: profile.id })).map(profile => ({ value: profile.id, label: profile.name }))} />
+      }} options={saveProfiles.filter(profile => isPaneSourceAvailable(panes, side, { kind: 'game', gameId: selectedGameId, profileId: profile.id })).map(profile => ({ value: profile.id, label: formatGameProfileLabel(profile, allSaveProfiles) }))} />
       {saveProfileGamesError && <p className="pokemon-pane-note" role="alert">{saveProfileGamesError}</p>}
     </>}
     {activeSourceKind === 'hub' && <><Select className="pokemon-pane-profile" classNames={{ popup: { root: 'pokemon-hub-select-popup' } }} aria-label="Perfil do Hub" value={selectedHubSource?.hubProfileId} placeholder={profilesLoading ? 'Carregando perfis…' : 'Escolher perfil…'} loading={profilesLoading} disabled={busy} allowClear onClear={() => setSelectionDraft({ kind: 'hub' })} onChange={value => {
