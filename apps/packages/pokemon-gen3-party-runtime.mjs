@@ -104,7 +104,7 @@ export function materializeGen3PartyRecord({ boxCore, speciesData, growthData, r
   const level = resolveLevel(growthData, parsed.experience)
   const nature = parsed.nature
 
-  const maxHp = calculateHp(baseStats.hp, parsed.ivs.hp, parsed.evs.hp, level)
+  const maxHp = species.fixedHp === 1 ? 1 : calculateHp(baseStats.hp, parsed.ivs.hp, parsed.evs.hp, level)
   const stats = {
     attack: calculateBattleStat(baseStats.attack, parsed.ivs.attack, parsed.evs.attack, level, nature, 'attack'),
     defense: calculateBattleStat(baseStats.defense, parsed.ivs.defense, parsed.evs.defense, level, nature, 'defense'),
@@ -114,7 +114,7 @@ export function materializeGen3PartyRecord({ boxCore, speciesData, growthData, r
   }
 
   const status = uint32(runtime.status ?? 0, 'Party status')
-  const mail = uint8(runtime.mail ?? 0, 'Party mail')
+  const mail = uint8(runtime.mail ?? 0xff, 'Party mail')
   const currentHp = uint16(runtime.currentHp ?? maxHp, 'Party current HP')
   if (currentHp > maxHp) throw runtimeError('GEN3_PARTY_RUNTIME_INVALID', 'Party current HP cannot exceed max HP.')
 

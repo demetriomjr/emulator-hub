@@ -156,3 +156,54 @@ test('recovers a durable pending flush after a backend restart', async () => {
   assert.deepEqual(flushed, [{ profileId: 'profile-may', sourceKey: 'save:profile-may:emerald', sourceRevision: 7, saveRevision: 4 }])
   assert.equal(released.length, 1)
 })
+
+test('passes the Gen III adapter PC to Party converter into the save materializer', async () => {
+  const converted = Buffer.alloc(100, 7)
+  const service = createPokemonHubSaveFlushService({
+    coordinator: {
+      async getSaveFlushPlan() { return { source: { sourceRevision: 7, needsSaveFlush: true }, records: new Map() } },
+      async markSaveFlushed() {},
+    },
+    saveStore: {
+      async get() { return { bytes: Buffer.from([1]), revision: 3 } },
+      async put() { return { revision: 4 } },
+    },
+    resolveSaveSource: async () => ({
+      gameId: 'ruby',
+      adapter: { materializePartyRecord: ({ boxCore, layout }) => {
+        assert.deepEqual(boxCore, Buffer.alloc(80, 5))
+        assert.equal(layout.pokemonSaveTitle, 'pokemon-ruby')
+        return converted
+      } },
+      layout: { pokemonSaveTitle: 'pokemon-ruby' },
+    }),
+    materialize: input => {
+      assert.deepEqual(input.materializePartyRecord({ boxCore: Buffer.alloc(80, 5) }), converted)
+      return { bytes: Buffer.from([2]), changed: true }
+    },
+    onError: () => {},
+  })
+
+  assert.deepEqual(await service.flushSource({ profileId: 'profile', sourceKey: 'save:profile:ruby' }), { status: 'flushed' })
+})
+
+test('logs a persistent failed flush once per source revision with its cause', async () => {
+  const errors = []
+  const unsupported = new Error('Pokemon record has no compatible native representation.')
+  unsupported.code = 'SAVE_MATERIALIZATION_UNSUPPORTED'
+  const service = createPokemonHubSaveFlushService({
+    coordinator: { async getSaveFlushPlan() { return { source: { sourceRevision: 7, needsSaveFlush: true }, records: new Map() } }, async markSaveFlushed() {} },
+    saveStore: { async get() { return { bytes: Buffer.from([1]), revision: 3 } }, async put() { throw new Error('must not write') } },
+    resolveSaveSource: async () => ({ gameId: 'ruby', adapter: {}, layout: {} }),
+    materialize: () => { throw unsupported },
+    onError: (message, details) => errors.push({ message, details }),
+  })
+
+  await service.flushSource({ profileId: 'profile', sourceKey: 'save:profile:ruby' })
+  await service.flushSource({ profileId: 'profile', sourceKey: 'save:profile:ruby' })
+
+  assert.equal(errors.length, 1)
+  assert.equal(errors[0].details.code, 'SAVE_MATERIALIZATION_UNSUPPORTED')
+  assert.equal(errors[0].details.message, unsupported.message)
+  assert.equal(errors[0].details.sourceRevision, 7)
+})

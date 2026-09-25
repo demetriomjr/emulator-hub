@@ -190,7 +190,7 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
           return
         }
       }
-      if (source.area === 'party' && target.area !== 'party' && sourceSnapshot.sourceKey !== targetSnapshot.sourceKey && sourceSnapshot.placements.filter(placement => placement.location.area === 'party' && placement.pokemonInstanceId).length === 1) {
+      if (source.area === 'party' && target.area !== 'party' && sourceSnapshot.placements.filter(placement => placement.location.area === 'party' && placement.pokemonInstanceId).length === 1 && (sourceSnapshot.sourceKey !== targetSnapshot.sourceKey || !targetSnapshot.placements?.[toSlot]?.pokemonInstanceId)) {
         setPokemonHubError('A save Party must keep at least one Pokémon.')
         return
       }

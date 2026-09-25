@@ -5,6 +5,7 @@ import {
   materializeGen3PartyRecord,
   parseGen3BoxCore,
 } from './pokemon-gen3-party-runtime.mjs'
+import { pokemonGen3Adapter } from './pokemon-gen3-adapter.mjs'
 
 const speciesData = {
   speciesId: 25,
@@ -58,7 +59,7 @@ test('materializes a complete 100-byte Party record with calculated runtime data
   assert.deepEqual(record.subarray(0, 80), boxCore)
   assert.equal(record.readUInt32LE(80), 0)
   assert.equal(record[84], 10)
-  assert.equal(record[85], 0)
+  assert.equal(record[85], 0xff)
   assert.equal(record.readUInt16LE(86), 39)
   assert.equal(record.readUInt16LE(88), 39)
   assert.equal(record.readUInt16LE(90), 21)
@@ -104,6 +105,36 @@ test('rejects malformed or incomplete Box-to-Party inputs', () => {
   assert.throws(() => parseGen3BoxCore(Buffer.concat([boxCore.subarray(0, 0x20), Buffer.from([0xff]), boxCore.subarray(0x21)])), /checksum/i)
   assert.throws(() => materializeGen3PartyRecord({ boxCore, speciesData: null, growthData }), /species/i)
   assert.throws(() => materializeGen3PartyRecord({ boxCore, speciesData, growthData: null }), /growth/i)
+})
+
+test('materializes a PC Pokémon for every supported Gen III GBA title', () => {
+  const boxCore = buildBoxCore({ personality: 0, originalTrainerId: 1, species: 25, experience: 1_000 })
+  for (const title of ['pokemon-ruby', 'pokemon-sapphire', 'pokemon-emerald', 'pokemon-firered', 'pokemon-leafgreen']) {
+    const partyRecord = pokemonGen3Adapter.materializePartyRecord({ boxCore, layout: { pokemonSaveTitle: title } })
+    assert.equal(partyRecord.length, 100)
+    assert.deepEqual(partyRecord.subarray(0, 80), boxCore)
+    assert.equal(partyRecord[84], 10)
+    assert.equal(partyRecord.readUInt16LE(88), 27)
+  }
+})
+
+test('uses the save title when deriving Deoxys Party stats', () => {
+  const boxCore = buildBoxCore({ personality: 0, originalTrainerId: 1, species: 410, experience: 1_250 })
+  const expectedSpeed = new Map([
+    ['pokemon-ruby', 35], ['pokemon-sapphire', 35], ['pokemon-emerald', 41],
+    ['pokemon-firered', 35], ['pokemon-leafgreen', 23],
+  ])
+  for (const [title, speed] of expectedSpeed) {
+    const record = pokemonGen3Adapter.materializePartyRecord({ boxCore, layout: { pokemonSaveTitle: title } })
+    assert.equal(record.readUInt16LE(94), speed)
+  }
+})
+
+test('keeps Shedinja at one HP during PC to Party conversion', () => {
+  const boxCore = buildBoxCore({ personality: 0, originalTrainerId: 1, species: 303, experience: 1_000 })
+  const record = pokemonGen3Adapter.materializePartyRecord({ boxCore, layout: { pokemonSaveTitle: 'pokemon-emerald' } })
+  assert.equal(record.readUInt16LE(86), 1)
+  assert.equal(record.readUInt16LE(88), 1)
 })
 
 function buildBoxCore({ personality, originalTrainerId, species, experience, evs = {}, ivs = {} }) {

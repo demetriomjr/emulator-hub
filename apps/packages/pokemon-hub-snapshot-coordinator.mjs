@@ -297,6 +297,7 @@ export function createPokemonHubSnapshotCoordinator({ persistence, eventStore, l
             return correction('SNAPSHOT_STALE', request, sources.length ? sources : await readRequestSources(request), now().getTime())
           }
           assertSameLocations(source.placements, submitted.placements)
+          assertGen3PartyShape(source, submitted)
         }
 
         const duplicate = findDuplicate(request.sources)
@@ -566,6 +567,14 @@ function normalizeLocation(location) {
 function assertSameLocations(expected, actual) {
   const expectedKeys = new Set(expected.map(placement => pokemonHubLocationKey(placement.location)))
   if (expectedKeys.size !== actual.length || actual.some(placement => !expectedKeys.delete(pokemonHubLocationKey(placement.location)))) throw coordinatorError('SNAPSHOT_INVALID', 'Pokemon Hub snapshot locations are invalid.')
+}
+function assertGen3PartyShape(source, submitted) {
+  if (source.adapter !== 'gen3-gba-v1' || !source.sourceKey.startsWith('save:')) return
+  const previous = source.placements.filter(placement => placement.location.area === 'party' && placement.pokemonInstanceId)
+  const occupied = submitted.placements.filter(placement => placement.location.area === 'party' && placement.pokemonInstanceId)
+    .sort((left, right) => left.location.slot - right.location.slot)
+  if (previous.length > 0 && occupied.length === 0) throw coordinatorError('SNAPSHOT_INVALID', 'A save Party must keep at least one Pokemon.')
+  if (occupied.some((placement, index) => placement.location.slot !== index)) throw coordinatorError('SNAPSHOT_INVALID', 'A save Party must be contiguous.')
 }
 function findDuplicate(sources) {
   const seen = new Set()

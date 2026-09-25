@@ -3,6 +3,8 @@ import test from 'node:test'
 
 import { pokemonGen3Adapter } from './pokemon-gen3-adapter.mjs'
 import { selectNewestPokemonGen3SaveCopy } from './pokemon-gen3-save-validation.mjs'
+import { getPokemonSaveLayout } from './pokemon-save-layouts.mjs'
+import { materializePokemonHubSave } from './pokemon-hub-save-materializer.mjs'
 
 test('identifies its adapter ID and rejects non-128KiB saves', () => {
   assert.equal(pokemonGen3Adapter.id, 'gen3-gba-v1')
@@ -331,6 +333,50 @@ test('marks an encrypted Gen III egg in the backend display projection', () => {
 
   const records = pokemonGen3Adapter.readAllSlots(bytes)
   assert.deepEqual(records.find(slot => slot.location.area === 'box' && slot.location.box === 0 && slot.location.slot === 0).record.display, { species: 25, shiny: false, isEgg: true })
+})
+
+test('writes a PC to Party move into valid native saves for all supported Gen III layouts', () => {
+  for (const [title, profileId] of [
+    ['pokemon-ruby', 'pokemon-ruby-sapphire-gba'],
+    ['pokemon-sapphire', 'pokemon-ruby-sapphire-gba'],
+    ['pokemon-emerald', 'pokemon-emerald-gba'],
+    ['pokemon-firered', 'pokemon-firered-leafgreen-gba'],
+    ['pokemon-leafgreen', 'pokemon-firered-leafgreen-gba'],
+  ]) {
+    const layout = getPokemonSaveLayout(profileId, pokemonGen3Adapter.id, title)
+    const bytes = buildGen3Save({ firstIndex: 3, secondIndex: 7 })
+    const survivorCore = buildPcRecord({ personality: 0, originalTrainerId: 1, species: 64, marker: 1_000 })
+    survivorCore.writeUInt16LE(64 + 1_000, 0x1c)
+    const incomingCore = buildPcRecord({ personality: 0, originalTrainerId: 1, species: 25, marker: 1_000 })
+    incomingCore.writeUInt16LE(25 + 1_000, 0x1c)
+    const survivorParty = Buffer.concat([survivorCore, Buffer.alloc(20)])
+    survivorParty[84] = 10
+    survivorParty[85] = 0xff
+    writePartyCount(bytes, 0xe000, layout.party.countOffset, 1)
+    writePartyRecord(bytes, 0xe000, layout.party.offset, 0, survivorParty)
+    writePcRecord(bytes, 0xe000, 0, 0, incomingCore)
+    refreshCopyChecksums(bytes, 0xe000)
+
+    const slots = pokemonGen3Adapter.readAllSlots(bytes, layout)
+    const placements = slots.map(slot => ({ location: slot.location, pokemonInstanceId: slot.location.area === 'party' && slot.location.slot === 0 ? 'survivor' : slot.location.area === 'party' && slot.location.slot === 1 ? 'incoming' : null }))
+    const records = new Map([
+      ['survivor', { representations: [{ adapter: pokemonGen3Adapter.id, kind: 'party-record', bytesBase64: survivorParty.toString('base64') }] }],
+      ['incoming', { representations: [{ adapter: pokemonGen3Adapter.id, kind: 'pc-record', bytesBase64: incomingCore.toString('base64') }] }],
+    ])
+    const materialized = materializePokemonHubSave({
+      adapter: pokemonGen3Adapter, layout, bytes,
+      source: { adapter: pokemonGen3Adapter.id, placements }, records,
+      materializePartyRecord: ({ boxCore }) => pokemonGen3Adapter.materializePartyRecord({ boxCore, layout }),
+    })
+
+    assert.equal(materialized.changed, true, title)
+    const reread = pokemonGen3Adapter.readAllSlots(materialized.bytes, layout)
+    const party = reread.filter(slot => slot.location.area === 'party')
+    assert.deepEqual(party.slice(0, 2).map(slot => slot.record.display.species), [64, 25], title)
+    assert.deepEqual(party[1].record.representation.bytes.subarray(0, 80), incomingCore, title)
+    assert.equal(party[1].record.representation.bytes[85], 0xff, title)
+    assert.equal(reread.find(slot => slot.location.area === 'box' && slot.location.box === 0 && slot.location.slot === 0).record, null, title)
+  }
 })
 
 function buildPcRecord({ personality, originalTrainerId, species, marker = 0, isEgg = false }) {

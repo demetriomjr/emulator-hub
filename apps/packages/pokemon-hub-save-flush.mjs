@@ -4,6 +4,7 @@ export function createPokemonHubSaveFlushService({ coordinator, saveStore, resol
   if (!coordinator || typeof coordinator.getSaveFlushPlan !== 'function' || typeof coordinator.markSaveFlushed !== 'function') throw new TypeError('Pokemon Hub snapshot coordinator is invalid')
   if (!saveStore || typeof saveStore.get !== 'function' || typeof saveStore.put !== 'function') throw new TypeError('Pokemon Hub save store is invalid')
   if (typeof resolveSaveSource !== 'function' || typeof materialize !== 'function') throw new TypeError('Pokemon Hub save flush configuration is invalid')
+  const loggedFailures = new Map()
 
   const api = {
     markDirty() {},
@@ -13,7 +14,10 @@ export function createPokemonHubSaveFlushService({ coordinator, saveStore, resol
     async flushSource({ profileId, sourceKey, generation }) {
       try {
         const plan = await coordinator.getSaveFlushPlan({ profileId, sourceKey })
-        if (plan.source.needsSaveFlush === false) return { status: 'clean' }
+        if (plan.source.needsSaveFlush === false) {
+          loggedFailures.delete(JSON.stringify([profileId, sourceKey]))
+          return { status: 'clean' }
+        }
         return flush({ profileId, sourceKey, generation }, plan)
       } catch (error) {
         safeError(error, { profileId, sourceKey })
@@ -33,7 +37,7 @@ export function createPokemonHubSaveFlushService({ coordinator, saveStore, resol
 
     isDirty() { return false },
 
-    dispose() {},
+    dispose() { loggedFailures.clear() },
   }
   return api
 
@@ -52,22 +56,41 @@ export function createPokemonHubSaveFlushService({ coordinator, saveStore, resol
         fenceGeneration = Math.max(fenceGeneration + 1, job.generation)
         await saveStore.advanceFence(sourceProfileId, target.gameId, fenceGeneration)
       }
-      const materialized = materialize({ adapter: target.adapter, layout: target.layout, bytes: stored.bytes, source: plan.source, records: plan.records })
+      const materialized = materialize({
+        adapter: target.adapter,
+        layout: target.layout,
+        bytes: stored.bytes,
+        source: plan.source,
+        records: plan.records,
+        materializePartyRecord: typeof target.adapter.materializePartyRecord === 'function'
+          ? ({ boxCore, document }) => target.adapter.materializePartyRecord({ boxCore, document, layout: target.layout })
+          : null,
+      })
       let saveRevision = stored.revision
       if (materialized.changed) {
         const saved = await saveStore.put(sourceProfileId, target.gameId, materialized.bytes, stored.revision, { fenceGeneration })
         saveRevision = saved.revision
       }
       await coordinator.markSaveFlushed({ profileId: job.profileId, sourceKey: job.sourceKey, sourceRevision: plan.source.sourceRevision, saveRevision })
+      loggedFailures.delete(JSON.stringify([job.profileId, job.sourceKey]))
       return { status: materialized.changed ? 'flushed' : 'unchanged' }
     } catch (error) {
-      safeError(error, job)
+      safeError(error, { ...job, sourceRevision: existingPlan?.source?.sourceRevision })
       return { status: 'failed', code: error.code ?? 'SAVE_FLUSH_FAILED' }
     }
   }
 
   function safeError(error, job) {
-    onError('[Pokemon Hub] save flush failed', { code: error?.code ?? 'SAVE_FLUSH_FAILED', ...(job ? { profileId: job.profileId, sourceKey: job.sourceKey } : {}) })
+    const details = {
+      code: error?.code ?? 'SAVE_FLUSH_FAILED',
+      message: error?.message ?? 'Pokemon Hub save flush failed.',
+      ...(job ? { profileId: job.profileId, sourceKey: job.sourceKey, ...(job.sourceRevision === undefined ? {} : { sourceRevision: job.sourceRevision }) } : {}),
+    }
+    const key = JSON.stringify([job?.profileId, job?.sourceKey])
+    const signature = JSON.stringify([details.sourceRevision, details.code, details.message])
+    if (loggedFailures.get(key) === signature) return
+    loggedFailures.set(key, signature)
+    onError('[Pokemon Hub] save flush failed', details)
   }
 }
 

@@ -1,9 +1,20 @@
 import { getGen3NationalDex } from './pokemon-gen3-species.mjs'
+import { getGen3PartySpeciesData, getGen3LevelFromExperience } from './pokemon-gen3-party-data.mjs'
+import { materializeGen3PartyRecord, parseGen3BoxCore } from './pokemon-gen3-party-runtime.mjs'
 import { selectNewestPokemonGen3SaveCopy } from './pokemon-gen3-save-validation.mjs'
 import transferCapabilityProfiles from './pokemon-gen3-save-capabilities.json' with { type: 'json' }
 
 export const pokemonGen3Adapter = Object.freeze({
   id: 'gen3-gba-v1',
+  materializePartyRecord({ boxCore, layout }) {
+    const parsed = parseGen3BoxCore(boxCore)
+    const speciesData = getGen3PartySpeciesData(parsed.species, layout?.pokemonSaveTitle)
+    return materializeGen3PartyRecord({
+      boxCore,
+      speciesData,
+      growthData: { levelFromExperience: experience => getGen3LevelFromExperience(speciesData.growthRate, experience) },
+    })
+  },
   inspect(saveBytes, layout = null) {
     const newest = selectNewestCopy(saveBytes)
     return {

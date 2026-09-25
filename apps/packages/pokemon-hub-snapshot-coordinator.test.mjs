@@ -112,7 +112,7 @@ test('persists a pending save flush until the materialized revision is acknowled
     adapter: 'gen3-gba-v1',
     slots: [
       { location: party(0), record: record(7, { species: 289, shiny: false }) },
-      { location: party(1), record: null },
+      { location: party(1), record: record(8, { species: 25, shiny: false }) },
     ],
   })
   const lease = await coordinator.acquire({ profileId, sourceKey: source.sourceKey, workspaceId: 'browser-session-a' })
@@ -129,7 +129,7 @@ test('persists a pending save flush until the materialized revision is acknowled
       leaseToken: lease.leaseToken,
       baseRevision: source.sourceRevision,
       placements: [
-        { location: party(0), pokemonInstanceId: null },
+        { location: party(0), pokemonInstanceId: lease.placements[1].pokemonInstanceId },
         { location: party(1), pokemonInstanceId },
       ],
     }],
@@ -191,7 +191,10 @@ test('accepts a complete two-source placement snapshot and emits one movement ev
   const { coordinator, events } = await fixture()
   const source = await coordinator.adopt({
     profileId, sourceKey: 'save:profile-may:emerald', sourceRevision: 4, adapter: 'gen3-gba-v1',
-    slots: [{ location: party(0), record: record(7, { species: 289, shiny: false }) }],
+    slots: [
+      { location: party(0), record: record(7, { species: 289, shiny: false }) },
+      { location: party(1), record: record(9, { species: 25, shiny: false }) },
+    ],
   })
   const destination = await coordinator.adopt({
     profileId, sourceKey: 'save:profile-may:ruby', sourceRevision: 8, adapter: 'gen3-gba-v1',
@@ -209,7 +212,7 @@ test('accepts a complete two-source placement snapshot and emits one movement ev
     clientSequence: 1,
     idempotencyKey: 'sync-1',
     sources: [
-      { sourceKey: source.sourceKey, sourceSessionId: sourceLease.sourceSessionId, leaseToken: sourceLease.leaseToken, baseRevision: 4, placements: [{ location: party(0), pokemonInstanceId: null }] },
+      { sourceKey: source.sourceKey, sourceSessionId: sourceLease.sourceSessionId, leaseToken: sourceLease.leaseToken, baseRevision: 4, placements: [{ location: party(0), pokemonInstanceId: source.placements[1].pokemonInstanceId }, { location: party(1), pokemonInstanceId: null }] },
       { sourceKey: destination.sourceKey, sourceSessionId: destinationLease.sourceSessionId, leaseToken: destinationLease.leaseToken, baseRevision: 8, placements: [{ location: party(0), pokemonInstanceId }] },
     ],
   })
@@ -327,6 +330,37 @@ test('validates a synchronized workspace through its lease index without scannin
   assert.equal(accepted.status, 'accepted')
 })
 
+test('rejects a save candidate that empties its Party before it becomes dirty', async () => {
+  const { coordinator } = await fixture()
+  const boxLocation = { kind: 'game', area: 'box', box: 0, slot: 0 }
+  const source = await coordinator.adopt({ profileId, sourceKey: 'save:profile-may:ruby', sourceRevision: 1, adapter: 'gen3-gba-v1', slots: [
+    { location: party(0), record: { representation: { adapter: 'gen3-gba-v1', kind: 'party-record', bytes: Buffer.alloc(100, 7) }, display: { species: 25 } } },
+    { location: boxLocation, record: null },
+  ] })
+  const lease = await coordinator.acquire({ profileId, sourceKey: source.sourceKey, workspaceId: 'workspace-a' })
+  const candidate = { sourceKey: source.sourceKey, sourceSessionId: lease.sourceSessionId, leaseToken: lease.leaseToken, baseRevision: source.sourceRevision, placements: [
+    { location: party(0), pokemonInstanceId: null },
+    { location: boxLocation, pokemonInstanceId: source.placements[0].pokemonInstanceId },
+  ] }
+
+  await assert.rejects(coordinator.sync({ profileId, workspaceId: 'workspace-a', clientSequence: 1, idempotencyKey: 'empty-party', sources: [candidate] }), { code: 'SNAPSHOT_INVALID' })
+  assert.equal((await coordinator.getSnapshot({ profileId, sourceKey: source.sourceKey })).needsSaveFlush, false)
+})
+
+test('rejects a save candidate with a gap before an occupied Party slot', async () => {
+  const { coordinator } = await fixture()
+  const source = await coordinator.adopt({ profileId, sourceKey: 'save:profile-may:ruby', sourceRevision: 1, adapter: 'gen3-gba-v1', slots: [
+    { location: party(0), record: { representation: { adapter: 'gen3-gba-v1', kind: 'party-record', bytes: Buffer.alloc(100, 7) }, display: { species: 25 } } },
+    { location: party(1), record: null },
+  ] })
+  const lease = await coordinator.acquire({ profileId, sourceKey: source.sourceKey, workspaceId: 'workspace-a' })
+
+  await assert.rejects(coordinator.sync({ profileId, workspaceId: 'workspace-a', clientSequence: 1, idempotencyKey: 'party-gap', sources: [{
+    sourceKey: source.sourceKey, sourceSessionId: lease.sourceSessionId, leaseToken: lease.leaseToken, baseRevision: source.sourceRevision,
+    placements: [{ location: party(0), pokemonInstanceId: null }, { location: party(1), pokemonInstanceId: source.placements[0].pokemonInstanceId }],
+  }] }), { code: 'SNAPSHOT_INVALID' })
+})
+
 test('returns a corrected snapshot rather than accepting a duplicated instance', async () => {
   const { coordinator } = await fixture()
   const source = await coordinator.adopt({ profileId, sourceKey: 'save:profile-may:emerald', sourceRevision: 4, adapter: 'gen3-gba-v1', slots: [{ location: party(0), record: record(7, { species: 289, shiny: false }) }] })
@@ -388,7 +422,7 @@ test('persists a first-admission Hub passport only after the rule policy permits
 test('returns an authoritative correction with a placement-rule reason without changing either source', async () => {
   const reason = { code: 'TRANSFER_NATIONAL_DEX_REQUIRED', message: 'Este save ainda não pode enviar ou receber esse Pokémon sem a Pokédex Nacional.' }
   const { coordinator } = await fixture({ validatePlacementChange: () => ({ allowed: false, reason }) })
-  const source = await coordinator.adopt({ profileId, sourceKey: 'save:profile-may:emerald', sourceRevision: 4, adapter: 'gen3-gba-v1', slots: [{ location: party(0), record: record(7, { species: 289, shiny: false }) }] })
+  const source = await coordinator.adopt({ profileId, sourceKey: 'save:profile-may:emerald', sourceRevision: 4, adapter: 'gen3-gba-v1', slots: [{ location: party(0), record: record(7, { species: 289, shiny: false }) }, { location: party(1), record: record(9, { species: 25, shiny: false }) }] })
   const destination = await coordinator.adopt({ profileId, sourceKey: 'save:profile-may:firered', sourceRevision: 8, adapter: 'gen3-gba-v1', slots: [{ location: party(0), record: null }] })
   const [sourceLease, destinationLease] = await Promise.all([
     coordinator.acquire({ profileId, sourceKey: source.sourceKey, workspaceId: 'workspace-a' }),
@@ -398,7 +432,7 @@ test('returns an authoritative correction with a placement-rule reason without c
   const corrected = await coordinator.sync({
     profileId, workspaceId: 'workspace-a', clientSequence: 1, idempotencyKey: 'blocked-by-rule',
     sources: [
-      { sourceKey: source.sourceKey, sourceSessionId: sourceLease.sourceSessionId, leaseToken: sourceLease.leaseToken, baseRevision: source.sourceRevision, placements: [{ location: party(0), pokemonInstanceId: null }] },
+      { sourceKey: source.sourceKey, sourceSessionId: sourceLease.sourceSessionId, leaseToken: sourceLease.leaseToken, baseRevision: source.sourceRevision, placements: [{ location: party(0), pokemonInstanceId: source.placements[1].pokemonInstanceId }, { location: party(1), pokemonInstanceId: null }] },
       { sourceKey: destination.sourceKey, sourceSessionId: destinationLease.sourceSessionId, leaseToken: destinationLease.leaseToken, baseRevision: destination.sourceRevision, placements: [{ location: party(0), pokemonInstanceId: source.placements[0].pokemonInstanceId }] },
     ],
   })
@@ -580,7 +614,7 @@ test('rejects a change the save materialization policy cannot write before accep
       }
     },
   })
-  const source = await coordinator.adopt({ profileId, sourceKey: 'save:profile-may:emerald', sourceRevision: 4, adapter: 'gen3-gba-v1', slots: [{ location: party(0), record: record(7, { species: 289, shiny: false }) }] })
+  const source = await coordinator.adopt({ profileId, sourceKey: 'save:profile-may:emerald', sourceRevision: 4, adapter: 'gen3-gba-v1', slots: [{ location: party(0), record: record(7, { species: 289, shiny: false }) }, { location: party(1), record: record(9, { species: 25, shiny: false }) }] })
   const destination = await coordinator.adopt({ profileId, sourceKey: 'save:profile-may:ruby', sourceRevision: 8, adapter: 'gen3-gba-v1', slots: [{ location: party(0), record: null }] })
   const [sourceLease, destinationLease] = await Promise.all([
     coordinator.acquire({ profileId, sourceKey: source.sourceKey, workspaceId: 'workspace-a' }),
@@ -590,7 +624,7 @@ test('rejects a change the save materialization policy cannot write before accep
   await assert.rejects(() => coordinator.sync({
     profileId, workspaceId: 'workspace-a', clientSequence: 1, idempotencyKey: 'sync-party-change',
     sources: [
-      { sourceKey: source.sourceKey, sourceSessionId: sourceLease.sourceSessionId, leaseToken: sourceLease.leaseToken, baseRevision: 4, placements: [{ location: party(0), pokemonInstanceId: null }] },
+      { sourceKey: source.sourceKey, sourceSessionId: sourceLease.sourceSessionId, leaseToken: sourceLease.leaseToken, baseRevision: 4, placements: [{ location: party(0), pokemonInstanceId: source.placements[1].pokemonInstanceId }, { location: party(1), pokemonInstanceId: null }] },
       { sourceKey: destination.sourceKey, sourceSessionId: destinationLease.sourceSessionId, leaseToken: destinationLease.leaseToken, baseRevision: 8, placements: [{ location: party(0), pokemonInstanceId: source.placements[0].pokemonInstanceId }] },
     ],
   }), error => error.code === 'SAVE_MATERIALIZATION_UNSUPPORTED')
