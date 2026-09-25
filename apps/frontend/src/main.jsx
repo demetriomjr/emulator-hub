@@ -296,6 +296,7 @@ function App() {
     if (closeLockRef.current !== locked) closeLockRevisionRef.current += 1
     closeLockRef.current = locked
     if (locked) awaitGamepadNeutralRef.current = true
+    else if (activeSessionsRef.current.length === 0) awaitGamepadNeutralRef.current = false
     for (const frame of document.querySelectorAll('.player-grid iframe')) {
       sendPlayerInteractionLock(frame, locked)
       if (locked) configurePlayerFrame(frame, { type: 'emulator-hub:gamepad', bindings: [] })

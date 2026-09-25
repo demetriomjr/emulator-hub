@@ -9,6 +9,10 @@ const pollStart = hub.indexOf('    const poll = () => {', hub.indexOf('const tri
 const pollEnd = hub.indexOf('    poll()', pollStart)
 assert.ok(pollStart > 0 && pollEnd > pollStart)
 const pollSource = `${hub.slice(pollStart, pollEnd)}\npoll`
+const lockStart = hub.indexOf('  function setPlayerInteractionLocked(')
+const lockEnd = hub.indexOf('  function sendPlayerInteractionLock(', lockStart)
+assert.ok(lockStart > 0 && lockEnd > lockStart)
+const lockSource = `${hub.slice(lockStart, lockEnd)}\nsetPlayerInteractionLocked`
 
 test('gamepad input keeps reaching players while the Hub document is hidden', () => {
   const sent = []
@@ -66,6 +70,36 @@ test('close lock releases gamepad input and waits for neutral before accepting h
   buttons = ['BUTTON_1']
   poll()
   assert.deepEqual(sent, [[], [], [], ['BUTTON_1']])
+})
+
+test('closing the last session clears the neutral wait before a new game starts', () => {
+  const closeLockRef = { current: false }
+  const awaitGamepadNeutralRef = { current: false }
+  const activeSessionsRef = { current: [{ sessionId: 'old' }] }
+  const lock = runInNewContext(lockSource, {
+    closeLockRef, closeLockRevisionRef: { current: 0 }, awaitGamepadNeutralRef,
+    activeSessionsRef, document: { querySelectorAll: () => [] },
+  })
+  lock(true)
+  lock(false)
+  assert.equal(awaitGamepadNeutralRef.current, true)
+  lock(true)
+  activeSessionsRef.current = []
+  lock(false)
+
+  const sent = []
+  const poll = runInNewContext(pollSource, {
+    hubPerformance: null,
+    controlPanelOpen: false, profileGame: null, instancePicker: false,
+    closeLockRef, awaitGamepadNeutralRef,
+    readGamepadSnapshot: () => ['BUTTON_1'],
+    activeGamepadBindings: snapshot => snapshot,
+    triggerActions: { update() {} },
+    l2TriggerAction: null, r2TriggerAction: null, triggerBindings: {},
+    broadcast: bindings => sent.push([...bindings]),
+  })
+  poll()
+  assert.deepEqual(sent, [['BUTTON_1']])
 })
 
 test('L2 and R2 emulator actions stay blocked through close modal and save overlay', () => {
