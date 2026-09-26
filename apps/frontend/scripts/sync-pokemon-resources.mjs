@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import sharp from 'sharp'
 
 import { getPokemonResourceCatalogStatus, syncPokemonResources } from '../../packages/pokemon-resource-sync.mjs'
 
@@ -64,7 +65,7 @@ if (background) {
   }
 } else {
   try {
-    const result = await syncPokemonResources({ targetDirectory, loadRecords, download, refresh })
+    const result = await syncPokemonResources({ targetDirectory, loadRecords, download, imageProcessor: sharp, refresh })
     console.log(`Pokemon resources: ${result.status} (${result.count} entries)`)
   } catch (error) {
     console.error(error instanceof Error ? error.message : error)

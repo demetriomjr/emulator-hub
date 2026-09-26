@@ -5,6 +5,7 @@ import { lstat, readFile } from 'node:fs/promises'
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import { createClient } from 'redis'
 import { backendListenConfiguration } from './runtime-configuration.mjs'
 import { createGameMetadataLoader } from '../packages/game-metadata.mjs'
 import { createGameCatalogResponse } from '../packages/game-catalog-contract.mjs'
@@ -2105,5 +2106,6 @@ function redisConfiguration(options = {}) {
   return {
     url: options.redisUrl ?? process.env.REDIS_URL,
     namespace: options.redisNamespace ?? process.env.REDIS_NAMESPACE,
+    createClient,
   }
 }

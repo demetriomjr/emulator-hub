@@ -8,5 +8,11 @@
     "dev": "node --env-file-if-exists=.env dev.mjs",
     "test": "node --test --test-isolation=none test/*.test.mjs",
     "migrate:redis": "node --env-file-if-exists=.env migrate-redis.mjs"
+  },
+  "dependencies": {
+    "redis": "^5.12.1"
+  },
+  "devDependencies": {
+    "cluster-key-slot": "^1.1.2"
   }
 }

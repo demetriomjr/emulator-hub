@@ -1,9 +1,5 @@
 FROM node:26-alpine AS build
 
-WORKDIR /app/apps
-COPY apps/package.json apps/package-lock.json ./
-RUN npm ci --omit=dev
-
 WORKDIR /app/apps/frontend
 COPY apps/frontend/package.json apps/frontend/package-lock.json ./
 RUN npm ci

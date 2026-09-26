@@ -38,30 +38,30 @@ hostname and TLS; this project does not bind ports 80 or 443.
 
 ## Separate browser origins for concurrent players
 
-EmulatorJS executes in each visitor's browser. Giving up to six player iframes
+EmulatorJS executes in each visitor's browser. Giving up to nine player iframes
 distinct origins lets compatible Chromium browsers schedule them separately.
 This changes browser execution, not the number of frontend or backend Docker
 containers. The Hub page and all players still use the same frontend image.
 
 The default deployment leaves `PLAYER_ORIGIN_PORTS` empty and serves players
-on the Hub origin. To enable six player origins:
+on the Hub origin. To enable nine player origins:
 
-1. Choose **six distinct, unused external TCP ports**. They must differ from
+1. Choose **nine distinct, unused external TCP ports**. They must differ from
    the Hub's own HTTPS port and be reachable from each visitor's browser.
    Check host listeners, existing Docker publications, provider firewall rules,
    and any private network policy. Ports inside Docker alone are insufficient.
 2. Set `PLAYER_ORIGIN_PORTS` in `deploy/.env` to the comma-separated ports,
-   for example `8444,8445,8446,8447,8448,8449`. The frontend Docker build
+   for example `8444,8445,8446,8447,8448,8449,8450,8451,8452`. The frontend Docker build
    receives this value through a build argument. Rebuild that image after
    changing the list; restarting the existing image cannot change it.
-3. If Caddy is containerized, add the same six TCP port publications to **the
-   Caddy service's** Compose file. Add six Caddy site addresses on the existing
+3. If Caddy is containerized, add the same nine TCP port publications to **the
+   Caddy service's** Compose file. Add nine Caddy site addresses on the existing
    Hub hostname, one per port, each `reverse_proxy`ing to the same frontend
    service on their shared Docker network. The script below prints both
    fragments using your hostname and upstream:
 
    ```sh
-   node deploy/print-player-caddy.mjs hub.example.com 8444,8445,8446,8447,8448,8449 frontend:8080
+   node deploy/print-player-caddy.mjs hub.example.com 8444,8445,8446,8447,8448,8449,8450,8451,8452 frontend:8080
    ```
 
    If Caddy runs directly on the host, use the frontend's published upstream,
@@ -86,8 +86,8 @@ The Nginx document-isolation header applies only to `/player.html`. Browsers
 without effective isolation use the ordinary EmulatorJS core. An empty or
 invalid port configuration uses the Hub origin so game launch remains available.
 
-In development, `npm run dev` starts six loopback proxies automatically on the
-Vite port plus one through plus six, or the six ports in
+In development, `npm run dev` starts nine loopback proxies automatically on the
+Vite port plus one through plus nine, or the nine ports in
 `apps/frontend/.env` under `PLAYER_ORIGIN_PORTS`. It passes the available
 ports to Vite without a query parameter. If those local ports cannot be
 reserved, it logs one warning and uses same-origin players for that run.

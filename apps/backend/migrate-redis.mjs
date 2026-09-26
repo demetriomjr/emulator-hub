@@ -1,10 +1,11 @@
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createClient } from 'redis'
 import { createRedisPersistence } from '../packages/redis-persistence.mjs'
 import { migrateLegacyJsonData } from '../packages/redis-legacy-migration.mjs'
 
 const backendDirectory = dirname(fileURLToPath(import.meta.url))
-const persistence = createRedisPersistence({ url: process.env.REDIS_URL, namespace: process.env.REDIS_NAMESPACE })
+const persistence = createRedisPersistence({ url: process.env.REDIS_URL, namespace: process.env.REDIS_NAMESPACE, createClient })
 
 try {
   await persistence.connect()

@@ -71,7 +71,7 @@ const playerActionFailureMessages = Object.freeze({
   'game-save-load': 'Não foi possível carregar o save do jogo.',
   'game-save-missing': 'O save do jogo esperado para este perfil não foi encontrado.',
 })
-const MAX_PLAYER_INSTANCES = 6
+const MAX_PLAYER_INSTANCES = 9
 let playerOriginPorts = []
 try { playerOriginPorts = parsePlayerOriginPorts(window.location, import.meta.env.VITE_PLAYER_PORTS) }
 catch (error) { console.warn('[player-origins] Invalid port configuration; using the Hub origin', { error: error.message }) }

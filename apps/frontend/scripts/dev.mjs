@@ -10,9 +10,9 @@ const host = environment.HOST ?? '127.0.0.1'
 let servers = []
 let ports = []
 
-if (['127.0.0.1', 'localhost'].includes(host) && Number.isInteger(hubPort) && hubPort > 0 && hubPort <= 65529) {
+if (['127.0.0.1', 'localhost'].includes(host) && Number.isInteger(hubPort) && hubPort > 0 && hubPort <= 65526) {
   try {
-    const configured = environment.PLAYER_ORIGIN_PORTS || Array.from({ length: 6 }, (_, slot) => hubPort + slot + 1).join(',')
+    const configured = environment.PLAYER_ORIGIN_PORTS || Array.from({ length: 9 }, (_, slot) => hubPort + slot + 1).join(',')
     ports = parsePlayerOriginPorts(new URL(`http://localhost:${hubPort}/`), configured)
     servers = await startPlayerOriginProxies({ targetOrigin: `http://127.0.0.1:${hubPort}`, ports })
     console.info(`[player-origins] Local players on ports ${ports.join(', ')}`)

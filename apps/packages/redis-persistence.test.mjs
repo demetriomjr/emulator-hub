@@ -3,6 +3,18 @@ import test from 'node:test'
 
 import { createRedisPersistence } from './redis-persistence.mjs'
 
+test('uses the application supplied Redis client factory', async () => {
+  const urls = []
+  const client = { on() {}, async connect() {}, async get() { return 'saved' } }
+  const persistence = createRedisPersistence({
+    url: 'redis://example.test:6379',
+    createClient({ url }) { urls.push(url); return client },
+  })
+
+  assert.equal(await persistence.get('profile'), 'saved')
+  assert.deepEqual(urls, ['redis://example.test:6379'])
+})
+
 test('uses direct Redis set operations for workspace lease indexes', async () => {
   const calls = []
   const client = {

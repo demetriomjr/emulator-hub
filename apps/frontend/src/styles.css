@@ -252,11 +252,13 @@ button { font: inherit; }
 .player-panel-2 { aspect-ratio: 3 / 1; }
 .player-panel-5 { aspect-ratio: 9 / 4; }
 .player-panel-6 { aspect-ratio: 9 / 4; }
+.player-panel-7, .player-panel-8, .player-panel-9 { aspect-ratio: 3 / 2; }
 .player-grid { display: grid; width: 100%; height: 100%; grid-template-columns: 1fr; overflow: hidden; }
 .player-panel-2 .player-grid, .player-panel-3 .player-grid, .player-panel-4 .player-grid { grid-template-columns: repeat(2, 1fr); }
 .player-panel-3 .player-grid, .player-panel-4 .player-grid { grid-template-rows: repeat(2, 1fr); }
 .player-panel-5 .player-grid { grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(2, 1fr); }
 .player-panel-6 .player-grid { grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(2, 1fr); }
+.player-panel-7 .player-grid, .player-panel-8 .player-grid, .player-panel-9 .player-grid { grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); }
 .player-cell { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #000; }
 .player-action-errors { position: absolute; z-index: 4; right: 8px; bottom: 8px; left: 8px; display: grid; gap: 4px; padding: 8px 10px; border: 1px solid #b9787e; border-radius: 8px; color: #ffe5e7; background: #532d32f2; font-size: 12px; pointer-events: none; }
 .player-action-errors p { margin: 0; }

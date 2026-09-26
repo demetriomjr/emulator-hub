@@ -1,5 +1,7 @@
 # Specifications
 
+- [Spec 073 - Nine-instance player surface and isolated origins](073-nine-instance-player.md): expand the player limit, 3 × 3 layout, development and production origin topology, and automatic full-capacity diagnostics.
+
 - [Spec 068 — Repeated profile names and controller unlock](068-profile-names-and-gamepad-unlock.md): allow repeated display names, preserve creation order, and repair controller input after lock and reopen.
 - [Spec 067 — Global profile editor](067-global-profile-editor.md): browse games and profiles in a three-column modal and edit profile metadata immediately.
 - [Spec 066 — Running profile information editor](066-running-profile-info-editor.md): edit the focused emulator's profile name during play and persist it immediately without changing the close payload.

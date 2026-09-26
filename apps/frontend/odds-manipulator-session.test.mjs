@@ -17,9 +17,10 @@ function launchHarness(existingSessions, purpose) {
     profileGame: { id: 'game-2' },
     fastForwardEnabled: false, fastForwardSpeed: 1.5, muted: false,
     playerOriginPorts: [],
-    MAX_PLAYER_INSTANCES: 6,
+    MAX_PLAYER_INSTANCES: 9,
     crypto: { randomUUID: () => 'session-2' },
     async acquirePlayerLease() { return { leaseGeneration: 1 } },
+    localRecoveryStore: { async getForLaunch() { return null } },
     disableOddsManipulator() { actions.push('disable-odds') },
     setError() {}, setProfileError() {}, setProfileBusy() {},
     setProfileGame(value) { pickerUpdates.push(['game', value]) },
@@ -97,16 +98,21 @@ test('closing the whole wrapper clears the odds toggle before a later first laun
   assert.deepEqual(actions, [['sessions', 0], ['odds', false]])
 })
 
-test('add-player picker stays open after a successful launch until the sixth instance', async () => {
+test('add-player picker stays open after a successful launch until the ninth instance', async () => {
   const second = launchHarness([{ sessionId: 'session-1' }], 'add-instance')
   await second.launch({ id: 'profile-2', oddsResetCount: 0 }, false)
   assert.equal(second.context.activeSessions.length, 2)
   assert.deepEqual(second.pickerUpdates, [])
 
-  const sixth = launchHarness(Array.from({ length: 5 }, (_, index) => ({ sessionId: `session-${index}` })), 'add-instance')
-  await sixth.launch({ id: 'profile-6', oddsResetCount: 0 }, false)
-  assert.equal(sixth.context.activeSessions.length, 6)
-  assert.deepEqual(sixth.pickerUpdates, [['game', null], ['picker', false], ['placement', null]])
+  const eighth = launchHarness(Array.from({ length: 7 }, (_, index) => ({ sessionId: `session-${index}` })), 'add-instance')
+  await eighth.launch({ id: 'profile-8', oddsResetCount: 0 }, false)
+  assert.equal(eighth.context.activeSessions.length, 8)
+  assert.deepEqual(eighth.pickerUpdates, [])
+
+  const ninth = launchHarness(Array.from({ length: 8 }, (_, index) => ({ sessionId: `session-${index}` })), 'add-instance')
+  await ninth.launch({ id: 'profile-9', oddsResetCount: 0 }, false)
+  assert.equal(ninth.context.activeSessions.length, 9)
+  assert.deepEqual(ninth.pickerUpdates, [['game', null], ['picker', false], ['placement', null]])
 })
 
 test('controller resets advance the current session after React replaces its state object', async () => {

@@ -25,16 +25,16 @@ test('player origin proxy serves the same document and forwards cookies', async 
   }
 })
 
-test('development starts six independent player listeners for the same upstream', async () => {
+test('development starts nine independent player listeners for the same upstream', async () => {
   const upstream = createServer((_request, response) => { response.end('shared frontend') })
   await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve))
   let servers = []
   try {
-    servers = await startPlayerOriginProxies({ targetOrigin: `http://127.0.0.1:${upstream.address().port}`, ports: [0, 0, 0, 0, 0, 0] })
+    servers = await startPlayerOriginProxies({ targetOrigin: `http://127.0.0.1:${upstream.address().port}`, ports: Array(9).fill(0) })
     const ports = servers.map(server => server.address().port)
-    assert.equal(new Set(ports).size, 6)
+    assert.equal(new Set(ports).size, 9)
     const bodies = await Promise.all(ports.map(async port => (await fetch(`http://127.0.0.1:${port}/player.html`)).text()))
-    assert.deepEqual(bodies, Array(6).fill('shared frontend'))
+    assert.deepEqual(bodies, Array(9).fill('shared frontend'))
   } finally {
     await closePlayerOriginProxies(servers)
     await new Promise(resolve => upstream.close(resolve))

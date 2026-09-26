@@ -1,11 +1,10 @@
-import { createClient } from 'redis'
-
 const defaultNamespace = 'emulator-hub:v1'
 
-export function createRedisPersistence({ url, namespace = defaultNamespace, client } = {}) {
+export function createRedisPersistence({ url, namespace = defaultNamespace, client, createClient } = {}) {
   if (typeof url !== 'string' || !url) throw persistenceError('REDIS_URL_MISSING', 'REDIS_URL must be configured.')
   if (typeof namespace !== 'string' || !/^[a-z0-9][a-z0-9:_-]*$/i.test(namespace)) throw persistenceError('REDIS_NAMESPACE_INVALID', 'REDIS_NAMESPACE is invalid.')
 
+  if (!client && typeof createClient !== 'function') throw new TypeError('Redis client factory is required.')
   const redis = client ?? createClient({ url })
   let connection
   redis.on?.('error', () => {})

@@ -6,7 +6,7 @@ import clusterKeySlot from 'cluster-key-slot'
 import {
   pokemonHubRedisKeys,
   profileHashTag,
-} from './pokemon-hub-redis-keys.mjs'
+} from '../../packages/pokemon-hub-redis-keys.mjs'
 
 const profileId = 'profile/with:reserved characters'
 

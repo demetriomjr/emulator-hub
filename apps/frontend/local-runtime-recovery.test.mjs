@@ -15,7 +15,7 @@ test('captures local recovery immediately and every 10 seconds, preserving it on
 
 test('offers a matching recovery candidate inside a scoped emulator session', async () => {
   const hub = await readFile(new URL('./src/main.jsx', import.meta.url), 'utf8')
-  assert.match(hub, /localRecoveryStore\.get\(profile\.id, game\.id\)/)
+  assert.match(hub, /localRecoveryStore\.getForLaunch\(profile\.id, game\.id, lease\.runtimeStateInvalidatedAtRevision\)/)
   assert.match(hub, /localRecoveryPrompt/)
   assert.match(hub, /SnapshotRestorePrompt/)
   assert.match(hub, /player-cell/)

@@ -21,7 +21,7 @@ test('add-player picker remembers the last selected title only while the player 
     gameSections: [{ games }],
     lastInstanceGameIdRef: { current: null },
     isMobileLandscape: false,
-    MAX_PLAYER_INSTANCES: 6,
+    MAX_PLAYER_INSTANCES: 9,
     setError() {},
     setInstancePicker() {},
     openProfilePicker(game) { opened.push(game.id) },

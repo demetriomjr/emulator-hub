@@ -6,7 +6,7 @@ import test from 'node:test'
 
 import sharp from 'sharp'
 
-import { getPokemonResourceCatalogStatus, normalizePokemonSprite, SPRITE_NORMALIZATION_VERSION, syncPokemonResources } from './pokemon-resource-sync.mjs'
+import { getPokemonResourceCatalogStatus, normalizePokemonSprite, SPRITE_NORMALIZATION_VERSION, syncPokemonResources } from '../packages/pokemon-resource-sync.mjs'
 
 const record = {
   sourceId: 6,
@@ -67,7 +67,7 @@ test('normalizes transparent outer space into a centered fixed-size sprite canva
     top: 4,
   }]).png().toBuffer()
 
-  const normalized = await normalizePokemonSprite(source)
+  const normalized = await normalizePokemonSprite(source, sharp)
   assert.deepEqual(await sharp(normalized).metadata().then(({ width, height, hasAlpha }) => ({ width, height, hasAlpha })), {
     width: 96,
     height: 96,
@@ -121,6 +121,7 @@ test('replaces an incomplete catalog with every expected local resource and mani
     targetDirectory: directory,
     loadRecords: async () => [record],
     download: async () => { downloads += 1; return opaqueSprite() },
+    imageProcessor: sharp,
   })
 
   assert.deepEqual(result, { status: 'synchronized', count: 1 })
@@ -141,6 +142,7 @@ test('normalizes a trailing slash before atomically replacing the catalog', asyn
     targetDirectory: `${directory}/`,
     loadRecords: async () => [record],
     download: async () => opaqueSprite(),
+    imageProcessor: sharp,
   })
 
   assert.deepEqual(result, { status: 'synchronized', count: 1 })

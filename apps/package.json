@@ -1,9 +1,0 @@
-{
-  "name": "@emulator-hub/apps",
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "redis": "^5.12.1",
-    "sharp": "^0.34.5"
-  }
-}

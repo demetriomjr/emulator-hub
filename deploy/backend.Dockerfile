@@ -1,15 +1,14 @@
 FROM node:26-alpine AS runtime
 
-WORKDIR /app/apps
-COPY apps/package.json apps/package-lock.json ./
+WORKDIR /app/apps/backend
+COPY apps/backend/package.json apps/backend/package-lock.json ./
 RUN npm ci --omit=dev
 
-COPY apps/backend ./backend
-COPY apps/packages ./packages
-RUN rm -rf ./backend/patches
-COPY assets/ips/ ./backend/patches/
+COPY apps/backend ./
+COPY apps/packages ../packages
+RUN rm -rf ./patches
+COPY assets/ips/ ./patches/
 
-WORKDIR /app/apps/backend
 RUN npm run build
 ENV NODE_ENV=production
 EXPOSE 3001

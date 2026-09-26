@@ -125,9 +125,9 @@ export function createHubPerformanceRecorder({ browser, getFrames, now = () => D
   let timer = null
   const membership = () => {
     const frames = [...getFrames()]
-    if (frames.length !== 6) return null
+    if (frames.length !== 9) return null
     const members = new Map(frames.map(frame => [frame.closest('.player-cell')?.dataset.sessionId, frame.contentWindow]))
-    return members.size === 6 && !members.has(undefined) ? members : null
+    return members.size === 9 && !members.has(undefined) ? members : null
   }
   const stable = () => {
     const live = membership()
@@ -146,7 +146,7 @@ export function createHubPerformanceRecorder({ browser, getFrames, now = () => D
     timer = null
     if (!stable()) { reset(); return }
     parentTimings.reset()
-    samples.start('automatic six-player run')
+    samples.start('automatic nine-player run')
     phase = 'recording'
     timer = browser.setTimeout(() => {
       timer = null
@@ -165,7 +165,7 @@ export function createHubPerformanceRecorder({ browser, getFrames, now = () => D
     if (expected && [...expected].some(([sessionId, source]) => live.get(sessionId) !== source)) reset()
     ready.set(event.data.sessionId, event.source)
     if (phase === 'recording') { samples.record(event.data); return }
-    if (phase !== 'waiting' || ready.size !== 6) return
+    if (phase !== 'waiting' || ready.size !== 9) return
     expected = live
     phase = 'warming'
     timer = browser.setTimeout(beginCapture, warmupMs)

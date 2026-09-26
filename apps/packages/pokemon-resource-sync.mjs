@@ -1,6 +1,5 @@
 import { access, mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
-import sharp from 'sharp'
 
 import { selectPokemonResources } from './pokemon-resource-catalog.mjs'
 
@@ -98,8 +97,9 @@ function alphaBounds(data, { width, height, channels }) {
   return { left, top, width: right - left + 1, height: bottom - top + 1 }
 }
 
-export async function normalizePokemonSprite(bytes) {
+export async function normalizePokemonSprite(bytes, sharp) {
   assertImage(bytes, 'sprite')
+  if (typeof sharp !== 'function') throw new TypeError('Image processor is required')
   const { data, info } = await sharp(bytes).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
   const bounds = alphaBounds(data, info)
   const cropped = sharp(data, { raw: info }).extract(bounds).resize({
@@ -140,7 +140,7 @@ async function replaceDirectory(targetDirectory, stageDirectory) {
   }
 }
 
-export async function syncPokemonResources({ targetDirectory, loadRecords, download, refresh = false } = {}) {
+export async function syncPokemonResources({ targetDirectory, loadRecords, download, imageProcessor, refresh = false } = {}) {
   targetDirectory = normalizeTargetDirectory(targetDirectory)
   if (typeof loadRecords !== 'function') throw new TypeError('Record loader is required')
   if (typeof download !== 'function') throw new TypeError('Resource downloader is required')
@@ -166,11 +166,11 @@ export async function syncPokemonResources({ targetDirectory, loadRecords, downl
       for (const resource of resources) {
         const normal = await download(resource.images.normal)
         assertImage(normal, resource.images.normal)
-        await writeFile(join(stageDirectory, resource.normalFile), await normalizePokemonSprite(normal))
+        await writeFile(join(stageDirectory, resource.normalFile), await normalizePokemonSprite(normal, imageProcessor))
 
         const shiny = await download(resource.images.shiny)
         assertImage(shiny, resource.images.shiny)
-        await writeFile(join(stageDirectory, resource.shinyFile), await normalizePokemonSprite(shiny))
+        await writeFile(join(stageDirectory, resource.shinyFile), await normalizePokemonSprite(shiny, imageProcessor))
       }
 
       await writeFile(join(stageDirectory, 'manifest.json'), JSON.stringify({

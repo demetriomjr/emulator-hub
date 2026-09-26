@@ -82,7 +82,7 @@ function automaticHarness() {
   let receive
   const timers = new Map()
   const logs = []
-  let frames = Array.from({ length: 6 }, (_, index) => {
+  let frames = Array.from({ length: 9 }, (_, index) => {
     const contentWindow = {}
     const sessionId = `s${index}`
     return { contentWindow, closest: () => ({ dataset: { sessionId } }) }
@@ -113,20 +113,20 @@ function automaticHarness() {
   return { sample, advance, recorder, logs, setFrames(value) { frames = value }, getFrames: () => frames }
 }
 
-test('six ready players automatically warm up, capture and log one report', () => {
+test('nine ready players automatically warm up, capture and log one report', () => {
   const runtime = automaticHarness()
   runtime.recorder.recordGamepad(1)
-  for (let index = 0; index < 5; index++) runtime.sample(index)
+  for (let index = 0; index < 8; index++) runtime.sample(index)
   runtime.advance(20_000)
   assert.equal(runtime.logs.length, 0)
-  for (let index = 0; index < 6; index++) runtime.sample(index)
+  for (let index = 0; index < 9; index++) runtime.sample(index)
   runtime.advance(19_000)
-  for (let index = 0; index < 6; index++) runtime.sample(index)
+  for (let index = 0; index < 9; index++) runtime.sample(index)
   runtime.advance(1_000)
   runtime.recorder.recordGamepad(2)
-  for (let index = 0; index < 6; index++) runtime.sample(index, index === 0 ? { timings: { 'getState.local': { count: 1, totalMs: 7, maxMs: 7 } } } : {})
+  for (let index = 0; index < 9; index++) runtime.sample(index, index === 0 ? { timings: { 'getState.local': { count: 1, totalMs: 7, maxMs: 7 } } } : {})
   runtime.advance(59_000)
-  for (let index = 0; index < 6; index++) runtime.sample(index)
+  for (let index = 0; index < 9; index++) runtime.sample(index)
   runtime.advance(1_000)
   assert.equal(runtime.logs.length, 1)
   assert.match(runtime.logs[0][0], /^\[emulator-performance\] \{/)
@@ -136,52 +136,52 @@ test('six ready players automatically warm up, capture and log one report', () =
   assert.equal(consoleSummary.summary.players.s0.isolated, true)
   assert.equal(consoleSummary.summary.players.s0.target, 5)
   assert.equal(consoleSummary.summary.players.s0.timings['getState.local'].totalMs, 7)
-  assert.equal(runtime.logs[0][1].samples.length, 12)
+  assert.equal(runtime.logs[0][1].samples.length, 18)
   assert.equal(runtime.logs[0][1].parentTimings.gamepad.totalMs, 2)
   runtime.advance(60_000)
   assert.equal(runtime.logs.length, 1)
   assert.equal(runtime.recorder.recordGamepad(10), undefined)
 })
 
-test('a frame reload invalidates an in-progress six-player run', () => {
+test('a frame reload invalidates an in-progress nine-player run', () => {
   const runtime = automaticHarness()
-  for (let index = 0; index < 6; index++) runtime.sample(index)
+  for (let index = 0; index < 9; index++) runtime.sample(index)
   runtime.advance(19_000)
   runtime.recorder.frameLoaded('s1')
   runtime.advance(80_000)
   assert.equal(runtime.logs.length, 0)
-  for (let index = 0; index < 6; index++) runtime.sample(index)
+  for (let index = 0; index < 9; index++) runtime.sample(index)
   runtime.advance(19_000)
-  for (let index = 0; index < 6; index++) runtime.sample(index)
+  for (let index = 0; index < 9; index++) runtime.sample(index)
   runtime.advance(1_000)
-  for (let index = 0; index < 6; index++) runtime.sample(index)
+  for (let index = 0; index < 9; index++) runtime.sample(index)
   runtime.advance(59_000)
-  for (let index = 0; index < 6; index++) runtime.sample(index)
+  for (let index = 0; index < 9; index++) runtime.sample(index)
   runtime.advance(1_000)
   assert.equal(runtime.logs.length, 1)
 })
 
-test('replaced frame does not leave stale readiness blocking the next six-player run', () => {
+test('replaced frame does not leave stale readiness blocking the next nine-player run', () => {
   const runtime = automaticHarness()
-  for (let index = 0; index < 5; index++) runtime.sample(index)
+  for (let index = 0; index < 8; index++) runtime.sample(index)
   const frames = runtime.getFrames()
   runtime.setFrames([{ contentWindow: {}, closest: () => ({ dataset: { sessionId: 'new' } }) }, ...frames.slice(1)])
-  for (let index = 0; index < 6; index++) runtime.sample(index)
+  for (let index = 0; index < 9; index++) runtime.sample(index)
   runtime.advance(19_000)
-  for (let index = 0; index < 6; index++) runtime.sample(index)
+  for (let index = 0; index < 9; index++) runtime.sample(index)
   runtime.advance(1_000)
-  for (let index = 0; index < 6; index++) runtime.sample(index)
+  for (let index = 0; index < 9; index++) runtime.sample(index)
   runtime.advance(59_000)
-  for (let index = 0; index < 6; index++) runtime.sample(index)
+  for (let index = 0; index < 9; index++) runtime.sample(index)
   runtime.advance(1_000)
   assert.equal(runtime.logs.length, 1)
 })
 
 test('a stalled ready player still produces a report with incomplete coverage', () => {
   const runtime = automaticHarness()
-  for (let index = 0; index < 6; index++) runtime.sample(index)
+  for (let index = 0; index < 9; index++) runtime.sample(index)
   runtime.advance(20_000)
-  for (let index = 0; index < 5; index++) runtime.sample(index)
+  for (let index = 0; index < 8; index++) runtime.sample(index)
   runtime.advance(60_000)
   assert.equal(runtime.logs.length, 1)
   assert.equal(runtime.logs[0][1].summary.aggregate.completeSeconds, 0)
