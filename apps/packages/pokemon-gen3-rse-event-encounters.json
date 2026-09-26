@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "scope": "in-game encounters unlocked by distributed event items in the original GBA games",
+  "events": [
+    {
+      "id": "southern-island",
+      "requiredItem": "eon-ticket",
+      "location": "southern-island",
+      "encounters": [
+        { "title": "pokemon-ruby", "speciesNationalDex": 380, "level": 50 },
+        { "title": "pokemon-sapphire", "speciesNationalDex": 381, "level": 50 },
+        { "title": "pokemon-emerald", "speciesNationalDex": 381, "level": 50, "when": { "roamingSpeciesNationalDex": 380 } },
+        { "title": "pokemon-emerald", "speciesNationalDex": 380, "level": 50, "when": { "roamingSpeciesNationalDex": 381 } }
+      ],
+      "distributionNote": "In international Emerald, the Eon Ticket was obtainable through record mixing with an eligible Ruby or Sapphire game.",
+      "source": "https://bulbapedia.bulbagarden.net/wiki/Eon_Ticket"
+    },
+    {
+      "id": "faraway-island",
+      "requiredItem": "old-sea-map",
+      "location": "faraway-island",
+      "encounters": [
+        { "title": "pokemon-emerald", "speciesNationalDex": 151, "level": 30 }
+      ],
+      "distributionNote": "The Old Sea Map was officially distributed only for Japanese-language Emerald in Japan and Taiwan.",
+      "source": "https://bulbapedia.bulbagarden.net/wiki/Old_Sea_Map"
+    },
+    {
+      "id": "navel-rock",
+      "requiredItem": "mystic-ticket",
+      "location": "navel-rock",
+      "encounters": [
+        { "title": "pokemon-emerald", "speciesNationalDex": 249, "level": 70 },
+        { "title": "pokemon-emerald", "speciesNationalDex": 250, "level": 70 }
+      ],
+      "source": "https://bulbapedia.bulbagarden.net/wiki/MysticTicket"
+    },
+    {
+      "id": "birth-island",
+      "requiredItem": "aurora-ticket",
+      "location": "birth-island",
+      "encounters": [
+        { "title": "pokemon-emerald", "speciesNationalDex": 386, "level": 30, "forme": "speed" }
+      ],
+      "source": "https://bulbapedia.bulbagarden.net/wiki/AuroraTicket"
+    }
+  ]
+}
