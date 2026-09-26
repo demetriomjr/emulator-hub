@@ -330,6 +330,35 @@ test('validates a synchronized workspace through its lease index without scannin
   assert.equal(accepted.status, 'accepted')
 })
 
+test('refreshes saved transfer rules without replacing pending placements or save revisions', async () => {
+  const { coordinator } = await fixture()
+  const sourceKey = 'save:profile-may:ruby'
+  const adopted = await coordinator.adopt({
+    profileId, sourceKey, sourceRevision: 4, adapter: 'gen3-gba-v1',
+    transferCapability: { game: 'pokemon-ruby', ordinaryTradeReady: false },
+    slots: [
+      { location: party(0), record: record(7, { species: 25, isEgg: false }) },
+      { location: { kind: 'game', area: 'box', box: 0, slot: 0 }, record: record(8, { species: 252, isEgg: false }) },
+      { location: { kind: 'game', area: 'box', box: 0, slot: 1 }, record: null },
+    ],
+  })
+  const lease = await coordinator.acquire({ profileId, sourceKey, workspaceId: 'workspace-a' })
+  await coordinator.sync({ profileId, workspaceId: 'workspace-a', clientSequence: 1, idempotencyKey: 'move-before-refresh', sources: [{
+    sourceKey, sourceSessionId: lease.sourceSessionId, leaseToken: lease.leaseToken, baseRevision: adopted.sourceRevision,
+    placements: adopted.placements.map((placement, index) => ({ ...placement, pokemonInstanceId: index === 1 ? null : index === 2 ? adopted.placements[1].pokemonInstanceId : placement.pokemonInstanceId })),
+  }] })
+  const stored = await coordinator.getSnapshot({ profileId, sourceKey })
+  assert.equal(stored.needsSaveFlush, true)
+  await coordinator.refreshTransferCapability({ profileId, sourceKey, transferCapability: { game: 'pokemon-ruby', ordinaryTradeReady: true } })
+  const refreshed = await coordinator.getSnapshot({ profileId, sourceKey })
+
+  assert.deepEqual(refreshed.transferCapability, { game: 'pokemon-ruby', ordinaryTradeReady: true })
+  assert.deepEqual(refreshed.placements, stored.placements)
+  assert.equal(refreshed.sourceRevision, stored.sourceRevision)
+  assert.equal(refreshed.saveRevision, adopted.saveRevision)
+  assert.equal(refreshed.needsSaveFlush, true)
+})
+
 test('rejects a save candidate that empties its Party before it becomes dirty', async () => {
   const { coordinator } = await fixture()
   const boxLocation = { kind: 'game', area: 'box', box: 0, slot: 0 }

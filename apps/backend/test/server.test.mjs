@@ -1242,6 +1242,34 @@ describe('hub backend HTTP contract', () => {
     assert.deepEqual((await jsonResponse(response)).transferCapabilities, { game: 'pokemon-emerald', ordinaryTradeReady: true, nationalDexUnlocked: false, networkMachineRestored: null })
   })
 
+  test('refreshes stored transfer rules when opening a previously adopted save with the same revision', async () => {
+    const fixture = await createFixture([{
+      id: 'pokemon-emerald', title: 'Pokémon Emerald', system: 'gba', core: 'mgba', file: 'pokemon-emerald.gba', sha256: 'a'.repeat(64),
+      pokemonSave: { supported: true, adapter: 'gen3-gba-v1', layoutProfile: 'pokemon-emerald-gba' },
+    }])
+    const refreshed = []
+    const capability = { game: 'pokemon-emerald', ordinaryTradeReady: true, nationalDexUnlocked: false, networkMachineRestored: null }
+    const server = createHubServer({
+      ...fixture,
+      romDiscovery: { async scan() { return { accepted: [{ id: 'pokemon-emerald', title: 'Pokémon Emerald', system: 'gba', core: 'mgba', file: 'pokemon-emerald.gba', sha256: 'a'.repeat(64) }] } } },
+      romRegistry: { async load() { return [] }, async replace(entries) { return entries } },
+      profileStore: { async get() { return { id: 'profile-may' } } },
+      saveStore: { async get() { return { bytes: Buffer.alloc(0x20000), revision: 4 } } },
+      pokemonSaveAdapters: { get() { return { inspect() { return { party: [], boxes: [], transferCapabilities: capability } } } } },
+      pokemonHubSnapshotCoordinator: {
+        async getSnapshot() { return { saveRevision: 4, needsSaveFlush: true, transferCapability: { ...capability, ordinaryTradeReady: false }, placements: [] } },
+        async refreshTransferCapability(request) { refreshed.push(request) },
+      },
+      pokemonHubSaveFlush: { markDirty() {}, async flushSource() { return { status: 'clean' } } },
+    })
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+    liveServers.add(server)
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/pokemon-hub/save-profiles/pokemon-emerald/profile-may/layout`)
+
+    assert.equal(response.status, 200)
+    assert.deepEqual(refreshed, [{ profileId: 'profile-may', sourceKey: 'save:profile-may:pokemon-emerald', transferCapability: capability }])
+  })
+
   test('creates and lists Hub profiles from the Redis-backed Hub collection', async () => {
     const { baseUrl } = await startFixture([])
 

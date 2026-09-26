@@ -26,6 +26,23 @@ const markSaveFlushedTransition = Object.freeze({
   },
 })
 
+const refreshTransferCapabilityTransition = Object.freeze({
+  lua: `
+    local raw = redis.call('GET', KEYS[1])
+    if not raw then return cjson.encode({ status = 'missing' }) end
+    local source = cjson.decode(raw)
+    source.transferCapability = cjson.decode(ARGV[1])
+    redis.call('SET', KEYS[1], cjson.encode(source))
+    return cjson.encode({ status = 'updated' })
+  `,
+  memory: async ({ keys, arguments: values, get, set }) => {
+    const raw = await get(keys[0])
+    if (raw === null) return JSON.stringify({ status: 'missing' })
+    await set(keys[0], JSON.stringify({ ...JSON.parse(raw), transferCapability: JSON.parse(values[0]) }))
+    return JSON.stringify({ status: 'updated' })
+  },
+})
+
 const pokemonHubHandshakeIntervalMs = 3_000
 const pokemonHubMissedHandshakeLimit = 3
 
@@ -41,6 +58,15 @@ export function createPokemonHubSnapshotCoordinator({ persistence, eventStore, l
       const source = await readSource(profileId, sourceKey)
       if (!source) throw coordinatorError('SOURCE_NOT_ADOPTED', 'Pokemon Hub source has not been adopted.')
       return publicSnapshot(source)
+    },
+
+    async refreshTransferCapability({ profileId, sourceKey, transferCapability }) {
+      assertString(profileId, 'Profile ID'); assertString(sourceKey, 'Source key')
+      if (!transferCapability || typeof transferCapability !== 'object' || Array.isArray(transferCapability)) throw new TypeError('Pokemon Hub transfer capability is invalid')
+      const result = JSON.parse(await persistence.eval(refreshTransferCapabilityTransition, {
+        keys: [sourceKeyFor(profileId, sourceKey)], arguments: [JSON.stringify(transferCapability)],
+      }))
+      if (result.status === 'missing') throw coordinatorError('SOURCE_NOT_ADOPTED', 'Pokemon Hub source has not been adopted.')
     },
 
     async ensureHubSource({ profileId, sourceKey, hubProfileId, minimumSlotCount }) {

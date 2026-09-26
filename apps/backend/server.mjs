@@ -863,6 +863,9 @@ async function getSaveLayout(response, config, { gameId, profileId, workspacePro
       if (snapshot.saveRevision !== save.revision && !snapshot.needsSaveFlush && typeof adapter.readAllSlots === 'function') {
         snapshot = await adoptPokemonHubSave({ coordinator: config.pokemonHubSnapshotCoordinator, profileId: workspaceProfileId, sourceProfileId: profileId, gameId, saved: save, adapter, layout })
       }
+      if (inspection.transferCapabilities && !samePokemonHubTransferCapability(snapshot.transferCapability, inspection.transferCapabilities)) {
+        await config.pokemonHubSnapshotCoordinator.refreshTransferCapability({ profileId: workspaceProfileId, sourceKey: `save:${profileId}:${gameId}`, transferCapability: inspection.transferCapabilities })
+      }
     } catch (error) {
       if (error.code !== 'SOURCE_NOT_ADOPTED') throw error
       if (typeof adapter.readAllSlots === 'function') snapshot = await adoptPokemonHubSave({ coordinator: config.pokemonHubSnapshotCoordinator, profileId: workspaceProfileId, sourceProfileId: profileId, gameId, saved: save, adapter, layout })
@@ -881,6 +884,11 @@ async function getSaveLayout(response, config, { gameId, profileId, workspacePro
     console.error('[Pokemon Hub] save layout inspection failed', { gameId, profileId, code: error.code ?? 'SAVE_LAYOUT_READ_FAILED', message: error.message })
     json(response, 409, { error: 'Save layout could not be read.', code: error.code ?? 'SAVE_LAYOUT_READ_FAILED' })
   }
+}
+
+function samePokemonHubTransferCapability(left, right) {
+  return left && right && Object.keys(left).length === Object.keys(right).length
+    && Object.entries(right).every(([key, value]) => left[key] === value)
 }
 
 async function handlePokemonHub(request, response, config, route) {
