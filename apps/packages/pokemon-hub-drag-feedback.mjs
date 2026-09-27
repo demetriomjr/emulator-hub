@@ -2,6 +2,10 @@ import { createPokemonHubTransferPlacementPolicy } from './pokemon-hub-transfer-
 
 const validatePlacementChange = createPokemonHubTransferPlacementPolicy()
 
+export function isPokemonHubPartyDropForbidden(source, target) {
+  return target?.kind === 'game' && target.area === 'party' && (source?.kind === 'hub' || source?.kind === 'game' && source.area !== 'party')
+}
+
 export function getPokemonHubDragFeedback({ panes, source, slot, saveLayoutsBySource = {} }) {
   if (!slot?.occupied || !isCompleteSource(source) || !hasRulePokemon(slot)) return { dragDisabled: false, destinations: [] }
   const destinations = (panes ?? [])

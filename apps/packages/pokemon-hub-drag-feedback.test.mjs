@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { getPokemonHubDragFeedback } from './pokemon-hub-drag-feedback.mjs'
+import * as dragFeedback from './pokemon-hub-drag-feedback.mjs'
+
+const { getPokemonHubDragFeedback } = dragFeedback
 
 const ruby = { kind: 'game', gameId: 'ruby-game', profileId: 'ruby-profile' }
 const emerald = { kind: 'game', gameId: 'emerald-game', profileId: 'emerald-profile' }
@@ -8,6 +10,18 @@ const hub = { kind: 'hub', hubProfileId: 'hub-profile' }
 const layout = (transferCapabilities, slots = []) => ({ transferCapabilities, party: slots, boxes: [] })
 const rubyLayout = layout({ game: 'pokemon-ruby', ordinaryTradeReady: true, nationalDexUnlocked: false, networkMachineRestored: null }, [{ occupied: true }, { occupied: true }])
 const emeraldLayout = layout({ game: 'pokemon-emerald', ordinaryTradeReady: true, nationalDexUnlocked: false, networkMachineRestored: null })
+
+test('marks only drops from outside the Party into the Party as forbidden', () => {
+  assert.equal(typeof dragFeedback.isPokemonHubPartyDropForbidden, 'function')
+  const { isPokemonHubPartyDropForbidden } = dragFeedback
+  const party = { kind: 'game', area: 'party', slot: 0 }
+  const box = { kind: 'game', area: 'box', box: 0, slot: 0 }
+  const hubSlot = { kind: 'hub', slot: 0 }
+  assert.equal(isPokemonHubPartyDropForbidden(box, party), true)
+  assert.equal(isPokemonHubPartyDropForbidden(hubSlot, party), true)
+  assert.equal(isPokemonHubPartyDropForbidden(party, { ...party, slot: 1 }), false)
+  assert.equal(isPokemonHubPartyDropForbidden(box, { ...box, slot: 1 }), false)
+})
 
 test('disables a sprite when the sole visible save destination rejects it', () => {
   const feedback = getPokemonHubDragFeedback({ panes: [ruby, emerald], source: ruby, slot: { occupied: true, species: 252, isEgg: true }, saveLayoutsBySource: { 'ruby-game:ruby-profile': rubyLayout, 'emerald-game:emerald-profile': emeraldLayout } })

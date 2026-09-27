@@ -117,7 +117,10 @@ button { font: inherit; }
 .pokemon-hub-slot.dragging .pokemon-hub-slot-sprite { opacity: .18; }
 .pokemon-hub-slot.drag-blocked { cursor: not-allowed; }
 .pokemon-hub-slot.drag-blocked .pokemon-hub-slot-sprite { opacity: .48; }
+.pokemon-hub-slot.drop-forbidden { border-color: #d92d2d; cursor: not-allowed; }
+.pokemon-hub-slot.drop-forbidden .pokemon-hub-slot-sprite { opacity: .48; }
 .pokemon-hub-slot-block-icon { position: absolute; z-index: 4; right: 3px; bottom: 3px; display: grid; place-items: center; width: 21px; height: 21px; border: 1px solid #fff; border-radius: 50%; color: #fff; background: #d92d2d; box-shadow: 0 1px 3px #00000070; font-size: 14px; line-height: 1; }
+.pokemon-save-party .pokemon-hub-slot-block-icon { bottom: 24px; }
 .pokemon-hub-slot-index { position: absolute; z-index: 2; top: -1px; right: auto; left: -1px; display: grid; place-items: center; min-width: 22px; height: 21px; padding: 0 5px; border-radius: 5px 0 7px 0; color: #fff; background: #08131a; box-shadow: 1px 1px 3px #00000038; font-size: 10px; font-variant-numeric: tabular-nums; font-weight: 750; line-height: 1; }
 .pokemon-hub-slot-content { position: absolute; z-index: 2; top: 4px; right: 4px; max-width: calc(100% - 32px); overflow: hidden; color: #143b34; font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .pokemon-hub-slot-sprite { position: absolute; z-index: 1; inset: 8px; width: calc(100% - 16px); height: calc(100% - 16px); object-fit: contain; pointer-events: none; user-select: none; }

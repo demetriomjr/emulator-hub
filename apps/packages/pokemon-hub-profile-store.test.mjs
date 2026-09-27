@@ -1,15 +1,12 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import test from 'node:test'
 
-import { createPokemonHubProfileStore, createRedisPokemonHubProfileStore } from './pokemon-hub-profile-store.mjs'
+import { createRedisPokemonHubProfileStore } from './pokemon-hub-profile-store.mjs'
 import { createMemoryRedisPersistence } from './redis-persistence.mjs'
 
-async function createStore() {
-  const dataPath = await mkdtemp(join(tmpdir(), 'emulator-hub-pokemon-hub-profiles-'))
-  return { dataPath, store: createPokemonHubProfileStore({ dataPath }) }
+function createStore() {
+  const persistence = createMemoryRedisPersistence()
+  return { persistence, store: createRedisPokemonHubProfileStore({ persistence }) }
 }
 
 test('persists a named Hub profile with sparse empty storage', async () => {
@@ -59,9 +56,8 @@ test('rejects Hub profile names longer than 26 characters when creating or renam
   await assert.rejects(() => store.rename(profile.hubProfileId, 'x'.repeat(27)), { code: 'POKEMON_HUB_PROFILE_INVALID' })
 })
 
-test('migrates legacy empty slots into sparse entries with no persisted layout when an existing profile is loaded', async () => {
-  const { dataPath, store } = await createStore()
-  const collectionPath = join(dataPath, 'profiles.json')
+test('normalizes legacy empty slots on read and persists sparse entries on the next write', async () => {
+  const { persistence, store } = createStore()
   const legacyProfile = {
     schemaVersion: 3,
     hubProfileId: '11111111-1111-4111-8111-111111111111',
@@ -69,18 +65,30 @@ test('migrates legacy empty slots into sparse entries with no persisted layout w
     createdAt: '2026-09-17T00:00:00.000Z',
     grid: { slots: [null, { species: 'Pikachu' }, ...Array(28).fill(null)] },
   }
-  await writeFile(collectionPath, JSON.stringify([legacyProfile]), 'utf8')
+  await persistence.set('pokemon-hub:profiles', JSON.stringify([legacyProfile]))
 
   const [profile] = await store.list()
   assert.deepEqual(profile.grid, { entries: { 1: { species: 'Pikachu' } } })
 
-  const [persisted] = JSON.parse(await readFile(collectionPath, 'utf8'))
+  await store.rename(profile.hubProfileId, profile.name)
+  const [persisted] = JSON.parse(await persistence.get('pokemon-hub:profiles'))
   assert.deepEqual(persisted.grid, { entries: { 1: { species: 'Pikachu' } } })
 })
 
-test('migrates a schema-version-4 profile without retaining its capacity', async () => {
-  const { dataPath, store } = await createStore()
-  const collectionPath = join(dataPath, 'profiles.json')
+test('serializes catalogue changes and continues after a rejected change', async () => {
+  const { store } = createStore()
+  const first = store.create({ name: 'First' })
+  const rejected = store.create({ name: 'First' })
+  const second = store.create({ name: 'Second' })
+
+  const createdFirst = await first
+  await assert.rejects(rejected, { code: 'POKEMON_HUB_PROFILE_NAME_DUPLICATE' })
+  const createdSecond = await second
+  assert.deepEqual((await store.list()).map(profile => profile.hubProfileId), [createdFirst.hubProfileId, createdSecond.hubProfileId])
+})
+
+test('normalizes a schema-version-4 profile without retaining its capacity on the next write', async () => {
+  const { persistence, store } = createStore()
   const legacyProfile = {
     schemaVersion: 4,
     hubProfileId: '22222222-2222-4222-8222-222222222222',
@@ -88,28 +96,28 @@ test('migrates a schema-version-4 profile without retaining its capacity', async
     createdAt: '2026-09-17T00:00:00.000Z',
     grid: { capacity: 60, entries: { 59: { species: 'Eevee' } } },
   }
-  await writeFile(collectionPath, JSON.stringify([legacyProfile]), 'utf8')
+  await persistence.set('pokemon-hub:profiles', JSON.stringify([legacyProfile]))
 
   const [profile] = await store.list()
   assert.deepEqual(profile.grid, { entries: { 59: { species: 'Eevee' } } })
 
-  const [persisted] = JSON.parse(await readFile(collectionPath, 'utf8'))
+  await store.rename(profile.hubProfileId, profile.name)
+  const [persisted] = JSON.parse(await persistence.get('pokemon-hub:profiles'))
   assert.deepEqual(persisted.grid, { entries: { 59: { species: 'Eevee' } } })
 })
 
 test('renames a Hub profile and requires explicit discard before deleting occupied slots', async () => {
-  const { dataPath, store } = await createStore()
+  const { persistence, store } = createStore()
   const created = await store.create({ name: 'Shiny collection' })
 
   const renamed = await store.rename(created.hubProfileId, 'Living dex')
   assert.equal(renamed.name, 'Living dex')
 
-  const collectionPath = join(dataPath, 'profiles.json')
-  const [persisted] = JSON.parse(await readFile(collectionPath, 'utf8'))
+  const [persisted] = JSON.parse(await persistence.get('pokemon-hub:profiles'))
   persisted.grid.entries[0] = { species: 'Pikachu' }
-  await writeFile(collectionPath, JSON.stringify([persisted]), 'utf8')
+  await persistence.set('pokemon-hub:profiles', JSON.stringify([persisted]))
 
-  const reloaded = createPokemonHubProfileStore({ dataPath })
+  const reloaded = createRedisPokemonHubProfileStore({ persistence })
   await assert.rejects(() => reloaded.delete(created.hubProfileId), { code: 'POKEMON_HUB_PROFILE_NOT_EMPTY' })
   assert.deepEqual(await reloaded.delete(created.hubProfileId, { discardOccupied: true }), { hubProfileId: created.hubProfileId, discardedPokemonCount: 1 })
   assert.deepEqual(await reloaded.list(), [])

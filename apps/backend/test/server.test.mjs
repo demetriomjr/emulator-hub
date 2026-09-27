@@ -929,7 +929,6 @@ describe('hub backend HTTP contract', () => {
       ...fixture,
       pokemonHubSaveFlush: {
         async flushExpiredLeases() { observations += 1 },
-        markDirty() {},
         async flushSource() { return { status: 'clean' } },
       },
     })
@@ -964,7 +963,6 @@ describe('hub backend HTTP contract', () => {
       },
       pokemonHubSaveFlush: {
         async flushExpiredLeases() {},
-        markDirty() {},
         async flushSource(request) { actions.push({ type: 'save-flushed', request }); return { status: 'flushed' } },
       },
     })
@@ -992,7 +990,6 @@ describe('hub backend HTTP contract', () => {
       },
       pokemonHubSaveFlush: {
         async flushExpiredLeases() {},
-        markDirty() {},
         async flushSource() { return { status: 'clean' } },
       },
     })
@@ -1026,7 +1023,6 @@ describe('hub backend HTTP contract', () => {
       },
       pokemonHubSaveFlush: {
         async flushExpiredLeases() {},
-        markDirty() {},
         async flushSource() { return { status: 'clean' } },
       },
     })
@@ -1053,7 +1049,6 @@ describe('hub backend HTTP contract', () => {
       },
       pokemonHubSaveFlush: {
         async flushExpiredLeases() {},
-        markDirty() {},
         async flushSource() { return { status: 'clean' } },
       },
     })
@@ -1086,7 +1081,6 @@ describe('hub backend HTTP contract', () => {
       },
       pokemonHubSaveFlush: {
         async flushExpiredLeases() {},
-        markDirty() {},
         async flushSource(request) { flushes.push(request); return { status: 'clean' } },
       },
     })
@@ -1117,7 +1111,6 @@ describe('hub backend HTTP contract', () => {
       },
       pokemonHubSaveFlush: {
         async flushExpiredLeases() {},
-        markDirty() {},
         async flushSource(request) { flushes.push(request); return { status: 'flushed' } },
       },
     })
@@ -1157,7 +1150,6 @@ describe('hub backend HTTP contract', () => {
       },
       pokemonHubSaveFlush: {
         async flushExpiredLeases() {},
-        markDirty() {},
         async flushSource(request) { flushes.push(request); return { status: 'flushed' } },
       },
     })
@@ -1183,19 +1175,22 @@ describe('hub backend HTTP contract', () => {
 
   test('returns only the authoritative canonical snapshot on validation correction', async () => {
     const fixture = await createFixture([])
+    const corrected = { status: 'corrected', snapshot: { revision: 3, panes: [null, null, null] }, reason: { code: 'SNAPSHOT_INVALID', message: 'Slot is invalid' } }
     const server = createHubServer({
       ...fixture,
-      pokemonHubSessionService: { async syncCanonicalSnapshot() { return { status: 'corrected', snapshot: { revision: 3, panes: [null, null, null] } } } },
-      pokemonHubSaveFlush: { async flushExpiredLeases() {}, markDirty() {}, async flushSource() { return { status: 'clean' } } },
+      pokemonHubSessionService: { async syncCanonicalSnapshot() { return corrected }, async closeCanonicalSession() { return corrected } },
+      pokemonHubSaveFlush: { async flushExpiredLeases() {}, async flushSource() { return { status: 'clean' } } },
     })
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
     liveServers.add(server)
-    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/profiles/profile-may/pokemon-hub/sessions/session-a/snapshots`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'snapshot-8' }, body: JSON.stringify({ revision: 2, panes: [null, null, null] }),
-    })
+    for (const action of ['snapshots', 'close']) {
+      const response = await fetch(`http://127.0.0.1:${server.address().port}/api/profiles/profile-may/pokemon-hub/sessions/session-a/${action}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'snapshot-8' }, body: JSON.stringify({ revision: 2, panes: [null, null, null] }),
+      })
 
-    assert.equal(response.status, 409)
-    assert.deepEqual(await jsonResponse(response), { revision: 3, panes: [null, null, null] })
+      assert.equal(response.status, 409)
+      assert.deepEqual(await jsonResponse(response), { revision: 3, panes: [null, null, null] })
+    }
   })
 
   test('passes profile-scoped snapshot acquire and sync requests to the coordinator', async () => {
@@ -1208,7 +1203,7 @@ describe('hub backend HTTP contract', () => {
         async renew(request) { requests.push({ type: 'renew', request }); return { status: 'renewed' } },
         async sync(request) { requests.push({ type: 'sync', request }); return { status: 'accepted', snapshots: [] } },
       },
-      pokemonHubSaveFlush: { markDirty() {}, async flushSource() { return { status: 'clean' } } },
+      pokemonHubSaveFlush: { async flushSource() { return { status: 'clean' } } },
     })
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
     liveServers.add(server)
@@ -1255,7 +1250,7 @@ describe('hub backend HTTP contract', () => {
         async bindOwner(hubProfileId, profileId) { requests.push({ type: 'bind', hubProfileId, profileId }); return { hubProfileId } },
       },
       pokemonHubGridTransferService: {},
-      pokemonHubSaveFlush: { markDirty() {}, async flushSource() { return { status: 'clean' } } },
+      pokemonHubSaveFlush: { async flushSource() { return { status: 'clean' } } },
     })
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
     liveServers.add(server)
@@ -1274,7 +1269,7 @@ describe('hub backend HTTP contract', () => {
     ])
   })
 
-  test('delegates a persistent grid transfer and schedules only returned save sources for flushing', async () => {
+  test('delegates a persistent grid transfer without scheduling an eager save write', async () => {
     const fixture = await createFixture([])
     const requests = []
     const dirty = []
@@ -1298,7 +1293,7 @@ describe('hub backend HTTP contract', () => {
     assert.equal(response.status, 200)
     assert.equal(requests.length, 1)
     assert.equal(requests[0].profileId, 'profile-may')
-    assert.deepEqual(dirty, [{ profileId: 'profile-may', sourceKey: 'save:profile-may:emerald' }])
+    assert.deepEqual(dirty, [])
   })
 
   test('accepts a full snapshot payload larger than the default JSON request limit', async () => {
@@ -1309,7 +1304,7 @@ describe('hub backend HTTP contract', () => {
       pokemonHubSnapshotCoordinator: {
         async sync(request) { requests.push(request); return { status: 'accepted', snapshots: [] } },
       },
-      pokemonHubSaveFlush: { markDirty() {}, async flushSource() { return { status: 'clean' } } },
+      pokemonHubSaveFlush: { async flushSource() { return { status: 'clean' } } },
     })
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
     liveServers.add(server)
@@ -1346,7 +1341,7 @@ describe('hub backend HTTP contract', () => {
     const server = createHubServer({
       ...fixture,
       pokemonHubGridTransferService: { async transfer(request) { requests.push(request); return { status: 'accepted', snapshots: [], hubProfile: { hubProfileId: 'grid-a', grid: { entries: {} } } } } },
-      pokemonHubSaveFlush: { markDirty() {}, async flushSource() { return { status: 'clean' } } },
+      pokemonHubSaveFlush: { async flushSource() { return { status: 'clean' } } },
     })
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
     liveServers.add(server)
@@ -1384,7 +1379,6 @@ describe('hub backend HTTP contract', () => {
       },
       pokemonHubSaveFlush: {
         async flushExpiredLeases() { finalizations += 1 },
-        markDirty() {},
         async flushSource() { return { status: 'clean' } },
       },
     })
@@ -1401,7 +1395,7 @@ describe('hub backend HTTP contract', () => {
     assert.ok(finalizations >= 1)
   })
 
-  test('marks accepted snapshots dirty and flushes before a source lease is released', async () => {
+  test('flushes before a source lease is released without an eager dirty notification', async () => {
     const fixture = await createFixture([])
     const actions = []
     const server = createHubServer({
@@ -1428,7 +1422,7 @@ describe('hub backend HTTP contract', () => {
 
     assert.equal(synced.status, 200)
     assert.equal(released.status, 200)
-    assert.deepEqual(actions.map(action => action.type), ['dirty', 'flush', 'release'])
+    assert.deepEqual(actions.map(action => action.type), ['flush', 'release'])
   })
 
   test('adopts supported save bytes into the snapshot coordinator after a save revision is stored', async () => {
@@ -1442,7 +1436,7 @@ describe('hub backend HTTP contract', () => {
       ...fixture,
       pokemonSaveAdapters: { get: () => ({ id: 'gen3-gba-v1', readAllSlots: () => [{ location: { kind: 'game', area: 'party', slot: 0 }, record: null }] }) },
       pokemonHubSnapshotCoordinator: { adopt: async (request) => { adopted.push(request); return { sourceKey: request.sourceKey } } },
-      pokemonHubSaveFlush: { markDirty() {}, async flushSource() { return { status: 'clean' } } },
+      pokemonHubSaveFlush: { async flushSource() { return { status: 'clean' } } },
     })
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
     liveServers.add(server)
@@ -1507,7 +1501,7 @@ describe('hub backend HTTP contract', () => {
         async getSnapshot() { return { saveRevision: 4, needsSaveFlush: true, transferCapability: { ...capability, ordinaryTradeReady: false }, placements: [] } },
         async refreshTransferCapability(request) { refreshed.push(request) },
       },
-      pokemonHubSaveFlush: { markDirty() {}, async flushSource() { return { status: 'clean' } } },
+      pokemonHubSaveFlush: { async flushSource() { return { status: 'clean' } } },
     })
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
     liveServers.add(server)
@@ -2031,7 +2025,7 @@ describe('hub backend HTTP contract', () => {
       pokemonHubSnapshotCoordinator: {
         async getSnapshot() { return { placements: [{ location: { kind: 'hub', hubProfileId: '11111111-1111-4111-8111-111111111111', slot: 4 }, pokemonInstanceId: 'pokemon-alpha' }], pokemonDisplay: { 'pokemon-alpha': { species: 25, shiny: true } } } },
       },
-      pokemonHubSaveFlush: { markDirty() {}, async flushSource() { return { status: 'clean' } } },
+      pokemonHubSaveFlush: { async flushSource() { return { status: 'clean' } } },
     })
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
     liveServers.add(server)
@@ -2075,7 +2069,7 @@ describe('hub backend HTTP contract', () => {
       profileStore: { async list(gameId) { return profiles[gameId] ?? [] } },
       saveStore: { async get(profileId, gameId) { return gameId === 'pokemon-emerald' && profileId === 'may' ? { bytes: Buffer.from([1]), revision: 1, sha256: 'save', fenceGeneration: 0 } : null } },
       pokemonSaveAdapters: { get(adapterId) { return adapterId === 'gen3-gba-v1' ? { id: adapterId } : null } },
-      pokemonHubSaveFlush: { markDirty() {}, async flushSource() { return { status: 'clean' } }, async flushExpiredLeases() {} },
+      pokemonHubSaveFlush: { async flushSource() { return { status: 'clean' } }, async flushExpiredLeases() {} },
     })
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
     liveServers.add(server)

@@ -23,16 +23,6 @@ function fixture({ materialize = () => ({ bytes: Buffer.from([2]), changed: true
   return { service, writes, flushed }
 }
 
-test('an accepted move never schedules or performs a native save write', async () => {
-  const { service, writes, flushed } = fixture()
-
-  service.markDirty({ profileId: 'profile-may', sourceKey: 'save:profile-may:emerald' })
-  await service.flushDue()
-
-  assert.deepEqual(writes, [])
-  assert.deepEqual(flushed, [])
-})
-
 test('an explicit source close flushes and acknowledges the exact source revision', async () => {
   const { service, writes, flushed } = fixture()
 
@@ -48,7 +38,6 @@ test('does not rewrite a save but acknowledges its durable flush when materializ
 
   assert.equal(writes.length, 0)
   assert.deepEqual(flushed, [{ profileId: 'profile-may', sourceKey: 'save:profile-may:emerald', sourceRevision: 7, saveRevision: 3 }])
-  assert.equal(service.isDirty({ profileId: 'profile-may', sourceKey: 'save:profile-may:emerald' }), false)
 })
 
 test('commits a materialized save with the fence generation read from the store', async () => {
@@ -124,7 +113,6 @@ test('flushes an expired leased source before releasing it to another workspace'
     schedule: () => null,
     cancel: () => {},
   })
-  service.markDirty({ profileId: 'profile-may', sourceKey: 'save:profile-may:emerald' })
 
   await service.flushExpiredLeases()
 

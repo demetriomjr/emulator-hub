@@ -76,6 +76,7 @@ test('creates and expands a Hub grid source without assigning native bytes to em
     hubProfileId: '11111111-1111-4111-8111-111111111111',
     minimumSlotCount: 3,
   })
+  const lease = await coordinator.acquire({ profileId, sourceKey: created.sourceKey, workspaceId: 'workspace-a' })
   const expanded = await coordinator.ensureHubSource({
     profileId,
     sourceKey: created.sourceKey,
@@ -92,6 +93,9 @@ test('creates and expands a Hub grid source without assigning native bytes to em
   assert.equal(expanded.placements.length, 5)
   assert.equal(expanded.placements[4].pokemonInstanceId, null)
   assert.deepEqual(await coordinator.getSnapshot({ profileId, sourceKey: created.sourceKey }), expanded)
+  const renewed = await coordinator.acquire({ profileId, sourceKey: created.sourceKey, workspaceId: 'workspace-a' })
+  assert.equal(renewed.leaseToken, lease.leaseToken)
+  assert.deepEqual(renewed.placements, expanded.placements)
 })
 
 test('expires a source session after three missed handshake windows', async () => {

@@ -1,3 +1,15 @@
+export const pokemonHubMaximumSlotGrowth = 1024
+
+export function extendPokemonHubPlacements(placements, hubProfileId, slot) {
+  if (!Array.isArray(placements) || typeof hubProfileId !== 'string' || !hubProfileId || !Number.isSafeInteger(slot) || slot < 0) return null
+  if (slot < placements.length) return placements
+  if (slot - placements.length >= pokemonHubMaximumSlotGrowth || !placements.every((placement, index) => placement.location?.kind === 'hub' && placement.location.hubProfileId === hubProfileId && placement.location.slot === index)) return null
+  return [
+    ...placements,
+    ...Array.from({ length: slot + 1 - placements.length }, (_, index) => ({ location: { kind: 'hub', hubProfileId, slot: placements.length + index }, pokemonInstanceId: null })),
+  ]
+}
+
 export function createInitialPokemonHubCanonicalSnapshot() {
   return { revision: 0, panes: [null, null, null] }
 }

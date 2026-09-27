@@ -15,10 +15,6 @@ export async function getGames() {
   return parseGameCatalogResponse(await getJson('/api/games'))
 }
 
-export async function getSaveProfileGames() {
-  return parseGameCatalogResponse(await getJson('/api/pokemon-hub/save-profile-games'))
-}
-
 export async function getSaveProfileLayout(gameId, profileId, workspaceProfileId = null) {
   const workspace = typeof workspaceProfileId === 'string' && workspaceProfileId ? `?workspaceProfileId=${encodeURIComponent(workspaceProfileId)}` : ''
   const body = await getJson(`/api/pokemon-hub/save-profiles/${encodeURIComponent(gameId)}/${encodeURIComponent(profileId)}/layout${workspace}`)
@@ -114,16 +110,8 @@ export async function releasePlayerLease(sessionId, lease) {
   return body
 }
 
-export function getPokemonHub(profileId) {
-  return getJson(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub`)
-}
-
 export function openPokemonHubSession(profileId) {
   return postPokemonHubSession(profileId, '', {})
-}
-
-export function attachPokemonHubSessionSource(profileId, sessionId, sourceKey) {
-  return postPokemonHubSession(profileId, `/${encodeURIComponent(sessionId)}/sources`, { sourceKey })
 }
 
 export function heartbeatPokemonHubSession(profileId, sessionId, sequence) {
@@ -161,10 +149,6 @@ export async function syncPokemonHubSessionSnapshot(profileId, sessionId, snapsh
   }
   if (response.status !== 200 || await response.text() !== '') throw new Error('Invalid Pokemon Hub snapshot response')
   return null
-}
-
-export async function detachPokemonHubSessionSource(profileId, sessionId, sourceId) {
-  return deletePokemonHubSession(profileId, `/${encodeURIComponent(sessionId)}/sources/${encodeURIComponent(sourceId)}`)
 }
 
 export async function closePokemonHubSession(profileId, sessionId, snapshot, idempotencyKey) {
@@ -230,61 +214,10 @@ export async function deletePokemonHubProfile(hubProfileId, { discardOccupied = 
   return body
 }
 
-export async function transferPokemonHub(profileId, transfer) {
-  const response = await fetch(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/transfers`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(transfer),
-  })
-  const body = await response.json().catch(() => ({}))
-  if (!response.ok) {
-    const error = new Error(body.error || `Request failed (${response.status})`)
-    if (typeof body.code === 'string') error.code = body.code
-    throw error
-  }
-  return body
-}
-
-export function acquirePokemonHubSnapshot(profileId, request) {
-  return postPokemonHubSnapshot(profileId, 'acquire', request)
-}
-
-export function renewPokemonHubSnapshot(profileId, request) {
-  return postPokemonHubSnapshot(profileId, 'renew', request)
-}
-
-export function syncPokemonHubSnapshot(profileId, request) {
-  return postPokemonHubSnapshot(profileId, 'sync', request)
-}
-
-export function releasePokemonHubSnapshot(profileId, request) {
-  return postPokemonHubSnapshot(profileId, 'release', request)
-}
-
-async function postPokemonHubSnapshot(profileId, operation, request) {
-  const response = await fetch(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/snapshots/${operation}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-  })
-  const body = await response.json().catch(() => ({}))
-  if (!response.ok) {
-    const error = new Error(body.error || `Request failed (${response.status})`)
-    if (typeof body.code === 'string') error.code = body.code
-    throw error
-  }
-  return body
-}
-
 async function postPokemonHubSession(profileId, suffix, body) {
   const response = await fetch(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/sessions${suffix}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   })
-  return readPokemonHubResponse(response)
-}
-
-async function deletePokemonHubSession(profileId, suffix) {
-  const response = await fetch(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/sessions${suffix}`, { method: 'DELETE' })
   return readPokemonHubResponse(response)
 }
 

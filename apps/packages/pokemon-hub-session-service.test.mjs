@@ -480,6 +480,90 @@ test('closes a Hub pane through the canonical snapshot without attempting a save
   assert.deepEqual(await service.getCanonicalSnapshot({ profileId, sessionId: opened.sessionId }), { revision: 2, panes: [null, null, null] })
 })
 
+test('grows a leased legacy Hub source when a canonical move reaches its next slot', async () => {
+  const persistence = createMemoryRedisPersistence()
+  const coordinator = createPokemonHubSnapshotCoordinator({ persistence, eventStore: createPokemonHubEventStore({ persistence }) })
+  const hubProfileId = 'legacy-short-grid'
+  const hubSourceKey = `hub:${hubProfileId}`
+  const slots = Array.from({ length: 10 }, (_, slot) => ({
+    location: { kind: 'hub', hubProfileId, slot },
+    record: slot === 0 ? { representation: { adapter: 'gen3-gba-v1', kind: 'pc-record', bytes: Buffer.alloc(80, 1) }, display: { species: 25 } } : null,
+  }))
+  const adopted = await coordinator.adopt({ profileId, sourceKey: hubSourceKey, sourceRevision: 0, adapter: 'hub-grid-v1', slots })
+  const pokemonInstanceId = adopted.placements[0].pokemonInstanceId
+  const service = createPokemonHubSessionService({ persistence, coordinator, newId: () => 'legacy-grid-session' })
+  const opened = await service.open({ profileId })
+  const lifecycle = {
+    acquireSource: sourceKey => coordinator.acquire({ profileId, sourceKey, workspaceId: opened.sessionId }),
+    flushOutgoingSource: async () => {},
+    releaseSource: async () => {},
+  }
+  const profile = { type: 'hub-profile', hubProfileId }
+  assert.deepEqual(await service.syncCanonicalSnapshot({
+    profileId, sessionId: opened.sessionId, idempotencyKey: 'open-short-grid',
+    snapshot: { revision: 0, panes: [{ pane: 0, profile, hub: [{ pokemonInstanceId, slot: 0 }] }, null, null] }, ...lifecycle,
+  }), { status: 'accepted', dirtySourceKeys: [] })
+
+  assert.deepEqual(await service.syncCanonicalSnapshot({
+    profileId, sessionId: opened.sessionId, idempotencyKey: 'move-to-next-slot',
+    snapshot: { revision: 1, panes: [{ pane: 0, profile, hub: [{ pokemonInstanceId, slot: 10 }] }, null, null] }, ...lifecycle,
+  }), { status: 'accepted', dirtySourceKeys: [] })
+  const source = await coordinator.getSnapshot({ profileId, sourceKey: hubSourceKey })
+  assert.equal(source.placements.length, 11)
+  assert.equal(source.placements[0].pokemonInstanceId, null)
+  assert.equal(source.placements[10].pokemonInstanceId, pokemonInstanceId)
+
+  const oversized = await service.syncCanonicalSnapshot({
+    profileId, sessionId: opened.sessionId, idempotencyKey: 'oversized-grid-jump',
+    snapshot: { revision: 2, panes: [{ pane: 0, profile, hub: [{ pokemonInstanceId, slot: 1035 }] }, null, null] }, ...lifecycle,
+  })
+  assert.equal(oversized.status, 'corrected')
+  assert.equal((await coordinator.getSnapshot({ profileId, sourceKey: hubSourceKey })).placements.length, 11)
+})
+
+test('moves a Box Pokemon beyond both a short Hub source and the initial sixty-slot projection', async () => {
+  const persistence = createMemoryRedisPersistence()
+  const coordinator = createPokemonHubSnapshotCoordinator({ persistence, eventStore: createPokemonHubEventStore({ persistence }) })
+  const native = byte => ({ representation: { adapter: 'gen3-gba-v1', kind: 'pc-record', bytes: Buffer.alloc(80, byte) }, display: { species: byte } })
+  const save = await coordinator.adopt({ profileId, sourceKey, sourceRevision: 1, adapter: 'gen3-gba-v1', slots: [
+    { location: { kind: 'game', area: 'party', slot: 0 }, record: native(1) },
+    { location: { kind: 'game', area: 'box', box: 0, slot: 0 }, record: native(2) },
+  ] })
+  const hubProfileId = 'short-destination'
+  const hubSourceKey = `hub:${hubProfileId}`
+  await coordinator.ensureHubSource({ profileId, sourceKey: hubSourceKey, hubProfileId, minimumSlotCount: 10 })
+  const service = createPokemonHubSessionService({ persistence, coordinator, newId: () => 'save-to-short-hub' })
+  const opened = await service.open({ profileId })
+  const lifecycle = {
+    acquireSource: key => coordinator.acquire({ profileId, sourceKey: key, workspaceId: opened.sessionId }),
+    flushOutgoingSource: async () => {},
+    releaseSource: async () => {},
+  }
+  const saveProfile = { type: 'save', profileId, gameId: 'emerald' }
+  const hubProfile = { type: 'hub-profile', hubProfileId }
+  const party = [{ pokemonInstanceId: save.placements[0].pokemonInstanceId, slot: 0 }]
+  const boxPokemonInstanceId = save.placements[1].pokemonInstanceId
+  assert.deepEqual(await service.syncCanonicalSnapshot({
+    profileId, sessionId: opened.sessionId, idempotencyKey: 'open-save-and-hub',
+    snapshot: { revision: 0, panes: [
+      { pane: 0, profile: saveProfile, party, boxes: [{ pokemonInstanceId: boxPokemonInstanceId, slot: 0 }] },
+      { pane: 1, profile: hubProfile, hub: [] }, null,
+    ] }, ...lifecycle,
+  }), { status: 'accepted', dirtySourceKeys: [] })
+
+  assert.deepEqual(await service.syncCanonicalSnapshot({
+    profileId, sessionId: opened.sessionId, idempotencyKey: 'box-to-hub-slot-sixty',
+    snapshot: { revision: 1, panes: [
+      { pane: 0, profile: saveProfile, party, boxes: [] },
+      { pane: 1, profile: hubProfile, hub: [{ pokemonInstanceId: boxPokemonInstanceId, slot: 60 }] }, null,
+    ] }, ...lifecycle,
+  }), { status: 'accepted', dirtySourceKeys: [sourceKey] })
+  const hub = await coordinator.getSnapshot({ profileId, sourceKey: hubSourceKey })
+  assert.equal(hub.placements.length, 61)
+  assert.equal(hub.placements[60].pokemonInstanceId, boxPokemonInstanceId)
+  assert.equal((await coordinator.getSnapshot({ profileId, sourceKey })).placements[1].pokemonInstanceId, null)
+})
+
 test('keeps an individual pane bound when its lease release fails', async () => {
   const persistence = createMemoryRedisPersistence()
   const coordinator = createPokemonHubSnapshotCoordinator({ persistence, eventStore: createPokemonHubEventStore({ persistence }) })

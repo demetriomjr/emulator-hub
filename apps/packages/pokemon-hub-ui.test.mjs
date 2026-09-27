@@ -36,7 +36,6 @@ test('serializes structural source changes before constructing another workspace
   assert.match(packageSource, /if \(pokemonHubBusyRef\.current\) return false/)
   assert.match(packageSource, /if \(pokemonHubBusyRef\.current\) return/)
   assert.match(packageSource, /choosePaneSource\(pokemonHubPanesRef\.current, index, source \|\| null\)/)
-  assert.match(packageSource, /saveSourceKey\(pane\.profile\.gameId, pane\.profile\.profileId\)/)
 })
 
 test('loads a selected pane through the server-owned pane command', async () => {
