@@ -25,7 +25,8 @@ import { playerThreadFallbackUrl, selectPlayerThreadMode } from '../../packages/
 import { createPlayerOriginStorageClient } from '../../packages/player-origin-storage-bridge.mjs'
 import { findGen3EncounterLayout } from '../../packages/pokemon-gen3-encounter.mjs'
 import { createShinyHuntPlayer } from '../../packages/shiny-hunt-player.mjs'
-import { buildMacroTimeline } from '../../packages/input-macro-simulator.mjs'
+import { createPlayerMacroController } from '../../packages/player-macro-controller.mjs'
+import { INPUT_CORE_IDS, macroUsesKeyboardKey, normalizeKeyboardKey } from '../../packages/input-macro-simulator.mjs'
 
 const parameters = new URLSearchParams(location.search)
 const suppliedHubOrigin = parameters.get('hubOrigin')
@@ -92,6 +93,7 @@ let lastGamepadBindings = new Set()
 let launchDescriptor = null
 let emulatorGameId = null
 let gamepadInput = null
+let macroKeyboardBindings = null
 let gamepadBindings = []
 let shinyHuntPlayer = null
 function getShinyHuntPlayer() {
@@ -104,7 +106,7 @@ function getShinyHuntPlayer() {
     softReset: () => softResetEmulator(window.EJS_emulator?.gameManager),
     setA: down => {
       if (!gamepadInput) throw new Error('Emulator input is unavailable')
-      gamepadInput.setSyntheticPressed(8, down)
+      gamepadInput.setSyntheticPressed(8, down, 'hunt')
     },
     saveState: () => saveEmulatorState({ kind: 'user-state', reasonCode: 'user-request' }),
   })
@@ -115,17 +117,26 @@ const interactionLock = createPlayerInteractionLock({
   releaseGamepadInput: () => gamepadInput?.release(),
   canResume: () => runtimeReady && !closeRequested && !leaseLost,
 })
-window.emulatorHubSetInteractionLock = locked => interactionLock.setLocked(locked)
+window.emulatorHubSetInteractionLock = locked => { if (locked) stopMacro(); interactionLock.setLocked(locked) }
+const heldKeyboardKeys = new Set()
+const blockedMacroKeys = new Set()
 const blockLockedKeyboard = event => {
-  if (shinyHuntPlayer?.isActive()) {
+  const key = normalizeKeyboardKey(event.key)
+  if (event.type === 'keyup') heldKeyboardKeys.delete(key)
+  const blockedRelease = event.type === 'keyup' && blockedMacroKeys.delete(key)
+  const blockedPress = event.type === 'keydown' && macroController.usesKeyboardKey(event.key, macroKeyboardBindings)
+  if (blockedPress) blockedMacroKeys.add(key)
+  if (shinyHuntPlayer?.isActive() || blockedPress || blockedRelease) {
     event.preventDefault()
     event.stopImmediatePropagation()
     return
   }
   interactionLock.blockKeyboard(event)
+  if (event.type === 'keydown' && event.isTrusted && !event.defaultPrevented) heldKeyboardKeys.add(key)
 }
 window.addEventListener('keydown', blockLockedKeyboard, true)
 window.addEventListener('keyup', blockLockedKeyboard, true)
+window.addEventListener('blur', () => { heldKeyboardKeys.clear(); blockedMacroKeys.clear() })
 let cloudSaveSynchronizer = null
 let cloudSaveInterval = null
 let cloudRecoveryDeleteTimer = null
@@ -153,17 +164,13 @@ const pendingRestoreRequests = new Map()
 const settledRestoreRequests = new Map()
 const oddsClock = createOddsManipulatorClock()
 oddsClock.install()
-let activeMacro = null
-
-const inputCoreIds = Object.freeze({
-  up: 4,
-  down: 5,
-  left: 6,
-  right: 7,
-  a: 8,
-  b: 0,
-  l: 10,
-  r: 11,
+const macroController = createPlayerMacroController({
+  canRun: macro => runtimeReady && Boolean(gamepadInput && window.EJS_emulator?.gameManager) && !leaseLost && !closeRequested && !interactionLock.isLocked() && !shinyHuntPlayer?.isActive() && ![...heldKeyboardKeys].some(key => macroUsesKeyboardKey(macro, key, macroKeyboardBindings)),
+  setPressed: (input, down) => gamepadInput.setSyntheticPressed(INPUT_CORE_IDS[input], down, 'macro'),
+  release: () => gamepadInput?.releaseSource('macro'),
+  schedule: (fn, ms) => window.setTimeout(fn, ms),
+  clear: timer => window.clearTimeout(timer),
+  onEnded: (runId, outcome) => window.parent.postMessage({ type: 'emulator-hub:macro-ended', sessionId, runId, outcome }, hubOrigin),
 })
 
 function loseLease() {
@@ -661,6 +668,7 @@ function scheduleCloudRecoveryDeleteAfterChoice(revision) {
 }
 
 async function closeEmulator() {
+  stopMacro()
   stopThreadStartupMonitor()
   stopEmulatedFpsOverlay()
   if (cloudRecoveryDeleteTimer) window.clearTimeout(cloudRecoveryDeleteTimer)
@@ -726,30 +734,11 @@ function loadEmulatorState() {
 }
 
 function stopMacro() {
-  if (!activeMacro) return
-  for (const timer of activeMacro.timers) window.clearTimeout(timer)
-  for (const input of activeMacro.heldInputs) window.EJS_emulator?.gameManager?.simulateInput(0, inputCoreIds[input], 0)
-  activeMacro = null
+  macroController.cancel()
 }
 
-function runMacro(steps) {
-  if (shinyHuntPlayer?.isActive() || leaseLost || closeRequested) return
-  if (!Array.isArray(steps) || steps.length === 0) return
-  if (!window.EJS_emulator?.gameManager || !window.EJS_emulator.gameManager.simulateInput) return
-  stopMacro()
-  const timers = []
-  const heldInputs = new Set()
-  activeMacro = { timers, heldInputs }
-  for (const event of buildMacroTimeline({ id: 'run', name: 'run', steps, createdAt: 0, updatedAt: 0 })) {
-    const coreId = inputCoreIds[event.input]
-    if (coreId === undefined) continue
-    timers.push(window.setTimeout(() => {
-      if (!activeMacro) return
-      if (event.value === 1) heldInputs.add(event.input)
-      else heldInputs.delete(event.input)
-      window.EJS_emulator.gameManager.simulateInput(0, coreId, event.value)
-    }, event.at))
-  }
+function macroReply(type, message, ok, error) {
+  window.parent.postMessage({ type, requestId: message.requestId, sessionId, runId: message.runId, ok, ...(error ? { error } : {}) }, hubOrigin)
 }
 
 window.addEventListener('message', event => {
@@ -785,6 +774,7 @@ window.addEventListener('message', event => {
     if (typeof event.data.locked !== 'boolean' || !Number.isInteger(event.data.revision) || typeof event.data.requestId !== 'string' || event.data.sessionId !== sessionId) return
     if (event.data.revision > lastInteractionLockRevision) {
       lastInteractionLockRevision = event.data.revision
+      if (event.data.locked) stopMacro()
       interactionLock.setLocked(event.data.locked)
     }
     window.parent.postMessage({ type: 'emulator-hub:interaction-lock-applied', requestId: event.data.requestId, sessionId, revision: lastInteractionLockRevision, ok: true }, hubOrigin)
@@ -824,7 +814,9 @@ window.addEventListener('message', event => {
   if (event.data?.type === 'emulator-hub:control-profile') {
     const bindings = event.data.bindings
     if (!bindings || typeof bindings !== 'object' || !Object.values(bindings).every(binding => binding && typeof binding.gamepad === 'string')) return
+    stopMacro()
     gamepadInput?.setBindings(bindings)
+    macroKeyboardBindings = bindings
     return
   }
   if (event.data?.type === 'emulator-hub:odds-manipulator-configure') {
@@ -844,6 +836,7 @@ window.addEventListener('message', event => {
   }
   if (event.data?.type === 'emulator-hub:reset') {
     if (shinyHuntPlayer?.isActive()) return
+    stopMacro()
     if (event.data.oddsResetCount !== undefined || event.data.virtualTimestamp !== undefined) {
       const accepted = oddsClock.configure({ enabled: true, oddsResetCount: event.data.oddsResetCount, virtualTimestamp: event.data.virtualTimestamp })
       clientDiagnostics?.capture({ kind: 'odds-manipulator', message: accepted ? 'odds.hard-reset.clock-applied' : 'odds.hard-reset.clock-rejected', oddsResetCount: event.data.oddsResetCount ?? null, virtualTimestamp: event.data.virtualTimestamp ?? null, dateNow: Date.now(), managerReady: Boolean(window.EJS_emulator?.gameManager) })
@@ -853,6 +846,7 @@ window.addEventListener('message', event => {
   }
   if (event.data?.type === 'emulator-hub:soft-reset') {
     if (shinyHuntPlayer?.isActive()) return
+    stopMacro()
     if (event.data.oddsResetCount !== undefined || event.data.virtualTimestamp !== undefined) {
       const accepted = oddsClock.configure({ enabled: true, oddsResetCount: event.data.oddsResetCount, virtualTimestamp: event.data.virtualTimestamp })
       clientDiagnostics?.capture({ kind: 'odds-manipulator', message: accepted ? 'odds.soft-reset.clock-applied' : 'odds.soft-reset.clock-rejected', oddsResetCount: event.data.oddsResetCount ?? null, virtualTimestamp: event.data.virtualTimestamp ?? null, dateNow: Date.now(), managerReady: Boolean(window.EJS_emulator?.gameManager) })
@@ -860,12 +854,22 @@ window.addEventListener('message', event => {
     void softResetEmulator(window.EJS_emulator?.gameManager)
     return
   }
-  if (event.data?.type === 'emulator-hub:macro-run') {
-    runMacro(event.data.steps)
+  if (event.data?.type === 'emulator-hub:macro-prepare') {
+    if (event.data.sessionId !== sessionId || typeof event.data.requestId !== 'string' || typeof event.data.runId !== 'string') return
+    const result = macroController.prepare(event.data.runId, event.data.macro)
+    macroReply('emulator-hub:macro-prepared', event.data, result.ok, result.error)
+    return
+  }
+  if (event.data?.type === 'emulator-hub:macro-start') {
+    if (event.data.sessionId !== sessionId || typeof event.data.requestId !== 'string' || typeof event.data.runId !== 'string') return
+    const result = macroController.start(event.data.runId)
+    macroReply('emulator-hub:macro-started', event.data, result.ok, result.error)
     return
   }
   if (event.data?.type === 'emulator-hub:macro-stop') {
-    stopMacro()
+    if (event.data.sessionId !== sessionId || typeof event.data.requestId !== 'string' || typeof event.data.runId !== 'string') return
+    macroController.stop(event.data.runId)
+    macroReply('emulator-hub:macro-stopped', event.data, true)
     return
   }
   if (event.data?.type === 'emulator-hub:save-state') {
@@ -882,6 +886,7 @@ window.addEventListener('message', event => {
   }
   if (event.data?.type === 'emulator-hub:load-state') {
     if (shinyHuntPlayer?.isActive()) return
+    stopMacro()
     if (loadEmulatorState()) snapshotTelemetry.info('user-state-loaded', { snapshotKind: 'user-state', revision: userSnapshotRevision })
     else { snapshotTelemetry.warn('user-state-load-unavailable', { snapshotKind: 'user-state', revision: userSnapshotRevision }); reportPlayerActionFailure('manual-load') }
     return
@@ -1000,6 +1005,7 @@ async function start() {
   window.EJS_gameName = launch.title
   window.EJS_gameID = emulatorGameId
   window.EJS_defaultControls = { 0: controlProfile.bindings, 1: {}, 2: {}, 3: {} }
+  macroKeyboardBindings = controlProfile.bindings
   // EmulatorJS only detects touch once during startup. Match the Hub's mobile
   // player breakpoint so Chrome's device viewport simulation is deterministic.
   window.EJS_browserMode = isMobilePlayerViewport ? 'mobile' : undefined

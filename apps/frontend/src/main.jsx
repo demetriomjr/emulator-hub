@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom'
 import { createRoot } from 'react-dom/client'
 import { ConfigProvider, Select } from 'antd'
 import { acquirePlayerLease, createProfile, deleteProfile as deleteProfileRequest, getControlProfile, getGames, getProfiles, getUserPreferences, listMacros, releasePlayerLease, saveMacro as saveMacroRequest, syncOddsResetCount, updateControlProfile, updateProfile, updateUserPreferences } from '../../packages/hub-client.js'
-import { createMacro } from '../../packages/input-macro-simulator.mjs'
+import { createMacro, migrateMacro, normalizeKeyboardKey, validateMacro } from '../../packages/input-macro-simulator.mjs'
+import { createMacroRunCoordinator } from '../../packages/macro-run-coordinator.mjs'
 import { activeGamepadBindings, readGamepadBinding, readGamepadSnapshot } from '../../packages/gamepad-input.mjs'
 import { createGamepadInputGate } from '../../packages/gamepad-input-gate.mjs'
 import { deliverPlayerInteractionLock } from '../../packages/player-interaction-lock-delivery.mjs'
@@ -201,11 +202,6 @@ function formatGamepadBinding(value) {
   return labels[value] ?? value
 }
 
-function normalizeKeyboardKey(key) {
-  const namedKeys = { ArrowUp: 'up arrow', ArrowDown: 'down arrow', ArrowLeft: 'left arrow', ArrowRight: 'right arrow', Enter: 'enter', ' ': 'space' }
-  return namedKeys[key] ?? key.toLowerCase()
-}
-
 function setControlBinding(profile, id, kind, value) {
   if (id.startsWith('trigger:')) {
     const trigger = id.slice('trigger:'.length)
@@ -247,7 +243,20 @@ function App() {
   const [macroDraft, setMacroDraft] = useState(null)
   const [macroError, setMacroError] = useState('')
   const [macroSaving, setMacroSaving] = useState(false)
-  const [runningMacroId, setRunningMacroId] = useState(null)
+  const [macroWarnings, setMacroWarnings] = useState([])
+  const [macroRunState, setMacroRunState] = useState({ phase: 'idle', runId: null, macroId: null, error: '' })
+  const macroCoordinatorRef = useRef(null)
+  if (!macroCoordinatorRef.current) macroCoordinatorRef.current = createMacroRunCoordinator({
+    request: async (sessionId, phase, runId, macro) => {
+      const frame = [...document.querySelectorAll('.player-cell iframe')].find(candidate => candidate.closest('.player-cell')?.dataset.sessionId === sessionId)
+      if (!frame) throw new Error('Player da macro indisponível')
+      const replyType = { prepare: 'emulator-hub:macro-prepared', start: 'emulator-hub:macro-started', stop: 'emulator-hub:macro-stopped' }[phase]
+      const response = await requestPlayerFrame({ frame, browser: window, sessionId, type: `emulator-hub:macro-${phase}`, replyType, details: { runId, ...(macro ? { macro } : {}) }, timeoutMs: 5000 })
+      if (response.runId !== runId) throw new Error('Resposta de macro pertence a outra execução')
+      return response
+    },
+    onChange: setMacroRunState,
+  })
   const [pokemonHubOpen, setPokemonHubOpen] = useState(false)
   const [pokemonHubCloseSignal, setPokemonHubCloseSignal] = useState(0)
   const [fastForwardEnabled, setFastForwardEnabled] = useState(false)
@@ -435,6 +444,11 @@ function App() {
     const receive = event => {
       const trustedFrame = findTrustedPlayerFrame(event, document.querySelectorAll('.player-cell iframe'), window.location.origin)
       if (!trustedFrame) return
+      if (event.data?.type === 'emulator-hub:macro-ended') {
+        const participant = trustedFrame.closest('.player-cell')?.dataset.sessionId
+        if (participant && event.data.sessionId === participant && typeof event.data.runId === 'string' && ['completed', 'stopped', 'failed'].includes(event.data.outcome)) macroCoordinatorRef.current.ended(participant, event.data.runId, event.data.outcome)
+        return
+      }
       if (event.data?.type === 'emulator-hub:local-storage-request') {
         const session = activeSessionsRef.current.find(candidate => trustedFrame.closest('.player-cell')?.dataset.sessionId === candidate.sessionId)
         if (session) void respondToPlayerStorageRequest(event, { frame: trustedFrame, session, storage: localRecoveryStorage, installationIdentity: event.data.operation === 'installation-identity' ? getInstallationIdentity() : null, origin: event.origin })
@@ -549,6 +563,7 @@ function App() {
       oddsSyncRef.current.delete(event.data.sessionId)
       snapshotDeleteWatchdogRef.current.cancel(event.data.sessionId)
       clearRestoreChoiceTimer(event.data.sessionId)
+      void macroCoordinatorRef.current.lost(event.data.sessionId).catch(cause => setMacroError(cause.message))
       setActiveSessions(current => current.filter(session => session.sessionId !== event.data.sessionId))
       setSnapshotRestoreRequests(current => { const next = { ...current }; delete next[event.data.sessionId]; return next })
       setError('A sessão do emulador foi substituída ou expirou.')
@@ -795,6 +810,7 @@ function App() {
 
   function dispatchReset(type) {
     if (huntActiveRef.current) return
+    void stopMacro()
     const frames = [...document.querySelectorAll('.player-grid iframe')]
     activeSessionsRef.current.forEach((session, index) => {
       const frame = frames[index]
@@ -848,9 +864,9 @@ function App() {
     })
   }
 
-  function startShinyHunt() {
+  async function startShinyHunt() {
     if (huntActiveRef.current || activeSessionsRef.current.length === 0) return
-    stopMacro()
+    if (!await stopMacro()) return
     const sessions = activeSessionsRef.current.map(session => ({ ...session }))
     const participantKey = sessions.map(session => session.sessionId).join('|')
     const huntId = crypto.randomUUID()
@@ -932,6 +948,7 @@ function App() {
 
   function configurePlayerFrameOnLoad(frame, session) {
     if (huntActiveRef.current) stopShinyHunt()
+    void macroCoordinatorRef.current.lost(session.sessionId).catch(cause => setMacroError(cause.message))
     hubPerformance?.frameLoaded(session.sessionId)
     sendPlayerInteractionLock(frame, closeLockRef.current || profileInfoSessionId === session.sessionId)
     configurePlayerFrame(frame, { type: 'emulator-hub:fast-forward', enabled: fastForwardEnabled, speed: fastForwardSpeed })
@@ -989,6 +1006,7 @@ function App() {
     if (saveCloseCoordinatorRef.current) return
     const selected = activeSessionsRef.current.filter(session => sessionIds.includes(session.sessionId))
     if (selected.length === 0) return
+    void stopMacro()
     setPlayerInteractionLocked(true)
     const preferenceSync = selected.length === activeSessionsRef.current.length
       ? saveUserPreferences({ fastForwardSpeed, fastForwardEnabled, muted, triggerActions: { l2: l2TriggerAction, r2: r2TriggerAction } }).catch(() => {})
@@ -1367,6 +1385,7 @@ function App() {
   function sendSelectedPlayerMessage(type) {
     const sessionId = activeSessions.some(session => session.sessionId === focusedSessionId) ? focusedSessionId : activeSessions[0]?.sessionId
     if (!sessionId) return
+    if (type === 'emulator-hub:load-state') void stopMacro()
     setPlayerActionErrors(current => { const next = { ...current }; delete next[sessionId]; return next })
     const frame = [...document.querySelectorAll('.player-cell')].find(cell => cell.dataset.sessionId === sessionId)?.querySelector('iframe')
     configurePlayerFrame(frame, { type, sessionId })
@@ -1383,37 +1402,48 @@ function App() {
 
   function openMacroModal() {
     setMacroModalOpen(true)
-    setMacroDraft(null)
+    if (!macroCoordinatorRef.current.getState().runId) { setMacroDraft(null); setMacroWarnings([]) }
     void refreshMacros()
   }
 
   function closeMacroModal() {
     setMacroModalOpen(false)
-    setMacroDraft(null)
-    stopMacro()
   }
 
-  function runMacro(macro) {
-    if (huntActiveRef.current) return
-    for (const frame of document.querySelectorAll('.player-grid iframe')) {
-      configurePlayerFrame(frame, { type: 'emulator-hub:macro-run', steps: macro.steps })
-    }
-    setRunningMacroId(macro.id)
+  function selectMacro(macro) {
+    try {
+      const converted = migrateMacro(macro)
+      setMacroDraft(converted.macro)
+      setMacroWarnings(converted.warnings)
+      setMacroError('')
+    } catch (cause) { setMacroError(cause.message) }
   }
 
-  function stopMacro() {
-    for (const frame of document.querySelectorAll('.player-grid iframe')) {
-      configurePlayerFrame(frame, { type: 'emulator-hub:macro-stop' })
-    }
-    setRunningMacroId(null)
+  async function runMacro() {
+    if (huntActiveRef.current || !macroDraft) return
+    const validation = validateMacro(macroDraft)
+    if (!validation.valid) { setMacroError(validation.errors[0]); return }
+    const participants = activeSessionsRef.current.map(session => session.sessionId)
+    if (!participants.length) { setMacroError('Nenhum player aberto'); return }
+    setMacroError('')
+    try { await macroCoordinatorRef.current.start(structuredClone(macroDraft), participants) }
+    catch (cause) { setMacroError(cause.message) }
+  }
+
+  async function stopMacro() {
+    try { await macroCoordinatorRef.current.stop(); return true }
+    catch (cause) { setMacroError(cause.message); return false }
   }
 
   async function saveMacro() {
     if (macroSaving || !macroDraft) return
+    const validation = validateMacro(macroDraft)
+    if (!validation.valid) { setMacroError(validation.errors[0]); return }
     setMacroSaving(true)
     try {
-      await saveMacroRequest(macroDraft)
-      setMacroDraft(null)
+      const saved = await saveMacroRequest(macroDraft)
+      setMacroDraft(saved)
+      setMacroWarnings([])
       await refreshMacros()
     } catch (cause) {
       setMacroError(cause.message)
@@ -1496,26 +1526,22 @@ function App() {
             ? <React.Suspense fallback={<p>Carregando editor...</p>}>
               <form className="macro-name-form" onSubmit={event => { event.preventDefault(); void saveMacro() }}>
                 <input id="macro-name" aria-label="Nome da macro" placeholder="Nome da macro" value={macroDraft.name} onChange={event => setMacroDraft({ ...macroDraft, name: event.target.value })} maxLength="50" required disabled={macroSaving} />
-                <MacroEditor macro={macroDraft} onChange={setMacroDraft} onSave={() => void saveMacro()} error={macroError} />
+                <MacroEditor macro={macroDraft} onChange={setMacroDraft} onSave={() => void saveMacro()} onStart={() => void runMacro()} onStop={() => void stopMacro()} runPhase={macroRunState.phase} disabled={macroSaving} error={macroRunState.error || macroError} warnings={macroWarnings} />
               </form>
             </React.Suspense>
             : <>
               <div className="profile-list">
                 {macros.length === 0 && <p className="profile-empty">Nenhuma macro salva.</p>}
-                {macros.map(macro => {
-                  const isRunning = runningMacroId === macro.id
-                  return <div className="profile-row" key={macro.id}>
-                    <button className="profile-select macro-run-button" type="button" aria-label={isRunning ? `Parar macro ${macro.name}` : `Executar macro ${macro.name}`} onClick={() => { if (isRunning) stopMacro(); else runMacro(macro) }}>
+                {macros.map(macro => <div className="profile-row" key={macro.id}>
+                    <button className="profile-select macro-run-button" type="button" aria-label={`Editar macro ${macro.name}`} onClick={() => selectMacro(macro)}>
                       <span>{macro.name}</span>
-                      {isRunning
-                        ? <svg className="macro-stop-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10v10H7z" /></svg>
-                        : <svg className="macro-play-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l11 7-11 7z" /></svg>}
                     </button>
-                  </div>})}
+                  </div>)}
               </div>
               <div className="macro-actions-footer">
-                <button className="profile-add" type="button" aria-label="Adicionar macro" onClick={() => setMacroDraft(createMacro('Nova macro'))}>
+                <button className="profile-add" type="button" aria-label="Criar novo macro" onClick={() => { setMacroDraft(createMacro('Nova macro')); setMacroWarnings([]); setMacroError('') }}>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                  <span>Criar novo</span>
                 </button>
                 {macroError && <p className="profile-error" role="alert">{macroError}</p>}
               </div>
@@ -1663,7 +1689,7 @@ function App() {
               <button className="player-control-button global-reset-button" type="button" aria-label="Hard Reset" title="Hard Reset" disabled={huntRunning} onClick={() => dispatchReset('emulator-hub:reset')}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v8M6.4 6.4a8 8 0 1 0 11.2 0" /></svg>
               </button>
-              <button className="player-control-button" type="button" aria-label="Macros" title="Macros" onClick={openMacroModal}>
+              <button className={`player-control-button${['starting', 'running', 'stopping'].includes(macroRunState.phase) ? ' is-active' : ''}`} type="button" aria-label={['starting', 'running', 'stopping'].includes(macroRunState.phase) ? 'Macros: macro ativa' : 'Macros'} title={macroRunState.phase === 'starting' ? 'Macro iniciando' : ['running', 'stopping'].includes(macroRunState.phase) ? 'Macro em execução' : 'Macros'} aria-expanded={macroModalOpen} onClick={openMacroModal}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5l7 7-7 7V5zm9 0h7v3h-7V5zm0 5h7v3h-7v-3zm0 5h7v3h-7v-3z" /></svg>
               </button>
             </div>

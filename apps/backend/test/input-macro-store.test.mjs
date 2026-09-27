@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, test } from 'node:test'
@@ -21,6 +21,10 @@ async function macroPath() {
 }
 
 function sampleMacro() {
+  return { schemaVersion: 2, id: 'macro-1', name: 'Dash Combo', items: [{ id: 'item-1', kind: 'button', input: 'up', action: 'press', count: 1, delayAfterMs: 0 }], createdAt: 1780000000000, updatedAt: 1780000000000 }
+}
+
+function sampleLegacyMacro() {
   return {
     id: 'macro-1',
     name: 'Dash Combo',
@@ -29,6 +33,41 @@ function sampleMacro() {
     updatedAt: 1780000000000,
   }
 }
+
+function sampleV2Macro() {
+  return { schemaVersion: 2, id: 'macro-2', name: 'Novo', items: [{ id: 'item-1', kind: 'delay', durationMs: 1200 }], createdAt: 1780000000000, updatedAt: 1780000000000 }
+}
+
+test('JSON store reads mixed versions and preserves legacy records when saving v2', async () => {
+  const dataPath = await macroPath()
+  await mkdir(join(dataPath, '..'), { recursive: true })
+  await writeFile(dataPath, JSON.stringify([sampleLegacyMacro()]))
+  const store = createInputMacroStore({ dataPath })
+  assert.deepEqual(await store.list(), [sampleLegacyMacro()])
+  const saved = await store.save(sampleV2Macro())
+  assert.equal(saved.schemaVersion, 2)
+  assert.deepEqual((await store.list()).map(macro => macro.id), ['macro-1', 'macro-2'])
+})
+
+test('one malformed stored record does not hide or discard valid macros', async () => {
+  const dataPath = await macroPath()
+  await mkdir(join(dataPath, '..'), { recursive: true })
+  await writeFile(dataPath, JSON.stringify([null, sampleLegacyMacro()]))
+  const store = createInputMacroStore({ dataPath })
+  assert.deepEqual(await store.list(), [sampleLegacyMacro()])
+  await store.save(sampleV2Macro())
+  assert.deepEqual((await store.list()).map(macro => macro.id), ['macro-1', 'macro-2'])
+})
+
+test('create fills absent identity but rejects a malformed supplied identity', async () => {
+  const store = createInputMacroStore({ dataPath: await macroPath() })
+  const { id: unused, ...withoutId } = sampleV2Macro()
+  const created = await store.save(withoutId)
+  assert.ok(created.id)
+  await assert.rejects(() => store.save({ ...sampleV2Macro(), id: 42 }), { code: 'INPUT_MACRO_INVALID' })
+  await assert.rejects(() => store.save({ ...sampleV2Macro(), id: null }), { code: 'INPUT_MACRO_INVALID' })
+  await assert.rejects(() => store.save({ ...sampleV2Macro(), createdAt: 'yesterday' }), { code: 'INPUT_MACRO_INVALID' })
+})
 
 test('stores, lists and deletes input macros on the JSON file store', async () => {
   const store = createInputMacroStore({ dataPath: await macroPath() })
@@ -65,4 +104,13 @@ test('stores, lists and deletes input macros on the Redis store', async () => {
 
   assert.deepEqual(await store.delete('macro-1'), saved)
   assert.deepEqual(await store.list(), [])
+})
+
+test('Redis store reads old and new macros in the same collection', async () => {
+  const persistence = createMemoryRedisPersistence()
+  await persistence.set('input-macros', JSON.stringify([sampleLegacyMacro()]))
+  const store = createRedisInputMacroStore({ persistence })
+  await store.save(sampleV2Macro())
+  assert.deepEqual((await store.list()).map(macro => macro.id), ['macro-1', 'macro-2'])
+  assert.equal((await store.list())[0].steps[0].action, 'press')
 })

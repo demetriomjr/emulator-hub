@@ -1,241 +1,158 @@
-# Input Macro Simulator Specification
+# Spec 042 — Controlador de macros de entrada
 
-## Overview
-A frontend-only input macro simulator package for creating and editing macro sequences. The backend only persists the macro data.
+Status: redesenho do contrato e da interface. A implementação atual desta branch ainda segue a versão anterior desta spec.
 
-## Package Location
-`apps/packages/input-macro-simulator.mjs` (and associated test file)
+## Objetivo
 
-## Data Model
+O usuário cria uma lista linear de eventos para os emuladores abertos: Botão, Delay e Repeat. O player executa um item por vez, na ordem da lista. Nenhum botão gerado pela macro se sobrepõe a outro. A macro é opcional e não altera as verificações de ROM, perfil, lease ou save.
 
-### MacroStep
-```typescript
-type InputType =
-  | 'up' | 'down' | 'left' | 'right'  // Directions
-  | 'a' | 'b' | 'l' | 'r';            // Buttons
+## Eventos e padrões
 
-type ActionType = 'press' | 'repeat' | 'hold';
+| Item | Configuração editável | Padrão | Comportamento |
+| --- | --- | --- | --- |
+| Botão — Press | Botão, quantidade de pressões e delay posterior | A, 1 pressão, 800 ms posteriores | Para cada pressão, envia down e up. Entre uma pressão e a seguinte da mesma ação, espera 800 ms fixos após o up. Depois do último up, espera o delay posterior antes do próximo item. |
+| Botão — Hold | Botão, tempo segurado e delay posterior | A, 2000 ms segurado, 800 ms posteriores | Envia down, mantém pelo tempo configurado, envia up e só então espera o delay posterior. |
+| Delay | Tempo em milissegundos | 1200 ms | Não envia botão. Apenas espera o tempo configurado e passa ao próximo item. |
+| Repeat | Quantidade de passagens; 0 significa infinito | 1 passagem | Controla o cursor da lista. Volta à primeira linha até completar sua própria contagem; depois zera seu contador e segue abaixo dele. Não envia botão e não acrescenta delay. |
 
-interface MacroStep {
-  id: string;                    // Unique identifier (UUID)
-  input: InputType;              // The input to simulate
-  action: ActionType;            // How to execute the input
-  duration?: number;             // For 'hold': 0 = infinite, otherwise ms (100-30000). For 'repeat': count (1-100). For 'press': 0 = infinite hold, omitted = short tap.
-  delay?: number;                // Delay before next step (ms), default 1000
-}
-```
+O pulso de uma pressão de Press dura 60 ms por padrão interno do executor, sem controle adicional na interface. Os 800 ms entre pressões de um mesmo Press são fixos e não editáveis. São distintos do delay posterior do botão, que é editável e começa somente depois que todo o Press ou Hold terminou. Por exemplo, Press A com count 3 e delay posterior de 1200 ms faz down/up, espera 800 ms, down/up, espera 800 ms, down/up, espera 1200 ms e só então inicia o item seguinte.
 
-### Macro
-```typescript
-interface InputMacro {
-  id: string;                    // Unique identifier
-  name: string;                  // User-defined name
-  steps: MacroStep[];            // Ordered list of steps
-  createdAt: number;             // Timestamp
-  updatedAt: number;             // Timestamp
-}
-```
+O Delay é um item separado. Assim, Press A, Repeat 10, Delay 1200 permite dez passagens por A e espera 1200 ms somente depois da décima. Para isso, o delay posterior do botão A deve estar configurado como 0; caso contrário, ele será aplicado em cada passagem pelo botão, como em qualquer outra volta ao início.
 
-## Available Inputs (Constant)
-```typescript
-const AVAILABLE_INPUTS: InputType[] = [
-  'up', 'down', 'left', 'right',
-  'a', 'b', 'l', 'r'
-];
+## Semântica de Repeat
 
-const INPUT_LABELS: Record<InputType, string> = {
-  up: '↑ Up', down: '↓ Down', left: '← Left', right: '→ Right',
-  a: 'A', b: 'B', l: 'L', r: 'R'
-};
+A execução mantém um cursor na lista e um contador independente para cada Repeat, começando em zero. Ao chegar a um Repeat com valor positivo N, ele conta a passagem atual. Se ainda não chegou a N, volta à primeira linha. Quando chega a N, zera seu próprio contador e continua no item abaixo dele. Repeat 1 apenas permite seguir: a primeira passagem já ocorreu.
 
-const ACTION_TYPES: ActionType[] = ['press', 'repeat', 'hold'];
+Quando um Repeat posterior volta à primeira linha, percorre todos os itens anteriores em ordem, inclusive os Repeat anteriores. Como eles zeraram seus próprios contadores quando terminaram, executam sua quantidade inteira novamente. Exemplo curto: Press A, Repeat 2, Press B, Repeat 2 produz A, A, B, A, A, B. No exemplo Press A, Press A, Repeat 10, Press B, Press B, Repeat 5, cada nova passagem provocada pelo segundo Repeat executa novamente o primeiro Repeat 10 desde seu contador zero.
 
-const ACTION_LABELS: Record<ActionType, string> = {
-  press: 'Press Once',
-  repeat: 'Repeat',
-  hold: 'Hold'
-};
-```
+Repeat 0 sempre volta à primeira linha e só termina quando a execução é parada ou cancelada. O usuário pode adicionar itens abaixo dele; eles permanecem salvos e editáveis, mas não serão alcançados naquela execução enquanto esse Repeat 0 estiver ativo. Isso não é erro de validação nem aviso bloqueante. A posição do Repeat não é restringida por regras sobre utilidade do fluxo; mesmo uma lista que só repete sem produzir inputs deve continuar cancelável e não pode travar a interface.
 
-## Package API
+## Modelo de dados e pacote compartilhado
 
-### Core Functions
+O contrato versionado pertence a apps/packages/. O frontend edita os itens, o player executa a lista e o backend persiste e valida o documento. A antiga descrição “frontend-only” deixa de valer.
 
-#### `createMacro(name: string): InputMacro`
-Creates a new empty macro with the given name.
+Macro versão 2:
 
-#### `addStep(macro: InputMacro, step: Omit<MacroStep, 'id'>, index?: number): InputMacro`
-Adds a step to the macro at the specified index (or end if not provided). Returns new macro instance.
+- schemaVersion: 2; id; name; items; createdAt; updatedAt.
+- ButtonItem: id; kind = button; input = up, down, left, right, a, b, l ou r; action = press ou hold; delayAfterMs.
+- ButtonItem com action = press: count, inteiro positivo. O executor usa 60 ms de down por pressão e 800 ms fixos entre uma pressão e a próxima da mesma ação.
+- ButtonItem com action = hold: holdMs, inteiro positivo. O campo count não existe nesse caso.
+- DelayItem: id; kind = delay; durationMs, inteiro não negativo.
+- RepeatItem: id; kind = repeat; count, inteiro não negativo; 0 significa infinito.
 
-#### `removeStep(macro: InputMacro, stepId: string): InputMacro`
-Removes a step by ID. Returns new macro instance.
+Campos que não pertencem à variante do item não são usados nem persistidos. Trocar Press por Hold cria holdMs = 2000 e remove count; trocar Hold por Press cria count = 1 e remove holdMs. O delay posterior do mesmo botão permanece configurado na troca. Adicionar Botão cria Press A com count 1 e delayAfterMs 800. Adicionar Delay cria durationMs 1200. Adicionar Repeat cria count 1.
 
-#### `updateStep(macro: InputMacro, stepId: string, updates: Partial<Omit<MacroStep, 'id'>>): InputMacro`
-Updates a step's properties. Returns new macro instance.
+A validação aceita apenas objetos no formato esperado, nome não vazio de até 50 caracteres, lista não vazia de até 100 itens, IDs de itens não vazios e únicos, entradas suportadas e números inteiros seguros e finitos. Um documento persistido exige id da macro não vazio; no POST de criação, o id da macro pode faltar e é gerado pelo store antes da validação do documento persistido. Press exige count maior que zero; Hold exige holdMs maior que zero; Delay e delayAfterMs aceitam zero; Repeat aceita zero. Durações configuráveis de Hold e Delay e delayAfterMs vão até 600000 ms. Contagens não dependem de um limite de expansão da lista; o executor é progressivo. Payload inválido retorna erro estruturado, sem TypeError. Repeat 0 com itens abaixo continua válido.
 
-#### `reorderSteps(macro: InputMacro, fromIndex: number, toIndex: number): InputMacro`
-Moves a step from one position to another. Returns new macro instance.
+Os helpers de criar, editar, remover e reordenar itens retornam novos objetos. Reordenação preserva os itens e a ordem escolhida pelo usuário. Não reaproveitar milissegundos como contagem ou vice-versa.
 
-#### `validateMacro(macro: InputMacro): { valid: boolean; errors: string[] }`
-Validates macro structure and step constraints.
+## Execução e tempo
 
-### React Components (Frontend Only)
+O runner do player executa a lista progressivamente com cursor, contadores e, no máximo, o timer do evento corrente. Ele não constrói uma timeline completa nem agenda previamente todas as pressões: Repeat 0 e Repeat encadeados podem produzir uma execução ilimitada ou muito longa. Mesmo um ciclo sem esperas ou botões deve ceder controle ao navegador para que Parar continue funcionando. Cada botão tem down/up explícitos. Hold é solto antes do delay posterior. Em Press, o intervalo fixo de 800 ms ocorre só entre pressões; o delay posterior começa depois da última. Delay começa após o item anterior, inclusive seu delay posterior.
 
-#### `MacroEditor({ macro, onChange, availableInputs, onSave })`
-Main editor component showing the step list with add/remove/reorder controls.
+Se um timer do navegador atrasar, os próximos tempos contam a partir da conclusão real do evento atual. Não emitir ações atrasadas em rajada. O intervalo fixo entre pressões garante que o core observe a soltura. Duas ações de botão da macro não ficam pressionadas ao mesmo tempo; uma segunda ação só começa após soltura e delay da primeira.
 
-#### `StepEditor({ step, availableInputs, onUpdate, onRemove })`
-Inline editor for a single step showing:
-- Input selector (dropdown with icons/labels)
-- Action type selector (press/repeat/hold)
-- Duration input (for hold/repeat)
-- Delay input
-- Remove button
+Parar, nova execução, perda da lease, fechamento ou recarga do player, reset manual e início da caça shiny cancelam a macro, impedem eventos futuros e soltam as entradas pertencentes à macro. Fechar apenas o modal não cancela nem pausa a execução. A soltura da macro não pode desligar o mesmo botão mantido por controle físico. IDs de execução impedem que timers e respostas antigas mudem a execução nova. Ao terminar uma macro finita, o player limpa o estado e avisa o hub; Repeat 0 continua ativo até cancelamento.
 
-#### `MacroStepList({ steps, onReorder, onUpdate, onRemove })`
-Draggable/sortable list of steps using native HTML5 drag-and-drop.
+A mesma macro é enviada aos player frames abertos, preservando o alcance atual desta branch. O hub congela o conjunto de sessões no Start. Todos confirmam preparo sem emitir inputs; só depois o hub autoriza o início. Se algum player recusar ou falhar, o hub cancela os demais e apresenta o erro. Mensagens de preparo, início, parada, aceite, conclusão e falha carregam runId e sessionId e validam origin/source. O hub não mostra “rodando” apenas porque enviou postMessage.
 
-#### `AddStepButton({ onAdd, availableInputs })`
-Button to append a new step with default values.
+## Interface
 
-### Macro Runner (Timeline Builder)
+O botão Macros permanece no header do player e abre um modal no tema verde escuro. Ele tem estado visual inativo/ativo, como os controles existentes de Fast Forward e Odds Manipulator: a partir do envio dos comandos de início, sua cor/realce indica atividade mesmo com o modal fechado e permanece assim até a parada confirmada. Clicar no botão Macros apenas abre o modal; não inicia, para nem alterna a execução. Seu nome acessível e título indicam o estado ativo; aria-expanded descreve o modal aberto. Não apresentá-lo semanticamente como botão de alternância, pois seu clique não controla a execução.
 
-`buildMacroTimeline(macro, options): MacroEvent[]` converts a macro's ordered steps into a flat list of timed input events.
+1. Sem macro em execução, abrir o modal mostra primeiro a lista de macros salvas e Criar novo. Selecionar uma macro abre seu editor preenchido; Criar novo abre o mesmo editor vazio. Se o modal foi fechado durante uma execução, reabri-lo mostra o editor da macro em curso, inclusive um rascunho não salvo, com Parar disponível.
+2. O editor mostra nome e a pilha de itens já editáveis. Não há botão genérico Adicionar nem selector para escolher o tipo de novo item. Abaixo da pilha há um wrapper com três botões quadrados, apenas com ícones: controller para adicionar Botão, relógio para adicionar Delay e refresh para adicionar Repeat. Um clique acrescenta diretamente o item correspondente ao fim da pilha com seus valores padrão. O botão controller reutiliza o SVG do controle “Configurar controles” no header do emulador, em apps/frontend/src/main.jsx, em vez de criar outro desenho. Os três botões têm nome acessível e título ao passar o mouse, embora não exibam texto.
+3. Cada linha da pilha mostra seus campos editáveis, um controle de arraste para mudar a posição e um botão com ícone de excluir. Arrastar e soltar move a linha para a posição indicada, sem alterar os demais valores. A mesma reordenação funciona por teclado. Excluir remove imediatamente o item do rascunho. A linha Botão permite escolher o input e Press ou Hold e mostra apenas count ou holdMs, respectivamente, além do delay posterior editável. A linha Delay mostra somente milissegundos. A linha Repeat mostra somente a contagem, incluindo 0. Campos têm rótulos e unidades visíveis.
+4. Salvar valida e persiste, mantendo o editor aberto. Iniciar valida e executa um snapshot do conteúdo visível, mesmo se ainda não salvo, sem salvá-lo implicitamente. Depois que os players confirmam o início, o botão muda de texto e cor de Iniciar para Parar. Parar solicita cancelamento; após confirmação, volta ao estado Iniciar. Esses estados vêm da execução confirmada, não apenas do clique. Enquanto prepara ou encerra, o botão mostra o estado transitório correspondente e não aceita cliques repetidos.
+5. Fechar ou X apenas ocultam o modal. A macro continua rodando e o botão Macros do header continua realçado. O rascunho da execução em curso permanece disponível ao reabrir; mudanças feitas no editor depois do Start não alteram o snapshot em execução até um novo Start. Conclusão finita, parada e falha atualizam tanto o botão do editor quanto o indicador do header. Erros de valor aparecem junto ao item. Itens após Repeat 0 continuam editáveis e não impedem salvar ou iniciar.
 
-```typescript
-interface MacroEvent {
-  at: number;        // Milliseconds from the start of the macro run
-  input: InputType;  // Logical input, e.g. 'up' or 'a'
-  value: 0 | 1;      // Pressed (1) or released (0)
-}
+Não criar página de detalhes, elementos decorativos ou controles extras.
 
-interface MacroTimelineOptions {
-  pressDurationMs?: number;   // Default 60
-  repeatIntervalMs?: number;  // Default 120
-}
-```
+## Persistência e compatibilidade
 
-Per action:
-- `press`: value 1 at `t`; value 0 at `t + pressDurationMs`
-  (or `t + duration` when `duration` is a positive number).
-- `press` with `duration: 0`: value 1 at `t`, held forever — released only by
-  `emulator-hub:macro-stop` or the next macro run.
-- `repeat` (count `n`): `n` presses, one every `repeatIntervalMs`.
-- `hold`: value 1 at `t`, value 0 at `t + duration`.
-- `hold` with `duration: 0`: value 1 at `t`, held forever — released only by
-  `emulator-hub:macro-stop` or the next macro run.
-- `delay`: shifts the start of the following step forward.
+As rotas GET/POST/DELETE de /api/macros e os stores JSON/Redis continuam. POST valida por meio do pacote compartilhado; payload inválido retorna 400; DELETE de id ausente retorna 404. Na criação, o store gera id e timestamps ausentes; ao atualizar pelo mesmo id, preserva createdAt existente e define updatedAt no servidor. A resposta POST contém o documento salvo, que substitui o rascunho base do editor sem interromper uma execução já iniciada a partir de outro snapshot.
 
-The player frame maps each `InputType` to the EmulatorJS core input id
-(`up=4, down=5, left=6, right=7, a=8, b=0, l=10, r=11`) and dispatches the
-timeline through `gameManager.simulateInput`.
+Macros da versão anterior não podem desaparecer nem fazer a lista inteira falhar. Press antigo sem duração vira Button Press count 1; Hold finito vira Button Hold; Repeat antigo de botão vira Button Press com o count anterior. O valor antigo de delay é preservado numericamente como delayAfterMs: a aplicação passa a esperar após o término do botão, como definido nesta versão. O ritmo antigo de Repeat era de 120 ms entre inícios de pressão, diferente dos 800 ms fixos da versão nova. Por isso toda macro migrada informa no editor que sua temporização mudou, antes de Iniciar ou Salvar. Press/Hold antigo com duration 0, que significava segurar indefinidamente, não tem equivalente automático nesta versão e exige que o usuário escolha um Press ou Hold finito. A leitura não grava a migração até o usuário salvar.
 
-### Execution Contract (Player Frame)
+## Levantamento da implementação atual
 
-The hub posts to each running player frame:
+| Arquivo | O que existe nesta branch | Mudança exigida por esta spec |
+| --- | --- | --- |
+| apps/packages/input-macro-simulator.mjs | Macro com steps; press, hold e repeat são ações do mesmo botão; delay desloca o início do próximo passo a partir do início do atual; buildMacroTimeline cria todos os eventos antecipadamente; validação aceita alguns números fracionários e pode lançar para tipos inválidos. | Substituir por items versionados e variantes Button/Delay/Repeat; separar valores padrão; validar sem exceção para payload inválido; criar executor progressivo ou núcleo de transição de estado que possa testar cursor, contadores e tempos sem expandir a sequência. |
+| apps/packages/input-macro-simulator-ui.jsx | Editor lazy com botão genérico Add step, Select de input/ação, InputNumber, remoção e drag nativo na linha inteira; Save é callback; não há Start/Stop no editor. | Três botões de ícone no rodapé; variantes de linha e campos corretos; arraste iniciado pelo handle, com teclado e touch; callbacks de Salvar e Iniciar/Parar e estado vindo do hub. |
+| apps/frontend/src/main.jsx | Mantém modal, lista, draft e runningMacroId; abrir ou fechar apaga o draft; fechar envia stop; lista executa por nome; editor só salva; run/stop fazem broadcast por postMessage e alteram runningMacroId sem resposta; botão do header não mostra atividade. | Manter draft e snapshot em execução separados; seleção da lista abre editor; fechamento só oculta; coordenar preparo/início/parada/confirmações de todos os players; receber término assíncrono; iluminar botão do header enquanto confirmado ativo; reabrir editor ativo com Parar. |
+| apps/frontend/src/player.js | Recebe macro-run com steps e macro-stop; agenda todos os setTimeout da timeline; não responde aceite ou término; usa simulateInput diretamente; não checa runtimeReady nem cancela macro em reset/close normal. | Usar executor progressivo; aceitar itens versionados e runId; responder preparo/início/parada e término; usar entrada sintética com propriedade por fonte; cancelar em reset, lock, fechamento, caça e lease perdida. |
+| apps/packages/gamepad-input.mjs | Combina entrada física com um Set sintético; já tem setSyntheticPressed usado pela caça shiny. | Permitir que macro e outras fontes sintéticas possuam o mesmo botão sem uma fonte soltar a outra; preservar a entrada física. Macro não chama simulateInput diretamente. |
+| apps/packages/player-frame-request.mjs | Requisição com requestId e sessionId, verificação de origin e event.source e timeout. | Reutilizar nas fases de preparo, início e parada; término espontâneo usa listener autenticado no hub. |
+| apps/packages/input-macro-store.mjs e apps/backend/server.mjs | Stores JSON e Redis validam todas as entradas como versão antiga; GET/POST/DELETE já existem. Um registro incompatível pode fazer a leitura da coleção inteira falhar. | Leitura mista de versões 1 e 2, migração de visualização sem gravar, save sempre em versão 2, erros 400 para payload inválido e preservação dos demais registros. |
+| apps/packages/hub-client.js | listMacros, saveMacro e deleteMacro já usam as rotas existentes. | Manter os caminhos HTTP e retornar formatos e erros definidos para as duas versões; não criar rota de execução no backend. |
+| apps/frontend/src/styles.css | Modal macro de 760 px, linhas sem quebra e estilos antigos do botão de adicionar; header já tem is-active e o SVG do controller. | Aplicar os estilos existentes de atividade ao header, criar estados Iniciar/Parar e wrapper de três botões quadrados, ajustar linhas e arraste para largura estreita sem esconder campos. |
 
-```typescript
-type RunMacroMessage = {
-  type: 'emulator-hub:macro-run';
-  steps: MacroStep[];
-};
+O backend atual usa por padrão o store Redis com a chave input-macros; o store de arquivo JSON também precisa manter o mesmo contrato para testes e instalações que o usam. O controle de entrada atual é GBA: up=4, down=5, left=6, right=7, a=8, b=0, l=10, r=11. Os oito IDs estão no perfil de controle padrão. O mapeamento lógico deve ficar em apps/packages/ e ser reutilizado pelo player, sem criar desvios por título de ROM.
 
-type StopMacroMessage = {
-  type: 'emulator-hub:macro-stop';
-};
-```
+## Contrato entre hub e player
 
-The player frame builds the timeline and plays it against the running core.
-Only one macro executes at a time per frame; a new run cancels the previous
-one, and `emulator-hub:macro-stop` cancels the active run and releases all
-buttons currently held by it.
+A execução pertence à sessão do hub e não é persistida no backend. Um recarregamento da página cria outra sessão e não retoma macros. Só pode haver uma macro ativa por conjunto de players abertos. O hub captura um snapshot imutável dos items e dos sessionId participantes quando o usuário clica Iniciar; mudanças posteriores no editor ou na lista de players não entram nessa execução. runId é novo a cada tentativa, mesmo que a mesma macro seja iniciada outra vez. macroId serve para o editor e armazenamento, não para identificar uma execução.
 
-### Run Button Placement (Saved Macros Modal)
+O hub usa requestPlayerFrame em paralelo para cada iframe participante. As mensagens são:
 
-The macro button lives in the running emulator frame's header
-(`.player-header` in `apps/frontend/src/main.jsx`), immediately next to the
-global reset button inside `.fast-forward-control`. It opens a modal listing
-the hub's saved macros. Each saved macro row shows its name and a play/stop
-state button. Playing a macro runs it against the running emulator frame(s);
-stop cancels the active run. Below the list sits an
-`add macro` button that opens the frontend macro editor to create and save a
-new macro. The list is loaded from the backend API.
+| Direção | Tipo | Campos e efeito |
+| --- | --- | --- |
+| Hub → player | emulator-hub:macro-prepare | requestId, sessionId, runId, macro versionada. Valida dados e condições locais e guarda o snapshot sem emitir input. |
+| Player → hub | emulator-hub:macro-prepared | requestId, sessionId, runId, ok e erro opcional. |
+| Hub → player | emulator-hub:macro-start | requestId, sessionId e runId. Só aceita a preparação correspondente e inicia o executor. |
+| Player → hub | emulator-hub:macro-started | requestId, sessionId, runId, ok e erro opcional. |
+| Hub → player | emulator-hub:macro-stop | requestId, sessionId e runId. Cancela a preparação ou execução correspondente; é idempotente. |
+| Player → hub | emulator-hub:macro-stopped | requestId, sessionId, runId e ok. Confirma que os inputs da macro foram soltos. |
+| Player → hub | emulator-hub:macro-ended | sessionId, runId, outcome = completed, stopped ou failed; erro opcional. Evento terminal assíncrono. |
 
-### Persistence Contract (Backend API)
+O player responde a prepare somente se runtimeReady, gameManager e o adaptador de input estiverem disponíveis, com lease válida, sem fechamento, lock de interação ou caça shiny ativa. Uma preparação não iniciada expira localmente após 10 segundos. O hub só envia start após todos os participantes confirmarem prepare. As três requisições usam timeoutMs de 5000 no helper existente. Falha ou timeout em qualquer fase solicita stop aos participantes já preparados ou iniciados e apresenta o erro no editor. A confirmação de start de todos coloca o hub em running; a de stop de todos ou a conclusão de todos o tira de running. Se um player terminar uma macro curta antes de chegar a confirmação de start de outro, o hub conserva esse término e não volta incorretamente para running.
 
-The saved macros list is managed by the backend. The backend implements:
+O hub valida origem, janela do iframe, sessionId e runId dos eventos espontâneos, além de ignorar resposta de requisição antiga. Cada resposta do player ecoa requestId e sessionId. Perda, substituição ou recarga de um participante cancela o mesmo runId nos sobreviventes; um iframe aberto depois não recebe a macro em curso. Preparação e parada não podem alterar ROM, perfil, lease ou save. Falha da macro informa o usuário e não interrompe o fluxo principal do jogo.
 
-```typescript
-interface MacroStore {
-  list(): Promise<InputMacro[]>;
-  save(macro: InputMacro): Promise<InputMacro>;
-  delete(id: string): Promise<InputMacro>;
-}
-```
+Os encaixes de ciclo de vida são concretos: dispatchReset no hub e os handlers de reset no player param a macro antes de resetar; closeSessions/closeEmulator param antes do flush final do save; o começo da caça shiny espera a parada da macro antes de enviar input da caça; interaction-lock que bloqueia um participante encerra o run de todos; o listener de lease-lost, o onLoad de iframe participante e a mudança em activeSessions reconciliam o estado do hub. Carregar state manualmente também para a macro antes da restauração; salvar state sem carregar não precisa pará-la. Não adicionar um lock de macro ao fechamento do modal, pois esse fechamento serve para observar o jogo.
 
-HTTP routes:
+## Estado de execução e interação
 
-- `GET /api/macros` -> `200 { macros: InputMacro[] }`
-- `POST /api/macros` -> `200 { macro: InputMacro }` (create or replace by id)
-- `DELETE /api/macros/:id` -> `200 { macro: InputMacro }`
+O hub distingue idle, preparing, starting, running, stopping e failed; completed é um resultado terminal antes de voltar a idle. Starting começa depois de todos confirmarem prepare e dura até todas as respostas de start. O botão do editor mostra Iniciar em idle, Parar em running, e texto transitório enquanto prepara, inicia ou para. O header tem classe is-active a partir de starting, enquanto a execução está confirmada como running ou ainda não há confirmação de que parou; seu título/nome acessível informa o estado. Clicar nele só abre o modal. Fechar/X altera apenas macroModalOpen. O hub retém runId, macro snapshot e draft do editor enquanto a execução existir, inclusive para macros nunca salvas. Ao reabrir o modal durante o run, apresenta esse editor com Parar. Depois do término, pode voltar à lista na próxima abertura sem perder as macros persistidas. Se Parar não receber confirmação, mantém indicação de execução possivelmente ativa, mostra “parada não confirmada” e permite tentar Parar novamente; não declara a macro parada apenas por timeout.
 
-Invalid macro bodies return `400`; a missing macro on delete returns `404`.
+A lista salva não inicia macros diretamente: selecionar abre o editor. Salvar usa POST /api/macros e permanece no editor com o documento retornado pelo backend; uma falha mantém o rascunho e mostra o erro. Enquanto o POST está pendente, os campos do rascunho e Salvar/Iniciar ficam desabilitados para que a resposta não sobrescreva uma edição posterior. Iniciar valida o rascunho localmente e não exige salvamento. Não é permitido iniciar sem player aberto ou enquanto a caça shiny está ativa. Um novo Start após parada usa o conteúdo atual do editor e outro runId.
 
-## UI/UX Requirements
+O modal atual usa profile-overlay com aria-modal e impede interação com o jogo enquanto aberto; ocultá-lo permite observar a macro, sem cancelá-la. A linha de item não deve ser draggable inteira, pois isso disputa gestos com Select e InputNumber. O handle é a área de arraste; o projeto já tem @dnd-kit/react e @dnd-kit/dom para interações com ponteiro e touch. O handle também aceita foco e reordenação por teclado, com indicação da nova posição. O editor mantém os campos e os três botões de inserção visíveis em telas estreitas; o SVG de controller é o mesmo usado em Configurar controles no header, inclusive quando esse botão do header fica oculto no layout móvel.
 
-### Visual Design
-- Dark green theme consistent with existing hub
-- Modal scales in width so the whole step row stacks horizontally without wrapping
-- Input selector shows a single compact glyph per button (one arrow or letter, no duplicated text)
-- Each step row: input glyph, action select, duration, delay, drag handle, remove button
-- Press once shows no duration control; hold/repeat duration uses a placeholder summary; delay defaults to 1000ms
-- Inline editing on click
-- Drag handle for reordering (☰ or ⋮⋮)
+Para preservar o controle físico, o player envia os inputs da macro por um adaptador compartilhado com createEmulatorGamepadInput, com propriedade separada por fonte: físico, caça shiny e macro. O estado enviado ao core é a união das fontes; soltar a fonte macro não solta um botão que continue pressionado por outra. O mesmo vale ao cancelar durante Hold, Delay ou Repeat. A macro não usa diretamente gameManager.simulateInput fora desse adaptador. A entrada nativa de teclado do EmulatorJS exige que o player não inicie uma macro enquanto alguma tecla correspondente aos botões dela estiver pressionada. Durante a execução, bloqueia keydown e o respectivo keyup apenas das teclas correspondentes aos botões da macro; outras teclas seguem disponíveis. O keyup de uma pressão bloqueada continua bloqueado mesmo se a macro parar antes da soltura física, para não liberar o input sintético de outra fonte.
 
-### Interactions
-1. **Add Step**: Click "Add Step" → appends new step with defaults (first input, 'press', no duration, 1000ms delay)
-2. **Edit Step**: Click step row → expands inline editor
-3. **Reorder**: Drag drag-handle to reorder
-4. **Remove**: Click remove button → immediate removal with undo toast
-5. **Save**: Click save → calls backend persistence
+## Migração de dados existentes
 
-### Step Defaults
-```typescript
-const DEFAULT_STEP: Omit<MacroStep, 'id'> = {
-  input: 'a',
-  action: 'press',
-  delay: 1000
-};
-```
+O store precisa aceitar na mesma coleção registros válidos da versão antiga, identificados pela ausência de schemaVersion e pela lista steps, e registros da versão 2 com items. GET mantém cada registro acessível no seu formato armazenado; listMacros no frontend usa a função pura do pacote para apresentar v1 como rascunho editável v2, com aviso de migração. Salvar uma macro nova não regrava nem descarta as outras. Uma macro antiga só vira versão 2 no POST após revisão do usuário. Preservar id e createdAt; updatedAt é atualizado pelo store ao salvar. DELETE continua funcionando para ambas as versões.
 
-## Constraints & Validation
+| Step antigo | Conversão para rascunho v2 |
+| --- | --- |
+| press sem duration | Button Press, count 1, pulso interno de 60 ms. |
+| hold com duration positiva | Button Hold, holdMs = duration. |
+| repeat com duration positiva | Button Press, count = duration; intervalo interno passa a ser 800 ms fixos. |
+| press ou hold com duration 0 | Manter a linha visível como legada e inválida para execução; usuário precisa substituí-la por Press ou Hold finito. |
 
-1. Maximum 100 steps per macro
-2. Duration for 'hold': 0 (infinite) or 100ms - 30000ms
-3. Duration for 'repeat': 1 - 100 (repetition count)
-4. Duration for 'press': 0 (infinite hold) or omitted (default short tap)
-5. Delay: 0 - 10000ms
-6. Macro name: 1-50 characters, required
-7. At least 1 step required for valid macro
+Para as três conversões válidas, o antigo delay numérico vira delayAfterMs com o mesmo valor. Isso muda sua posição temporal: antes ele era contado a partir do início do step; agora começa depois do último up. O conversor retorna rascunho mais avisos; um step infinito permanece como linha temporária de revisão no editor e nunca é enviado como item v2. Substituí-lo por Press ou Hold finito remove o bloqueio. O editor mostra uma mensagem curta de que o timing legado foi convertido, sem alterar silenciosamente o registro salvo. Payload novo malformado ou conversão incompleta devolve erro de validação específico; nunca deve resultar em resposta 200 com macro nula. Um registro legado que exige revisão não impede listar, editar ou excluir os outros.
 
-## Testing Requirements
+## Verificações específicas da base atual
 
-- Unit tests for all core functions (immutability, validation)
-- Component tests for editor interactions
-- Integration test for full create-edit-save flow
-- Edge cases: empty macro, max steps, invalid durations
+- Substituir os testes de texto por regex de input-macro-simulator-ui.test.mjs por verificações comportamentais dos três botões de inserção, edição dos campos, remoção, drag handle, teclado e estado Iniciar/Parar. A suíte usa node:test; não tratar uma busca no código-fonte como prova da interação.
+- Atualizar input-macro-simulator.test.mjs para as três variantes, defaults 1/2000/800/1200/1, cursor e contadores de Repeat, zero infinito, ausência de sobreposição, cancelamento, números fracionários/NaN e atraso de timer sem rajada.
+- Atualizar input-macro-store.test.mjs e o teste de rota em apps/backend/test/server.test.mjs com leitura mista v1/v2, migração sob demanda, upsert v2, preservação de outros registros, 400 para corpo inválido e 404 no DELETE.
+- Testar requestId, runId, origem, source, sessionId, timeout, término antes do último started, iframe recarregado, perda de lease, reset, caça shiny, close de player e stop com botão físico segurado.
+- Conferir manualmente no navegador desktop e no layout móvel: modal fechado durante Repeat 0, realce no header, reabertura com Parar, editor legível, arraste por handle e scroll da pilha. Não usar build como prova de comportamento.
 
-## Implementation Order
+## Aceite
 
-1. Create package with types and core functions
-2. Add validation logic
-3. Build React components (StepEditor, MacroStepList, MacroEditor)
-4. Add drag-and-drop reordering
-5. Write tests
-6. Export from package index
-7. Add `buildMacroTimeline` runner and tests
-8. Add `input-macro-store.mjs` (JSON file + Redis persistence)
-9. Add `/api/macros` routes to `apps/backend/server.mjs` and tests
-10. Add `listMacros`/`saveMacro`/`deleteMacro` to `apps/packages/hub-client.js`
-11. Handle `emulator-hub:macro-run`/`macro-stop` in `apps/frontend/src/player.js`
-12. Add macro button and saved macros modal to `.player-header` in `apps/frontend/src/main.jsx`
+- Press A count 3 e delay posterior 1200 envia três pares down/up de 60 ms, com duas esperas internas fixas de 800 ms, e só depois espera 1200 ms antes do próximo item.
+- Hold B de 2000 ms e delay posterior 800 mantém B pressionado por 2000 ms, solta e espera 800 ms antes do próximo item.
+- Delay 1200 não envia input e posterga o item seguinte por 1200 ms.
+- A, Repeat 2, B, Repeat 2 produz A-A-B-A-A-B. Ao revisitar o primeiro Repeat, seu contador começa novamente em zero.
+- Repeat 0 continua voltando ao início até cancelar. Itens posteriores podem ser salvos, mas não são alcançados nessa execução.
+- Conclusão finita, Parar, falha, reset, caça shiny e perda de lease liberam a contribuição da macro e corrigem o estado visual. Fechar o modal durante uma execução mantém a macro ativa; o header continua realçado, e reabrir o modal mostra Parar no editor da macro em curso.
+- Testes comportamentais exercitam os três botões de ícone que acrescentam o tipo correto com valores padrão, o ícone de exclusão por linha, reordenação por drag and drop e teclado, seleção de macro salva, edição, salvamento, início, estados Iniciar/Parar, fechamento e reabertura durante a execução. Testes de pacote cobrem contadores encadeados, zero infinito, tempos, validação, migração legada, atraso de timers e cancelamento. Testes de integração cobrem backend e confirmação de player sem início parcial.
+
+## Limite desta revisão
+
+O código atual, incluindo buildMacroTimeline, editor e runner do player, ainda não implementa este contrato.

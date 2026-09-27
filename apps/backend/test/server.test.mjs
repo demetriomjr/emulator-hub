@@ -1813,9 +1813,10 @@ describe('hub backend HTTP contract', () => {
     assert.deepEqual(await jsonResponse(empty), { macros: [] })
 
     const macro = {
+      schemaVersion: 2,
       id: 'macro-1',
       name: 'Dash Combo',
-      steps: [{ id: 'step-1', input: 'up', action: 'press', delay: 0 }],
+      items: [{ id: 'item-1', kind: 'button', input: 'up', action: 'press', count: 1, delayAfterMs: 0 }],
       createdAt: 1780000000000,
       updatedAt: 1780000000000,
     }

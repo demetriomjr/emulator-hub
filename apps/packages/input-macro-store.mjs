@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { validateMacro } from './input-macro-simulator.mjs'
+import { validateLegacyMacro, validateMacro } from './input-macro-simulator.mjs'
 
 export function createInputMacroStore({ dataPath }) {
   let queue = Promise.resolve()
@@ -14,13 +14,13 @@ export function createInputMacroStore({ dataPath }) {
       const operation = queue.then(async () => {
         const normalized = normalizeMacro(macro)
         const macros = await readMacros(dataPath)
-        const existing = macros.find(candidate => candidate.id === normalized.id)
+        const existing = macros.find(candidate => candidate?.id === normalized.id)
         const stored = {
           ...normalized,
-          createdAt: existing?.createdAt ?? normalized.createdAt,
+          createdAt: Number.isSafeInteger(existing?.createdAt) && existing.createdAt >= 0 ? existing.createdAt : normalized.createdAt,
           updatedAt: Date.now(),
         }
-        const index = macros.findIndex(candidate => candidate.id === stored.id)
+        const index = macros.findIndex(candidate => candidate?.id === stored.id)
         const next = index === -1 ? [...macros, stored] : [...macros.slice(0, index), stored, ...macros.slice(index + 1)]
         await writeMacros(dataPath, next)
         return copyMacro(stored)
@@ -31,7 +31,7 @@ export function createInputMacroStore({ dataPath }) {
     delete(id) {
       const operation = queue.then(async () => {
         const macros = await readMacros(dataPath)
-        const index = macros.findIndex(candidate => candidate.id === id)
+        const index = macros.findIndex(candidate => candidate?.id === id)
         if (index === -1) throw macroError('INPUT_MACRO_NOT_FOUND', 'Input macro was not found.')
         const [removed] = macros.splice(index, 1)
         await writeMacros(dataPath, macros)
@@ -55,13 +55,13 @@ export function createRedisInputMacroStore({ persistence }) {
       const operation = queue.then(async () => {
         const normalized = normalizeMacro(macro)
         const macros = await readRedisMacros(persistence, collectionKey)
-        const existing = macros.find(candidate => candidate.id === normalized.id)
+        const existing = macros.find(candidate => candidate?.id === normalized.id)
         const stored = {
           ...normalized,
-          createdAt: existing?.createdAt ?? normalized.createdAt,
+          createdAt: Number.isSafeInteger(existing?.createdAt) && existing.createdAt >= 0 ? existing.createdAt : normalized.createdAt,
           updatedAt: Date.now(),
         }
-        const index = macros.findIndex(candidate => candidate.id === stored.id)
+        const index = macros.findIndex(candidate => candidate?.id === stored.id)
         const next = index === -1 ? [...macros, stored] : [...macros.slice(0, index), stored, ...macros.slice(index + 1)]
         await writeRedisMacros(persistence, collectionKey, next)
         return copyMacro(stored)
@@ -72,7 +72,7 @@ export function createRedisInputMacroStore({ persistence }) {
     delete(id) {
       const operation = queue.then(async () => {
         const macros = await readRedisMacros(persistence, collectionKey)
-        const index = macros.findIndex(candidate => candidate.id === id)
+        const index = macros.findIndex(candidate => candidate?.id === id)
         if (index === -1) throw macroError('INPUT_MACRO_NOT_FOUND', 'Input macro was not found.')
         const [removed] = macros.splice(index, 1)
         await writeRedisMacros(persistence, collectionKey, macros)
@@ -88,8 +88,8 @@ async function readMacros(dataPath) {
   try {
     const source = await readFile(dataPath, 'utf8')
     const macros = JSON.parse(source)
-    const normalized = Array.isArray(macros) ? macros.map(normalizeStoredMacro) : null
-    if (!normalized || normalized.some(macro => macro === null)) throw new Error('Invalid input macro data.')
+    const normalized = Array.isArray(macros) ? macros : null
+    if (!normalized) throw new Error('Invalid input macro data.')
     return normalized
   } catch (error) {
     if (error.code === 'ENOENT') return []
@@ -115,8 +115,8 @@ async function readRedisMacros(persistence, collectionKey) {
     const source = await persistence.get(collectionKey)
     if (source === null) return []
     const macros = JSON.parse(source)
-    const normalized = Array.isArray(macros) ? macros.map(normalizeStoredMacro) : null
-    if (!normalized || normalized.some(macro => macro === null)) throw new Error('Invalid input macro data.')
+    const normalized = Array.isArray(macros) ? macros : null
+    if (!normalized) throw new Error('Invalid input macro data.')
     return normalized
   } catch (error) {
     if (error.code?.startsWith('INPUT_MACRO_')) throw error
@@ -132,37 +132,28 @@ async function writeRedisMacros(persistence, collectionKey, macros) {
 
 function normalizeMacro(macro) {
   if (!macro || typeof macro !== 'object' || Array.isArray(macro)) throw macroError('INPUT_MACRO_INVALID', 'Input macro body is required.')
-  const validation = validateMacro(macro)
-  if (!validation.valid) throw macroError('INPUT_MACRO_INVALID', validation.errors[0])
-  return normalizeStoredMacro({
+  const candidate = {
     ...macro,
-    id: typeof macro.id === 'string' && macro.id.length > 0 ? macro.id : randomUUID(),
-    createdAt: typeof macro.createdAt === 'number' ? macro.createdAt : Date.now(),
+    id: Object.hasOwn(macro, 'id') ? macro.id : randomUUID(),
+    createdAt: Object.hasOwn(macro, 'createdAt') ? macro.createdAt : Date.now(),
     updatedAt: Date.now(),
-  })
+  }
+  const validation = validateMacro(candidate)
+  if (!validation.valid) throw macroError('INPUT_MACRO_INVALID', validation.errors[0])
+  return normalizeStoredMacro(candidate)
 }
 
 function normalizeStoredMacro(macro) {
-  if (!macro || typeof macro !== 'object' || Array.isArray(macro)
-    || typeof macro.id !== 'string' || macro.id.length === 0
-    || !Array.isArray(macro.steps)
-    || typeof macro.createdAt !== 'number' || !Number.isFinite(macro.createdAt)
-    || typeof macro.updatedAt !== 'number' || !Number.isFinite(macro.updatedAt)) return null
-  const normalized = { ...macro, id: macro.id, steps: macro.steps.map(copyStep), createdAt: macro.createdAt, updatedAt: macro.updatedAt }
-  if (!validateMacro(normalized).valid) return null
-  return normalized
-}
-
-function copyStep(step) {
-  return { ...step }
+  if (macro?.schemaVersion === 2) return validateMacro(macro).valid ? structuredClone(macro) : null
+  return validateLegacyMacro(macro) ? structuredClone(macro) : null
 }
 
 function copyMacro(macro) {
-  return { ...macro, steps: macro.steps.map(copyStep) }
+  return structuredClone(macro)
 }
 
 function copyMacros(macros) {
-  return macros.map(copyMacro)
+  return macros.map(normalizeStoredMacro).filter(Boolean).map(copyMacro)
 }
 
 function macroError(code, message, cause) {

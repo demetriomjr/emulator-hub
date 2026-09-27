@@ -399,9 +399,8 @@ button { font: inherit; }
 .macro-panel .profile-select:hover:not(:disabled) { background: #1b473d; }
 .macro-panel .macro-actions-footer { padding: 4px 6px; }
 .macro-run-button span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.macro-play-icon, .macro-stop-icon { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .macro-actions-footer { display: flex; flex-direction: column; }
-.macro-actions-footer .profile-add { margin-top: 14px; }
+.macro-actions-footer .profile-add { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 14px; }
 .macro-name-form { display: flex; min-height: 0; flex: 1; flex-direction: column; }
 .macro-name-form > input { min-height: 42px; padding: 8px 12px; border: 1px solid #397c67; border-radius: 8px; color: #e8f5ef; background: #0d2026; }
 .macro-editor { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 12px; padding-top: 12px; }
@@ -409,13 +408,28 @@ button { font: inherit; }
 .macro-step { display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid #397c67; border-radius: 8px; background: #0d2026; }
 .macro-step.dragging { opacity: .5; }
 .macro-step.drag-over { border-color: #22b36f; }
-.macro-step-drag { display: grid; place-items: center; width: 22px; height: 30px; flex: none; color: #98b9ad; cursor: grab; }
+.macro-step-drag { display: grid; place-items: center; width: 22px; height: 30px; flex: none; border: 0; background: transparent; color: #98b9ad; cursor: grab; }
 .macro-step-index { min-width: 18px; color: #98b9ad; font-size: 12px; }
 .macro-step-remove { flex: none; }
-.macro-step-fields { display: flex; min-width: 0; flex: 1; flex-wrap: nowrap; align-items: center; gap: 6px; }
+.macro-step-fields { display: flex; min-width: 0; flex: 1; flex-wrap: wrap; align-items: center; gap: 6px; }
 .macro-step-fields .ant-select { flex: none; }
 .macro-step-fields .ant-input-number { min-width: 96px; flex: none; }
-.macro-step-duration, .macro-step-delay { display: flex; align-items: center; gap: 6px; color: #98b9ad; font-size: 12px; }
 .macro-actions { display: flex; gap: 8px; }
 .macro-empty { color: #98b9ad; }
 .macro-error { margin: 0; color: #ffdada !important; }
+.macro-warning { margin: 0; color: #ffe3a0; font-size: 12px; }
+.macro-item-error { flex-basis: 100%; color: #ffdada; font-size: 12px; }
+.macro-step:has(.macro-item-error) { flex-wrap: wrap; }
+.macro-step-fields label { display: flex; align-items: center; gap: 6px; color: #b7d4c7; font-size: 12px; }
+.macro-step-fields .ant-select { min-width: 72px; }
+.macro-step-drag:focus-visible, .macro-add-item:focus-visible { outline: 2px solid #55d896; outline-offset: 2px; }
+.macro-add-items { display: flex; gap: 8px; }
+.macro-add-item { width: 40px; height: 40px; padding: 7px; display: grid; place-items: center; }
+.macro-add-item svg { width: 20px; height: 20px; }
+.macro-run-toggle.is-running { background: #a13e3e; border-color: #be5c5c; }
+@media (max-width: 680px) {
+  .macro-step { align-items: flex-start; }
+  .macro-step-fields { flex-wrap: wrap; }
+  .macro-step-fields label { flex-wrap: wrap; }
+  .macro-step-list { max-height: 50vh; }
+}

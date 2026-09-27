@@ -4,6 +4,8 @@ import { readFile } from 'node:fs/promises'
 import vm from 'node:vm'
 import { activeGamepadBindings, readGamepadBinding, readGamepadSnapshot, createEmulatorGamepadInput } from './gamepad-input.mjs'
 import { createPlayerInteractionLock } from './player-interaction-lock.mjs'
+import { createPlayerMacroController } from './player-macro-controller.mjs'
+import { INPUT_CORE_IDS, addItem, createMacro, macroUsesKeyboardKey, normalizeKeyboardKey } from './input-macro-simulator.mjs'
 import { selectPlayerThreadMode } from './player-thread-policy.mjs'
 
 const pad = (buttons = [], axes = [], index = 0) => ({ index, buttons: buttons.map(value => ({ pressed: value === 1, value })), axes })
@@ -75,6 +77,20 @@ test('synthetic A remains owned across physical gamepad updates and releases exp
   assert.deepEqual(events, [[0, 8, 1], [0, 8, 0]])
 })
 
+test('macro release preserves a button owned by a physical pad and by the hunt', () => {
+  const events = []
+  const input = createEmulatorGamepadInput({ gamepad: { terminate() {} }, gameManager: { simulateInput: (...args) => events.push(args) } }, { 8: { gamepad: 'BUTTON_1' } })
+  events.length = 0
+  input.update(['BUTTON_1'])
+  input.setSyntheticPressed(8, true, 'hunt')
+  input.setSyntheticPressed(8, true, 'macro')
+  input.setSyntheticPressed(8, false, 'macro')
+  input.update([])
+  assert.deepEqual(events, [[0, 8, 1]])
+  input.setSyntheticPressed(8, false, 'hunt')
+  assert.deepEqual(events, [[0, 8, 1], [0, 8, 0]])
+})
+
 test('replaces gamepad bindings without restarting a running emulator', () => {
   const events = []
   const input = createEmulatorGamepadInput({
@@ -96,16 +112,23 @@ test('player boot keeps backend controls authoritative and applies pre-start par
     .replace(/^import .+\r?\n/gm, '')
     .replace('import.meta.env.VITE_DEBUG', "'0'")
   const listeners = new Map()
+  const keyboardListeners = new Map()
   const calls = []
+  const parentMessages = []
   const startupErrors = []
-  const parent = { postMessage() {} }
+  const parent = { postMessage: message => parentMessages.push(message) }
   const origin = 'http://localhost:5173'
   const bindings = { 8: { keyboard: 'z', gamepad: 'BUTTON_1' } }
   const window = {
     parent,
-    addEventListener: (type, listener) => listeners.set(type, listener),
+    addEventListener: (type, listener) => {
+      if (type === 'keydown' || type === 'keyup') keyboardListeners.set(type, [...(keyboardListeners.get(type) ?? []), listener])
+      else listeners.set(type, listener)
+    },
     setInterval: () => 1,
     clearInterval() {},
+    setTimeout,
+    clearTimeout,
     matchMedia: () => ({ matches: false }),
     EJS_emulator: {
       gamepad: { terminate: () => calls.push('stop') },
@@ -143,6 +166,10 @@ test('player boot keeps backend controls authoritative and applies pre-start par
     monitorEmulatorFrameProgress: () => () => {},
     instrumentEmulatorLifecycle: () => () => {},
     createEmulatorGamepadInput,
+    createPlayerMacroController,
+    INPUT_CORE_IDS,
+    macroUsesKeyboardKey,
+    normalizeKeyboardKey,
     createPlayerInteractionLock,
     selectPlayerThreadMode,
     createEmulatorAudioMute: () => ({ attach() {}, apply() {} }),
@@ -163,4 +190,21 @@ test('player boot keeps backend controls authoritative and applies pre-start par
   assert.deepEqual(calls, [])
   receive(parent, origin, [])
   assert.deepEqual(calls, [[0, 8, 0]])
+
+  const macro = addItem(createMacro('Keyboard'), 'button', { input: 'a', action: 'hold', holdMs: 2000, delayAfterMs: 0 })
+  const message = (type, extra = {}) => listeners.get('message')({ source: parent, origin, data: { type: `emulator-hub:macro-${type}`, sessionId: 'session', requestId: type, runId: 'run', ...extra } })
+  message('prepare', { macro })
+  assert.equal(parentMessages.at(-1).ok, true)
+  message('start')
+  assert.equal(parentMessages.at(-1).ok, true)
+  const keyboardEvent = (type, key) => {
+    const event = { type, key, isTrusted: true, defaultPrevented: false, prevented: false, preventDefault() { this.prevented = true }, stopImmediatePropagation() {} }
+    for (const listener of keyboardListeners.get(type) ?? []) listener(event)
+    return event
+  }
+  assert.equal(keyboardEvent('keydown', 'z').prevented, true)
+  assert.equal(keyboardEvent('keyup', 'z').prevented, true)
+  assert.equal(keyboardEvent('keydown', 'x').prevented, false)
+  keyboardEvent('keyup', 'x')
+  message('stop')
 })
