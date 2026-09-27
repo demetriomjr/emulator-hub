@@ -265,6 +265,25 @@ O observer em `server.mjs` varre sessões e leases expirados. Uma falha de item 
 
 ## Dossiê 6 — projeção binária e runtime state
 
+### Protocolo a especificar antes de alterar save store
+
+`getSaveFlushPlan` lê source e depois `Promise.all` dos records. A combinação pode não ter existido em nenhum instante se sync ocorrer no meio; o plano precisa carregar generation/revision e ponteiros de records do mesmo commit ou revalidar todos antes de escrever. Materializer deve comparar conteúdo de cada placement com representação esperada para o título de destino e garantir preservação dos bytes que não são alvo. A regra de Party de Spec 071 considera **a transação inteira**: retirar da Party só se restar ao menos um; PC/Hub→Party permanece negado mesmo que o writer técnico de Spec 063 saiba montar bytes.
+
+`saveStore.put` usa lock por save, CAS de revisão e `fenceGeneration`, mas para flush Hub o código chama `put` sem `beforeCommit` verificando novamente source/fence lógico. Publica `.sav` e metadata por dois renames; `get` lê os dois em paralelo e valida hash. No intervalo/crash pode falhar leitura, e não há recuperação geral para put comum (há journal específico quando `eventGrantReceipt` é fornecido). `advanceFence` atualiza metadata sem aumentar save revision. Qualquer desenho novo deve definir relação de ordem entre `fenceGeneration`, save revision e source revision, inclusive se bytes não mudarem ou se apenas o fence avançar.
+
+| Etapa | Pré e pós condição obrigatórias |
+| --- | --- |
+| Criar plano | Source dirty e records consistentes da geração G; owner/fence atual F; save base S lido com revisão/hash válidos. |
+| Materializar | Writer suporta adapter/título; todos os IDs têm representação adequada; Party/Box final válidos; checksums e bytes não alvo preservados. Falha deixa G dirty. |
+| Publicar | Ainda é G/F; save esperado S não mudou; publicação de bytes+metadata é observável como geração completa ou reader bloqueado com recovery seguro. |
+| Invalidar runtime | Nova metadata contém marker da revisão publicada; `cloud-recovery` e `user-state` velhos são excluídos antes de confirmar flush, ou o marker impede leitura mesmo se exclusão falhar. |
+| Marcar clean | Somente após save publicado/validado e deleções concluídas, com CAS de G/F; não limpa source G+1. |
+| Liberar | Player só adquire após clean e estado binário válido; se processo morrer, outro finalizador retoma da obrigação. |
+
+Se source muda entre materialização e `put`, replanejar ou abortar antes de publicar; um `markSaveFlushed` que rejeita **depois** da publicação evita limpar revisão errada, mas não impede uma janela de save antigo/obsoleto. Se snapshotStore falha depois de save publicado, retry deve reconhecer geração já publicada e terminar limpeza, sem incrementar save revision por repetição cega. Se publicação de bytes passou mas metadata não, reader deve ter versão anterior completa recuperável ou recusar acesso até restauração; `get` retornar `null` para ausência de um arquivo não equivale a prova de save inexistente. O `eventGrantReceipt` e seu journal existentes são outro fluxo de save: refatoração não pode perder suas garantias específicas.
+
+**Evidência/PoC:** fixtures binárias de cinco títulos, hash dos intervalos não alteráveis antes/depois, checksum independente, leitura de save pelo adapter e por emulador, duas instâncias tentando flush da mesma source, crash injetado antes/depois de cada escrita/rename/metadata/marker/delete/clean/release, retry após restart. Medir se journal do par atual resolve tudo com menos estado que manifest de geração; qualquer alternativa precisa contemplar backup e restore, não só `put/get` em processo vivo.
+
 **Hoje:** `needsSaveFlush` é obrigação persistida; `markDirty`, `flushDue` e `isDirty` do flush service são no-ops. Plano de flush lê source e records em instantes diferentes. Save store faz dois renames (bytes e metadata) e reader lê ambos em paralelo. Flush pode publicar bytes antes de descobrir que source mudou; depois apaga snapshots de runtime e marca clean.
 
 **Contrato:** plano de materialização usa source e records de uma mesma geração lógica, com fence e revisão ainda válidos antes da publicação. Materializer preserva bytes nativos não alterados, representa Party/PC conforme Specs 063/071, valida checksums e falha fechado se faltam dados. Reader vê par bytes+metadata completo ou bloqueia com recuperação preservando versão anterior. Manifest imutável ou journal do formato atual são alternativas; escolher a menor que passa crash/reader concorrente. Retry não publica geração velha nem marca nova como clean. Marker de Spec 070 acompanha nova revisão e impede state velho mesmo se deleção física atrasar; deleção dos dois slots precisa concluir antes de ACK de flush Hub.
@@ -272,6 +291,25 @@ O observer em `server.mjs` varre sessões e leases expirados. Uma falha de item 
 **PoCs e saída:** mutação entre leituras source/records, entre plano/publicação, crash entre renames, bytes/metadata ausentes, checksum/fence divergente, deleção de snapshot falhando e retry após save publicado/clean pendente. Fixtures reais de Ruby/Sapphire/Emerald/FireRed/LeafGreen, leitura independente e round trip de emulador. Fechar protocolo reader/writer e recovery antes de liberar player.
 
 ## Dossiê 7 — política e protocolos redundantes
+
+### Matriz de comportamento a congelar
+
+| Movimento/intenção | Regra funcional vigente a preservar | Evidência de validação |
+| --- | --- | --- |
+| Save Box → Hub livre | Permitido apenas com adapter/representação e capacidade compatíveis | Planner/transfer policy e materializer produzem save de origem válido. |
+| Hub → Save Box livre | Mesmas verificações para título de destino; tradução nativa se suportada | Save final lê Pokémon correto sem perder campos/provenance. |
+| Save A → Save B | Política de pares/títulos/capabilities, owner de ambos e destino vazio | Commit conjunto de fontes e publicação de ambos antes de liberar cada save. |
+| Party → Box ou Hub | Permitido se Party final mantém ≥1 Pokémon | Avaliação final do snapshot inteiro, não contagem isolada antes de múltiplos movimentos. |
+| Box ou Hub → Party | Negado pela política atual | Writer técnico que suporta Party não autoriza operação. |
+| Destino ocupado ou ID ausente/duplicado | Corrigir/rejeitar sem write | Não substituir record silenciosamente nem efetuar swap implícito. |
+| Título/espécie/egg/region/trade/passport incompatível | Negar pelo código de razão atual | Matriz capturada dos testes de policy atuais, incluindo pares Gen III. |
+| Source sem save, layout/adapter ausente | Não mover nem adotar dados inventados | UI expõe ausência; nenhum ID criado sem observação nativa. |
+
+Fazer uma tabela de **todos** os casos já cobertos por `pokemon-hub-transfer-placement-policy.test.mjs`, testes de coordinator/session/materializer e casos HTTP. Uma comparação differential executa mesmas entradas contra caminho antigo e planner candidato e registra divergência justificada. Não usar simplificação arquitetural para alterar regra de jogo. Rota antiga que grava `.sav` diretamente é fronteira perigosa; durante migração, adaptá-la ao writer único ou desativar com erro de versão documentado após confirmar consumidores. O corpo da rota `/transfers` escolhe caminho por shape; essa ambiguidade deve constar do inventário de clientes.
+
+### Critério objetivo de redução de complexidade
+
+Medir antes/depois: (a) quantos caminhos conseguem alterar placement, (b) quantas representações são tratadas como autoridade de ocupação, (c) quantos mecanismos independentes decidem se player pode abrir save, (d) quantos estados de retry não são reconstruíveis da persistência, (e) quantas migrações/adapters permanecem em produção. A meta é um writer lógico de placement, uma fonte de ocupação e uma barreira efetiva por save; manter projeções de leitura/compatibilidade explicitamente derivadas. Contagem de linhas, arquivos ou classes só importa se vier junto com menos estados e interleavings. Não somar um mecanismo novo de confiabilidade sem retirar ou demover o anterior.
 
 **Hoje:** backend/client preservam serviço legado, grid transfer, snapshot direto, compact session e canonical session. Regras Gen III, capabilities, região, trade, Party e passport já existem. Não há inventário comprovado de clientes externos. Revisions de source, sessão, save, fence e capability têm papéis distintos; uma versão global seria simplificação falsa.
 
@@ -281,6 +319,38 @@ O observer em `server.mjs` varre sessões e leases expirados. Uma falha de item 
 
 ## Dossiê 8 — diagnóstico, scanner, backup, durabilidade e cutover
 
+### Scanner read-only e classificação de achados
+
+O scanner de baseline recebe visão consistente ou registra que a varredura não teve corte consistente. Enumera namespaces v2 e legados, catálogo, sources/placements, records, sessões/operations/terminals, leases globais e de source, índices, events/outboxes, saves e metadata, runtime markers e snapshots existentes. Nunca assume que evento histórico é placement atual; tampouco considera índice de lease como prova de owner se o lease principal falta. Preserva hashes/revisões/chaves para comparação, mas não exporta bytes nativos nem tokens para logs.
+
+| Classe | Detecção | Ação segura até diagnóstico |
+| --- | --- | --- |
+| ID duplicado ou faltante | Multiconjunto de placements versus records | Bloquear writes do componente e preservar evidência. |
+| Record/source divergentes | Ponteiro de record não corresponde ao slot da geração | Bloquear adição de movimento; reconstrução só com plano aprovado. |
+| Perfil ausente e source ocupado | `hubProfileId` em source sem catálogo | Quarentena; não descartar record nem reusar ID. |
+| Alias de save físico | Mesmo `(saveProfileId,gameId)` em namespaces diferentes | Comparar geração/hash/owner; não escolher vencedor por timestamp apenas. |
+| Source dirty e lease expirado/ausente | Obrigação sem proteção de player | Bloquear player, finalizador fenced ou intervenção controlada. |
+| Save/metadata desencontrados | Hash ou revisão/fence inválidos | Não servir ao player; recuperar versão coerente comprovada. |
+| Runtime state anterior ao marker | Revisão do state menor que invalidation marker | Não servir state, concluir deleção com retry. |
+| Resultado idempotente sem commit ou inverso | Operação não corresponde à geração/records | Bloquear replay como sucesso até classificação. |
+
+### Backup e durabilidade
+
+O módulo de backup atual percorre `persistence.keys('')`, lê cada string/set/zset, depois `saveStore.listAll`, compacta um JSON e faz rename do arquivo. Ele verifica o conteúdo lido de cada `.sav` via `get`, inclui marker e event receipt quando presentes, mas não estabelece um ponto comum Redis+volume, não pausa writers, não oferece restore e não prova fsync do diretório após rename. A fila do módulo serializa apenas backups feitos pela mesma instância. O backup de startup ocorre depois da migração legada e depois de `makeServer()` iniciar observer, embora antes do listener. Portanto seu sucesso não deve ser rotulado como checkpoint de rollback pré-migração.
+
+Definir matriz de perda tolerada separada para: queda de processo, restart de container, reboot de host, falha de volume, perda de Redis e perda simultânea Redis+volume. Para cada classe, registrar configuração real de AOF/replicação, volumes, fsync, snapshot/backup, restore testado, RPO e RTO. O ACK HTTP promete apenas o nível que a infraestrutura efetivamente sustenta. Teste de durabilidade compara journal externo dos ACKs com o grafo restaurado; um conjunto de testes in-memory não prova durabilidade física. Restore deve reconstruir chaves com tipos e TTL/índices coerentes, saves/metadata pares, marker e owner; indisponibilidade é preferível a reabrir save velho.
+
+### Plano de cutover verificável, sem implementação implícita
+
+1. Congelar contratos e produzir baseline read-only com contagem de componentes íntegros, divergentes e ambíguos; capturar fixtures de comportamento e de bytes. Não usar produção como ambiente de reparo experimental.
+2. Definir e ensaiar checkpoint **antes** da nova migração em réplica isolada. Parar entrada e observers de todas as instâncias, esperar/abortar operações em voo conforme protocolo, conferir geração lógica e save físico; demonstrar restore completo desse checkpoint.
+3. Migrar por componente conectado de fontes, sessões e operações, incluindo dependências de catálogo. Conflitos entre aliases ou dados legados entram em quarentena. Não migrar só uma source se há movimento/sessão que a conecte a outra.
+4. Ativar shadow read/comparação sem segundo writer autoritativo; registrar divergências de slot/ID/policy e corrigir desenho antes de write cutover. Preparar roteamento/versão que impede instâncias antigas e workers antigos de escrever.
+5. Trocar autoridade apenas após barrier verificável: zero writers/observers antigos, sessão em voo resolvida, backup restaurável, scanner limpo ou exceções classificadas. Monitorar 409, dirty age, flush retries, blocked player, IDs e source/record mismatch por componente.
+6. Se houver regressão **antes** de ACK novo, restaurar checkpoint isolado e voltar com versão antiga após confirmar compatibilidade. Depois de ACK novo, rollback só com replay comprovado desses ACKs; sem isso, manter nova autoridade e fazer forward recovery. Nunca substituir estado aceito por snapshot mais velho.
+
+**Gate de produção:** ensaio de todos os interleavings críticos, scanner antes/depois, restauração isolada, avaliação de RPO/RTO, runbook de quarentena, telemetria suficiente e plano de recuperação de ACKs. Definir limites numéricos de idade dirty, tempo de finalização, tamanho de componente e duração máxima de bloqueio operacional quando a configuração real for conhecida.
+
 **Hoje:** log não informa pane/slot rejeitado. Backup varre Redis depois saves e não implementa restore; o código atual já inclui runtime marker e recibo de evento quando presentes. Bootstrap migra legado, cria servidor (que já dispara observer), então executa backup antes de abrir HTTP. Portanto backup de startup é barreira de listener, não checkpoint de pré-migração nem garantia de quiescência. Outras instâncias podem continuar escrevendo.
 
 **Contrato:** diagnóstico por operação/source/pane/slot/revisões/fase, sem dados nativos/tokens. Scanner **read-only** percorre catálogo, fontes, records, sessões, leases, evento/outbox, obrigação dirty, save e runtime marker; diferencia evento histórico de placement atual. Violação bloqueia escrita apenas do componente afetado quando identificável; não apaga IDs nem conserta sozinho. Backup de migração captura corte coerente com metadata completo ou manifest capaz de reconstruí-lo. Restore é ensaiado isoladamente antes de qualquer migração. RPO/RTO para crash de processo, reboot, host, volume e Redis são definidos com configuração efetiva, não inferidos do Spec 019.
@@ -288,6 +358,33 @@ O observer em `server.mjs` varre sessões e leases expirados. Uma falha de item 
 **PoCs e saída:** gerar slot inválido conhecido e confirmar diagnóstico; scanner detectar duplicado, órfão, record divergente, perfil excluído com source, save/metadata inválidos e runtime marker ausente; backup sob movimento/flush concorrentes deve ser rejeitado se corte não for recuperável; restore isolado e fault drill por ACK. Este dossiê começa como **baseline antes do dossiê 1** e fecha no cutover depois dos demais.
 
 ## Oráculos comuns das provas
+
+### Matriz de rastreabilidade para a futura implementação
+
+Esta matriz é **plano de verificação**, não afirmação de testes executados ou de implementação aprovada. Os arquivos são pontos de entrada existentes a ampliar; primeiro comparar expectativas atuais e alterar somente as que contradizem o contrato validado.
+
+| Requisito | Superfície principal | Evidência mínima futura | Testes existentes a consultar/ampliar |
+| --- | --- | --- | --- |
+| R1 — uma identidade por save/Hub | Redis keys, coordinator, adoção, layout | Mesmo save por dois backend profiles resolve uma source; aliases divergentes bloqueiam write | `pokemon-hub-redis-keys.test.mjs`, `pokemon-hub-snapshot-coordinator.test.mjs`, `pokemon-hub-save-adoption.test.mjs` |
+| R2 — catálogo e exclusão íntegros | profile store, GET/DELETE HTTP | Duas instâncias sem lost update; perfil ocupado sem flag recebe recusa; com descarte explícito há IDs/contagem corretos | `pokemon-hub-profile-store.test.mjs`, `apps/backend/test/server.test.mjs` |
+| R3 — topologia coerente | validator, pane mapping, UI/grid | Slot visível existe na geração da fonte; slot ausente gera log preciso, 409 cru e zero write | `pokemon-hub-canonical-session-snapshot.test.mjs`, `pokemon-hub-grid.test.mjs`, `pokemon-hub-ui.test.mjs` |
+| R4 — correção/close sem perder intenção | UI, snapshot flight, session service | 1→2→3 panes, correção, debounce/flight/close, ACK perdido e expiry conservam última intenção aceita | `pokemon-hub-snapshot-flight.test.mjs`, `pokemon-hub-session-service.test.mjs`, `server.test.mjs` |
+| R5 — commit lógico indivisível | coordinator, session service, event store, persistence | Fault injection em cada fronteira e dois backends observam apenas geração antiga ou nova; replay não duplica evento | `pokemon-hub-snapshot-coordinator.test.mjs`, `pokemon-hub-event-store.test.mjs`, `pokemon-hub-session-service.test.mjs` |
+| R6 — um owner/fence efetivo | global lease, source lease, observer/player | Expiry dirty/close concorrentes não liberam player antes do save; owner velho não limpa/release novo | `game-save-lease-coordinator.test.mjs`, `pokemon-hub-save-flush.test.mjs`, `server.test.mjs` |
+| R7 — projeção binária íntegra | materializer, save store, snapshot store | Crash entre renames/deleções, retry, reader concorrente; arquivo final e metadata válidos, runtime antigo bloqueado | `pokemon-hub-save-materializer.test.mjs`, `save-store.test.mjs`, `pokemon-hub-save-flush.test.mjs` |
+| R8 — política preservada | transfer policy, adapter Gen III, rotas legadas | Execução differential do corpus de casos, Party final válida, proibições e compatibilidade sem bypass | `pokemon-hub-transfer-placement-policy.test.mjs`, `pokemon-hub-grid-transfer-service.test.mjs`, `server.test.mjs` |
+| R9 — diagnóstico, backup e restore | scanner futuro, backup, startup | Violação detectada sem mutação; checkpoint coerente restaurado em isolamento; ACKs pós-corte conservados | `backend-state-backup.test.mjs`, `redis-legacy-migration.test.mjs`, `server.test.mjs` |
+
+### Casos de borda compartilhados que não podem ficar implícitos
+
+- **Sem mudança material:** reenvio de snapshot igual não deve criar nova revisão de save, evento de movimento, invalidation marker ou liberar source dirty alheia; close de sessão ainda precisa ter resultado terminal.
+- **Origem e destino no mesmo save:** política de ordenação/Party e materialização se aplicam à transação final; não publicar estado intermediário de cada drag.
+- **Duas fontes de save em um movimento:** commit lógico cobre ambas; finalização pode exigir dois `.sav` separados, sem transação de arquivo conjunta. Enquanto um save estiver pendente, o player desse save fica bloqueado; definir semântica de operação parcialmente projetada sem perder o vínculo lógico entre as duas fontes.
+- **Perfil/jogo removido ou renomeado durante sessão:** owner e identidade física não mudam pela string exibida; exclusão que invalida source ativo deve ser condicional e rejeitada com erro explícito.
+- **Restart com sessão `transitioning` ou `closing`:** operação tem deadline/fence e resultado durável suficiente para retomar ou corrigir. Timeout por si não decide se o commit lógico ocorreu; consultar geração/resultados antes de repetir.
+- **Índice de expiração atrasado, duplicado ou perdido:** recuperação varre autoridade e reconstrói índice; não remove lease/dirty baseado só no índice.
+- **Payload e volume:** três panes podem referir muitos slots/records; medir limite de `pokemonHubSnapshotMaximumBytes`, latência de script/transação, memória Redis e tempo de lock sob pior caso real, mantendo recusa segura de corpo grande.
+- **Observabilidade:** correlacionar request, sessão, operation ID, backend profile, source físico, pane, slot e revisão; mascarar lease token, bytes de Pokémon e conteúdo de save. Métricas agregadas não substituem scanner de integridade.
 
 | Fronteira | Sucesso | Falha admissível |
 | --- | --- | --- |
