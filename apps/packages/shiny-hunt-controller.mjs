@@ -67,15 +67,20 @@ export function createShinyHuntController({ now = () => performance.now(), sleep
       const results = new Map()
       for (let attempt = 0; attempt < MAX_PENDING_READS; attempt += 1) {
         check(signal)
-        const replies = await Promise.all(pending.map(async session => [session, await inspect(session, signal, cycleId)]))
+        const replies = await Promise.all(pending.map(async session => {
+          try { return [session, await inspect(session, signal, cycleId)] }
+          catch { return [session, { status: 'error' }] }
+        }))
         check(signal)
+        const shiny = replies.find(([, reply]) => reply.status === 'shiny')
+        if (shiny) {
+          const [session, reply] = shiny
+          const found = { resetCount, foundSessionId: session.sessionId, ...(reply.species !== undefined ? { species: reply.species } : {}) }
+          publish({ phase: 'saving', ...found })
+          await Promise.all(sessions.map(candidate => saveState(candidate, signal, cycleId)))
+          return publish({ phase: 'found', ...found })
+        }
         for (const [session, reply] of replies) {
-          if (reply.status === 'shiny') {
-            const found = { resetCount, foundSessionId: session.sessionId, ...(reply.species !== undefined ? { species: reply.species } : {}) }
-            publish({ phase: 'saving', ...found })
-            await Promise.all(sessions.map(candidate => saveState(candidate, signal, cycleId)))
-            return publish({ phase: 'found', ...found })
-          }
           if (reply.status === 'error') throw new Error('Encounter inspection failed in ' + session.sessionId)
           if (reply.status === 'normal') results.set(session.sessionId, reply)
           else if (reply.status !== 'pending') throw new Error('Invalid encounter result from ' + session.sessionId)

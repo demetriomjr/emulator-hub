@@ -33,6 +33,55 @@ test('saves every open player and stops before another reset on enemy shiny', as
   assert.equal(calls.some(call => call[0] === 'status' && call[1] === 'found'), true)
 })
 
+test('inspects all nine open players before deciding the cycle', async () => {
+  const players = Array.from({ length: 9 }, (_, index) => ({ sessionId: `player-${index + 1}` }))
+  const inspected = []
+  const saved = []
+  let time = 0
+  const controller = createShinyHuntController({
+    now: () => time,
+    sleep: async ms => { time += ms },
+    prepare: async () => {},
+    reset: async () => {},
+    pulse: async () => {},
+    inspect: async session => {
+      inspected.push(session.sessionId)
+      return { status: session.sessionId === 'player-9' ? 'shiny' : 'normal' }
+    },
+    saveState: async session => { saved.push(session.sessionId) },
+    release: async () => {},
+  })
+
+  const outcome = await controller.start(players)
+  assert.equal(outcome.foundSessionId, 'player-9')
+  assert.deepEqual(inspected, players.map(session => session.sessionId))
+  assert.deepEqual(saved, players.map(session => session.sessionId))
+})
+
+test('a shiny in a later player takes priority over an inspection failure', async () => {
+  const players = [{ sessionId: 'broken' }, { sessionId: 'shiny' }]
+  const saved = []
+  let time = 0
+  const controller = createShinyHuntController({
+    now: () => time,
+    sleep: async ms => { time += ms },
+    prepare: async () => {},
+    reset: async () => {},
+    pulse: async () => {},
+    inspect: async session => {
+      if (session.sessionId === 'broken') throw new Error('inspection unavailable')
+      return { status: 'shiny' }
+    },
+    saveState: async session => { saved.push(session.sessionId) },
+    release: async () => {},
+  })
+
+  const outcome = await controller.start(players)
+  assert.equal(outcome.phase, 'found')
+  assert.equal(outcome.foundSessionId, 'shiny')
+  assert.deepEqual(saved, ['broken', 'shiny'])
+})
+
 test('waits two real seconds after all soft resets before the first A', async () => {
   let now = 0
   const downTimes = []

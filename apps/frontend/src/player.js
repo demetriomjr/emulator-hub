@@ -19,6 +19,7 @@ import { getInstallationIdentity, localCandidateSummary, remoteCandidateSummary,
 import { softResetEmulator } from '../../packages/player-reset.mjs'
 import { createOddsManipulatorClock } from '../../packages/odds-manipulator-clock.mjs'
 import { createEmulatorAudioMute } from '../../packages/emulator-audio-mute.mjs'
+import { configureEmulatorNotifications } from '../../packages/emulator-notifications.mjs'
 import { createPlayerInteractionLock } from '../../packages/player-interaction-lock.mjs'
 import { playerThreadFallbackUrl, selectPlayerThreadMode } from '../../packages/player-thread-policy.mjs'
 import { createPlayerOriginStorageClient } from '../../packages/player-origin-storage-bridge.mjs'
@@ -86,7 +87,6 @@ let threadFallbackRequested = false
 let threadStartupMonitor = null
 let threadStartupTimeout = null
 let lastInteractionLockRevision = -1
-let fastForwardOverlayObserver = null
 let lastGamepadBindings = new Set()
 let launchDescriptor = null
 let emulatorGameId = null
@@ -344,25 +344,8 @@ function hideContextMenuButton() {
   }
 }
 
-function hideFastForwardOverlay() {
-  for (const overlay of game.querySelectorAll('.ejs_message')) {
-    if (/fast[-\s]?forward/i.test(overlay.textContent)) {
-      // EmulatorJS styles this message with an author rule, so the hidden
-      // attribute can be overridden. Force the overlay out of the layout.
-      overlay.style.setProperty('display', 'none', 'important')
-    } else {
-      overlay.style.removeProperty('display')
-    }
-  }
-}
-
 function normalizeEmulatorChrome() {
   hideContextMenuButton()
-  hideFastForwardOverlay()
-  if (!fastForwardOverlayObserver) {
-    fastForwardOverlayObserver = new MutationObserver(hideFastForwardOverlay)
-    fastForwardOverlayObserver.observe(game, { childList: true, characterData: true, subtree: true })
-  }
 }
 
 function stopThreadStartupMonitor() {
@@ -501,7 +484,6 @@ function applyFastForward() {
   const emulator = window.EJS_emulator
   if (!emulator?.changeSettingOption) return
   const revision = ++fastForwardRevision
-  emulator.gameManager?.setVariable('notification_show_fast_forward', 'false')
   if (emulator.isFastForward) emulator.changeSettingOption('fastForward', 'disabled')
   emulator.changeSettingOption('ff-ratio', fastForwardRequest.speed.toFixed(1))
   if (fastForwardRequest.enabled) {
@@ -988,9 +970,6 @@ async function start() {
   // EmulatorJS per-game localStorage profile replace them during startup.
   window.EJS_disableLocalStorage = true
   window.EJS_pathtodata = dataUrl
-  window.EJS_externalFiles = {
-    '/home/web_user/.config/retroarch/retroarch.cfg': '/retroarch.cfg',
-  }
   window.EJS_startOnLoaded = true
   window.EJS_Buttons = {
     fullscreen: false,
@@ -1006,6 +985,7 @@ async function start() {
     contextMenu: false,
   }
   window.EJS_ready = () => {
+    configureEmulatorNotifications(window.EJS_emulator)
     interactionLock.apply()
     stopLifecycleDiagnostics?.()
     audioMute.attach(window.EJS_emulator)
