@@ -5,8 +5,6 @@ import { materializePokemonGen3EventGrant } from './pokemon-gen3-event-grant.mjs
 import { readPokemonGen3Flags } from './pokemon-gen3-event-flags.mjs'
 import { inspectPokemonGen3Inventory } from './pokemon-gen3-inventory.mjs'
 
-const recipeVersion = 1
-
 export function createPokemonGen3EventDeliveryService({ saveStore, gameSaveLeases, snapshotStore = null, resolveGame, now = () => new Date(), onError = console.warn, onEvent = () => {} } = {}) {
   if (typeof saveStore?.get !== 'function' || typeof saveStore?.put !== 'function' || typeof gameSaveLeases?.get !== 'function' || typeof resolveGame !== 'function') {
     throw new TypeError('Gen III event delivery dependencies are invalid.')
@@ -18,6 +16,7 @@ export function createPokemonGen3EventDeliveryService({ saveStore, gameSaveLease
     try {
       const game = await resolveGame(gameId)
       const title = game?.title
+      const recipeVersion = title === 'pokemon-emerald' ? 2 : 1
       const romSha256 = game?.romSha256
       const eventIds = catalog.events.filter(event => event.itemIdByTitle[title] !== undefined).map(event => event.id)
       if (!eventIds.length || typeof romSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(romSha256)) return { status: 'unsupported-rom', ...(game?.unsupportedReason ? { reason: game.unsupportedReason } : {}) }
@@ -41,6 +40,9 @@ export function createPokemonGen3EventDeliveryService({ saveStore, gameSaveLease
       const requestedFlagIds = [...new Set([...catalog.globalUnlockFlagIdsByTitle[title], ...eventIds.flatMap(eventId => catalog.events.find(event => event.id === eventId).grantFlagIdsByTitle[title])])]
       const existingFlags = readPokemonGen3Flags(original.bytes, title, requestedFlagIds)
       const enabledFlagIds = requestedFlagIds.filter((_, index) => !existingFlags[index])
+      const defaultFlagChanges = catalog.defaultFlagChangesByTitle[title] ?? []
+      const defaultFlagsBefore = readPokemonGen3Flags(original.bytes, title, defaultFlagChanges.map(change => change.flagId))
+      const clearedFlagIds = defaultFlagChanges.filter((change, index) => !change.value && defaultFlagsBefore[index]).map(change => change.flagId)
       if ((title === 'pokemon-ruby' || title === 'pokemon-sapphire') && !eligibility.nationalDexUnlocked) enabledFlagIds.push(0x836)
       const deliveredAt = new Date(now()).toISOString()
       const saved = await saveStore.put(profileId, gameId, Buffer.from(candidate), original.revision, {
@@ -55,7 +57,7 @@ export function createPokemonGen3EventDeliveryService({ saveStore, gameSaveLease
       if (confirmed?.revision !== saved.revision || confirmed.sha256 !== saved.sha256 || confirmed.eventGrantReceipt?.saveSha256 !== saved.sha256) {
         throw deliveryError('EVENT_SAVE_READBACK_FAILED', 'The stored event save could not be confirmed.')
       }
-      emit('committed', { profileId, gameId, title, romSha256, patchSha256: game.patchSha256 ?? null, previousRevision: original.revision, revision: saved.revision, previousSha256: original.sha256, sha256: saved.sha256, backupFileName: saved.eventGrantReceipt.backupFileName, eventIds, addedItemIds, enabledFlagIds: enabledFlagIds.sort((a, b) => a - b) })
+      emit('committed', { profileId, gameId, title, romSha256, patchSha256: game.patchSha256 ?? null, previousRevision: original.revision, revision: saved.revision, previousSha256: original.sha256, sha256: saved.sha256, backupFileName: saved.eventGrantReceipt.backupFileName, eventIds, addedItemIds, enabledFlagIds: enabledFlagIds.sort((a, b) => a - b), clearedFlagIds })
       if (validation.changed && snapshotStore) {
         for (const kind of ['cloud-recovery', 'user-state']) {
           try { await snapshotStore.delete(profileId, gameId, { kind }) }

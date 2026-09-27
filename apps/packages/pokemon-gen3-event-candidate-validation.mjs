@@ -52,9 +52,12 @@ export function validatePokemonGen3EventCandidate(original, candidate, title, ev
 
   const requiredFlags = [...flagIds]
   if (readPokemonGen3Flags(candidate, title, requiredFlags).some(value => !value)) throw invalidCandidate('Event candidate is missing a required flag.')
+  const defaultFlagChanges = catalog.defaultFlagChangesByTitle[title] ?? []
+  if (readPokemonGen3Flags(candidate, title, defaultFlagChanges.map(change => change.flagId))
+    .some((value, index) => value !== defaultFlagChanges[index].value)) throw invalidCandidate('Event candidate has an incorrect Match Call flag.')
   const allowedFlagMasks = new Map()
   const flagBase = title === 'pokemon-ruby' || title === 'pokemon-sapphire' ? 0x1220 : title === 'pokemon-emerald' ? 0x1270 : 0x0ee0
-  for (const flagId of requiredFlags) {
+  for (const flagId of [...requiredFlags, ...defaultFlagChanges.map(change => change.flagId)]) {
     const logical = flagBase + (flagId >> 3)
     const address = pokemonGen3SaveByteOffset(beforeSave, 'large', logical)
     allowedFlagMasks.set(address, (allowedFlagMasks.get(address) ?? 0) | (1 << (flagId & 7)))

@@ -38,11 +38,18 @@ export function materializePokemonGen3EventGrant(saveBytes, pokemonSaveTitle, ev
     : saveBytes
   const withItems = addPokemonGen3KeyItems(withNationalDex, pokemonSaveTitle, items)
   const flagIds = [...flags]
-  const candidate = editPokemonGen3Flags(withItems, pokemonSaveTitle, flagIds.map(flagId => ({ flagId, value: true })))
+  const defaultFlagChanges = eventCatalog.defaultFlagChangesByTitle[pokemonSaveTitle] ?? []
+  const candidate = editPokemonGen3Flags(withItems, pokemonSaveTitle, [
+    ...flagIds.map(flagId => ({ flagId, value: true })),
+    ...defaultFlagChanges,
+  ])
   const owned = new Set(inspectPokemonGen3Inventory(candidate, pokemonSaveTitle).keyItems.slots
     .filter(slot => slot.quantity === 1)
     .map(slot => slot.itemId))
-  if (items.some(itemId => !owned.has(itemId)) || readPokemonGen3Flags(candidate, pokemonSaveTitle, flagIds).some(value => !value)) {
+  if (items.some(itemId => !owned.has(itemId))
+    || readPokemonGen3Flags(candidate, pokemonSaveTitle, flagIds).some(value => !value)
+    || readPokemonGen3Flags(candidate, pokemonSaveTitle, defaultFlagChanges.map(change => change.flagId))
+      .some((value, index) => value !== defaultFlagChanges[index].value)) {
     throw invalidGrant('Gen III event grant could not be verified.')
   }
   return candidate

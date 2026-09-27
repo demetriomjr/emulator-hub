@@ -7,8 +7,9 @@ import { join } from 'node:path'
 import { createSaveStore } from './save-store.mjs'
 import { createPokemonGen3EventDeliveryService } from './pokemon-gen3-event-delivery.mjs'
 import { inspectPokemonGen3Inventory } from './pokemon-gen3-inventory.mjs'
-import { readPokemonGen3Flags } from './pokemon-gen3-event-flags.mjs'
+import { editPokemonGen3Flags, readPokemonGen3Flags } from './pokemon-gen3-event-flags.mjs'
 import { inspectPokemonGen3EventEligibility } from './pokemon-gen3-event-eligibility.mjs'
+import { materializePokemonGen3EventGrant } from './pokemon-gen3-event-grant.mjs'
 
 const profileId = 'profile-1'
 const gameId = 'firered-1'
@@ -66,6 +67,41 @@ test('delivers Ruby National Dex and Eon Ticket in one backed-up save revision',
     assert.equal((await readdir(join(root, 'event-backups'))).length, 1)
     assert.deepEqual(original, rubySave({ league: true }))
     assert.deepEqual(await service.attempt({ profileId, gameId: 'ruby-1' }), { status: 'already-delivered', revision: 2 })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('upgrades an existing Emerald event receipt and backs up the Match Call change', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'emulator-hub-event-delivery-'))
+  try {
+    const saveStore = createSaveStore({ dataPath: join(root, 'saves'), eventBackupsPath: join(root, 'event-backups') })
+    const original = emeraldSave()
+    await saveStore.put(profileId, 'emerald-1', original, null)
+    const eventIds = ['southern-island', 'faraway-island', 'navel-rock', 'birth-island']
+    const previousGrant = editPokemonGen3Flags(
+      materializePokemonGen3EventGrant(original, 'pokemon-emerald', eventIds),
+      'pokemon-emerald', [{ flagId: 0x12f, value: true }],
+    )
+    await saveStore.put(profileId, 'emerald-1', previousGrant, 1, {
+      eventGrantReceipt: { romSha256, recipeVersion: 1, eventIds, deliveredAt: '2026-09-26T00:00:00.000Z' },
+    })
+    const changes = []
+    const service = createPokemonGen3EventDeliveryService({
+      saveStore,
+      gameSaveLeases: { async get() { return null } },
+      resolveGame: async () => ({ title: 'pokemon-emerald', romSha256 }),
+      onEvent(phase, details) { if (phase === 'committed') changes.push(details) },
+    })
+
+    assert.deepEqual(await service.attempt({ profileId, gameId: 'emerald-1' }), { status: 'delivered', revision: 3 })
+    const stored = await saveStore.get(profileId, 'emerald-1')
+    assert.deepEqual(readPokemonGen3Flags(stored.bytes, 'pokemon-emerald', [0x12f, 0x8ac, 0x8db]), [false, true, true])
+    assert.equal(stored.eventGrantReceipt.recipeVersion, 2)
+    assert.deepEqual(changes[0].clearedFlagIds, [0x12f])
+    assert.equal((await readdir(join(root, 'event-backups'))).length, 2)
+    assert.deepEqual(await service.attempt({ profileId, gameId: 'emerald-1' }), { status: 'already-delivered', revision: 3 })
+    assert.equal((await readdir(join(root, 'event-backups'))).length, 2)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -169,6 +205,24 @@ function rubySave({ league }) {
       for (let offset = 0; offset < length; offset += 4) sum = (sum + bytes.readUInt32LE(start + offset)) >>> 0
       bytes.writeUInt16LE(((sum & 0xffff) + (sum >>> 16)) & 0xffff, start + 0xff6)
     }
+  }
+  return bytes
+}
+
+function emeraldSave() {
+  const bytes = fireRedSave({ eligible: false })
+  const copy = 0xe000
+  bytes[physical(copy, 0) + 0x1a] = 0xda
+  bytes.writeUInt16LE(0x0302, large(copy, 0x1428))
+  for (const flagId of [0x864, 0x896, 0x12f, 0x130, 0x15c]) {
+    bytes[large(copy, 0x1270 + (flagId >> 3))] |= 1 << (flagId & 7)
+  }
+  for (let section = 0; section < 14; section += 1) {
+    const start = physical(copy, section)
+    const length = section === 0 ? 3884 : section === 13 ? 2000 : 3968
+    let sum = 0
+    for (let offset = 0; offset < length; offset += 4) sum = (sum + bytes.readUInt32LE(start + offset)) >>> 0
+    bytes.writeUInt16LE(((sum & 0xffff) + (sum >>> 16)) & 0xffff, start + 0xff6)
   }
   return bytes
 }

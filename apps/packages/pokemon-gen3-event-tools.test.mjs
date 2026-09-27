@@ -57,6 +57,23 @@ test('Emerald event grant includes both Mystery unlocks and every selected event
   assert.deepEqual(materializePokemonGen3EventGrant(edited, 'pokemon-emerald', selected), edited)
 })
 
+test('Emerald event grant clears Match Call without removing contacts or the PokeNav menu', () => {
+  const original = editPokemonGen3Flags(eligibleFixture('pokemon-emerald'), 'pokemon-emerald', [
+    { flagId: 0x12f, value: true },
+    { flagId: 0x130, value: true },
+    { flagId: 0x15c, value: true },
+  ])
+  const before = Buffer.from(original)
+  const candidate = materializePokemonGen3EventGrant(original, 'pokemon-emerald', ['birth-island'])
+  assert.deepEqual(readPokemonGen3Flags(candidate, 'pokemon-emerald', [0x12f, 0x130, 0x15c]), [false, true, true])
+  assert.deepEqual(validatePokemonGen3EventCandidate(original, candidate, 'pokemon-emerald', ['birth-island']), { changed: true })
+  assert.deepEqual(original, before)
+  assert.deepEqual(materializePokemonGen3EventGrant(candidate, 'pokemon-emerald', ['birth-island']), candidate)
+
+  const unmuted = editPokemonGen3Flags(candidate, 'pokemon-emerald', [{ flagId: 0x12f, value: true }])
+  assert.throws(() => validatePokemonGen3EventCandidate(original, unmuted, 'pokemon-emerald', ['birth-island']), /Match Call|required flag/i)
+})
+
 test('partial Emerald grant sets only the selected event flags plus global unlocks', () => {
   const edited = materializePokemonGen3EventGrant(eligibleFixture('pokemon-emerald'), 'pokemon-emerald', ['birth-island'])
   assert.deepEqual(readPokemonGen3Flags(edited, 'pokemon-emerald', [0x8ac, 0x8db, 0x8d5, 0x13a]), [true, true, true, true])

@@ -15,6 +15,9 @@
     "pokemon-firered": [2105],
     "pokemon-leafgreen": [2105]
   },
+  "defaultFlagChangesByTitle": {
+    "pokemon-emerald": [{ "flagId": 303, "value": false }]
+  },
   "keyItemsInsertion": {
     "pocket": "key-items",
     "slotBytes": 4,
