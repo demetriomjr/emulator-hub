@@ -41,6 +41,7 @@ import { createPlayerLeaseCoordinator } from '../packages/player-lease-coordinat
 import { createGameSaveLeaseCoordinator } from '../packages/game-save-lease-coordinator.mjs'
 import { createIpsPatchRegistry } from '../packages/game-patches.mjs'
 import { createBackendStateBackup } from '../packages/backend-state-backup.mjs'
+import { createPokemonGen3EventDeliveryService } from '../packages/pokemon-gen3-event-delivery.mjs'
 
 const backendDirectory = dirname(fileURLToPath(import.meta.url))
 const defaultCatalogPath = join(backendDirectory, 'catalog.json')
@@ -96,7 +97,7 @@ export function createHubServer(options = {}) {
     profileStore: options.profileStore ?? createRedisProfileStore({ persistence }),
     controlProfileStore: options.controlProfileStore ?? createRedisControlProfileStore({ persistence }),
     userPreferencesStore: options.userPreferencesStore ?? createRedisUserPreferencesStore({ persistence }),
-    saveStore: options.saveStore ?? createSaveStore({ dataPath: options.savesPath ?? defaultSavesPath }),
+    saveStore: options.saveStore ?? createSaveStore({ dataPath: options.savesPath ?? defaultSavesPath, eventBackupsPath: options.eventBackupsPath ?? join(options.backupsPath ?? join(dirname(options.savesPath ?? defaultSavesPath), 'backups'), 'gen3-events') }),
     snapshotStore: options.snapshotStore ?? createSnapshotStore({ dataPath: options.snapshotsPath ?? defaultSnapshotsPath }),
     pokemonHubStore: options.pokemonHubStore ?? createRedisPokemonHubStore({ persistence }),
     pokemonHubProfileStore: options.pokemonHubProfileStore ?? createRedisPokemonHubProfileStore({ persistence }),
@@ -114,6 +115,24 @@ export function createHubServer(options = {}) {
   }
   config.backupService = options.backupService ?? (typeof config.saveStore.listAll === 'function'
     ? createBackendStateBackup({ persistence, saveStore: config.saveStore, backupsPath: options.backupsPath ?? defaultBackupsPath, namespace: options.redisNamespace ?? process.env.REDIS_NAMESPACE ?? null })
+    : null)
+  config.eventDeliveryService = options.eventDeliveryService ?? (typeof config.saveStore.put === 'function' && typeof config.gameSaveLeases.get === 'function'
+    ? createPokemonGen3EventDeliveryService({
+      saveStore: config.saveStore,
+      gameSaveLeases: config.gameSaveLeases,
+      snapshotStore: config.snapshotStore,
+      resolveGame: async gameId => {
+        const entry = await findEntry(config, gameId)
+        const layout = entry && getPokemonSaveLayout(entry.pokemonSave?.layoutProfile, entry.pokemonSave?.adapter, entry.pokemonSave?.title)
+        if (entry?.system !== 'gba' || !layout || entry.pokemonSave?.adapter !== pokemonGen3Adapter.id) return null
+        const rom = await verifyRom(entry, config.romsDirectory)
+        if (!rom.ok) return null
+        const patch = await verifyGamePatch(entry, config)
+        if (!patch.ok || patch.patch) return null
+        return { title: layout.pokemonSaveTitle, romSha256: entry.sha256 }
+      },
+      onError: (message, details) => config.savePipelineLogger.warn('save.backend.event-delivery-skipped', { message, ...details }),
+    })
     : null)
   config.pokemonHubSnapshotCoordinator = options.pokemonHubSnapshotCoordinator ?? createPokemonHubSnapshotCoordinator({ persistence, eventStore: config.pokemonHubEventStore, logger: config.pokemonHubLogger, validatePlacementChange: createPokemonHubTransferPlacementPolicy(), gameSaveLeases: config.gameSaveLeases })
   const canCreatePokemonHubSessionService = ['getSnapshot', 'renew', 'release', 'sync', 'reconcileWorkspaceLeases'].every(method => typeof config.pokemonHubSnapshotCoordinator[method] === 'function')
@@ -1744,7 +1763,14 @@ async function handlePlayerLease(request, response, config, route, searchParams)
           emitSnapshotLog(config, 'warn', 'snapshot.backend.release-cleanup-failed', { profileId: input.profileId, gameId: input.gameId, kind: 'cloud-recovery', sessionId: input.sessionId, leaseGeneration: input.generation, code: error.code ?? null, error: error.message })
         }
       }
-      return json(response, 200, await config.playerLeases.release(input))
+      const released = await config.playerLeases.release(input)
+      json(response, 200, released)
+      if (config.eventDeliveryService && body.closeCompleted === true && body.preserveRecovery !== true) setImmediate(() => {
+        Promise.resolve(config.eventDeliveryService.attempt({ profileId: input.profileId, gameId: input.gameId })).catch(error => {
+          config.savePipelineLogger.warn('save.backend.event-delivery-skipped', { profileId: input.profileId, gameId: input.gameId, code: error.code ?? null, message: error.message })
+        })
+      })
+      return
     }
     const entry = await findEntry(config, input.gameId)
     if (!entry) return json(response, 404, { error: 'Game was not found.' })

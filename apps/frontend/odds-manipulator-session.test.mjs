@@ -59,6 +59,7 @@ test('a newly loaded iframe receives the already enabled wrapper odds clock', ()
   const actions = []
   const configure = runInNewContext(`${hub.slice(begin, end)}\nconfigurePlayerFrameOnLoad`, {
     hubPerformance: null,
+    huntActiveRef: { current: false }, stopShinyHunt() {},
     fastForwardEnabled: false, fastForwardSpeed: 1.5, muted: false, oddsManipulatorEnabled: true,
     closeLockRef: { current: false }, profileInfoSessionId: null, window: { location: { origin: 'http://localhost' } },
     sendPlayerInteractionLock() {},
@@ -124,6 +125,7 @@ test('controller resets advance the current session after React replaces its sta
   const dirty = []
   const initialSession = { sessionId: 'session-1', gameId: 'game-1', profileId: 'profile-1', oddsResetCount: 10 }
   const context = {
+    huntActiveRef: { current: false },
     activeSessions: [initialSession],
     activeSessionsRef: { current: [initialSession] },
     oddsManipulatorEnabled: true,

@@ -17,6 +17,7 @@ function harness(sessions, { preferenceFailure = false } = {}) {
     activeSessions: sessions,
     activeSessionsRef: { current: sessions },
     closeChooserOpen: false,
+    stopShinyHunt() {},
     saveCloseCoordinatorRef: { current: null },
     closeBatchSessionIdsRef: { current: [] },
     setPlayerInteractionLocked: locked => calls.push(['lock', locked]),
@@ -38,7 +39,7 @@ function harness(sessions, { preferenceFailure = false } = {}) {
     },
     flushPlayerSave: async frame => { calls.push(['flush', frame.sessionId]); return { preserveRecovery: false } },
     clearPlayerRecovery: async frame => calls.push(['clear-recovery', frame.sessionId]),
-    releasePlayerLease: async sessionId => calls.push(['release', sessionId]),
+    releasePlayerLease: async (sessionId, payload) => { calls.push(['release', sessionId]); calls.push(['release-payload', JSON.parse(JSON.stringify(payload))]) },
     createMultiSaveCloseCoordinator({ tasks: selectedTasks }) {
       tasks = selectedTasks
       return { run: async () => selectedTasks.map(() => ({ status: 'failed' })) }
@@ -81,6 +82,7 @@ test('selected close uses session identity after the frame order changes', async
   assert.equal(getTasks()[0].label, 'ROM B | Perfil B')
   await getTasks()[0].run()
   assert.deepEqual(calls.filter(call => call[0] === 'flush' || call[0] === 'release'), [['flush', 'b'], ['release', 'b']])
+  assert.equal(calls.find(call => call[0] === 'release-payload')[1].closeCompleted, true)
 })
 
 test('partial completion keeps survivor and global odds state', async () => {

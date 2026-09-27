@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, test } from 'node:test'
@@ -12,6 +12,7 @@ import { createCloudSaveSynchronizer } from '../../packages/cloud-save-sync.mjs'
 import { observeEmulatorSaveFiles } from '../../packages/emulator-save-events.mjs'
 import { createSaveStore } from '../../packages/save-store.mjs'
 import { createSnapshotStore } from '../../packages/snapshot-store.mjs'
+import { inspectPokemonGen3Inventory } from '../../packages/pokemon-gen3-inventory.mjs'
 
 const liveServers = new Set()
 const liveFixtures = new Set()
@@ -89,6 +90,63 @@ test('creates an authenticated backend state backup without exposing its content
   assert.equal('saves' in result, false)
 })
 
+test('player release schedules optional event delivery after the lease closes', async () => {
+  const rom = Buffer.from('event release route fixture')
+  let completeAttempt
+  const attempted = new Promise(resolve => { completeAttempt = resolve })
+  const { baseUrl } = await startFixture([{ id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom) }], { 'pokemon-red.gb': rom }, {}, {
+    eventDeliveryService: { async attempt(identity) { completeAttempt(identity); return { status: 'unsupported-rom' } } },
+  })
+  const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Red' }) }))
+  const lease = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, 'event-release')
+  const release = await fetch(`${baseUrl}/api/player-leases/event-release`, { method: 'DELETE', headers: { Cookie: lease.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: profile.id, gameId: 'pokemon-red', generation: lease.body.leaseGeneration, closeCompleted: true }) })
+  assert.equal(release.status, 200)
+  assert.deepEqual(await Promise.race([attempted, new Promise((_, reject) => setTimeout(() => reject(new Error('event delivery was not scheduled')), 500))]), { profileId: profile.id, gameId: 'pokemon-red' })
+})
+
+test('event delivery waits for a completed normal player close', async () => {
+  const rom = Buffer.from('event close guard fixture')
+  const attempts = []
+  const { baseUrl } = await startFixture([{ id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom) }], { 'pokemon-red.gb': rom }, {}, {
+    eventDeliveryService: { async attempt(identity) { attempts.push(identity) } },
+  })
+  const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Red' }) }))
+  for (const [sessionId, extra] of [['no-close', {}], ['preserved-close', { closeCompleted: true, preserveRecovery: true }]]) {
+    const lease = await acquirePlayerLease(baseUrl, 'pokemon-red', profile.id, sessionId)
+    const response = await fetch(`${baseUrl}/api/player-leases/${sessionId}`, { method: 'DELETE', headers: { Cookie: lease.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: profile.id, gameId: 'pokemon-red', generation: lease.body.leaseGeneration, ...extra }) })
+    assert.equal(response.status, 200)
+  }
+  await new Promise(resolve => setTimeout(resolve, 50))
+  assert.deepEqual(attempts, [])
+})
+
+test('backend release delivers an eligible FireRed save through the real event service', async () => {
+  const rom = Buffer.alloc(0xc0)
+  rom.write('BPRE', 0xac, 'ascii')
+  const entry = { id: 'firered', title: 'Pokémon FireRed Version', system: 'gba', core: 'mgba', file: 'firered.gba', sha256: sha256(rom), pokemonSave: { adapter: 'gen3-gba-v1', layoutProfile: 'pokemon-firered-leafgreen-gba', title: 'pokemon-firered', saveKind: 'battery', supported: true } }
+  const fixture = await createFixture([entry], { 'firered.gba': rom })
+  const server = createHubServer(fixture)
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  liveServers.add(server)
+  const baseUrl = `http://127.0.0.1:${server.address().port}`
+  const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/firered/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Red' }) }))
+  const store = createSaveStore({ dataPath: fixture.savesPath, eventBackupsPath: join(fixture.root, 'data', 'backups', 'gen3-events') })
+  await store.put(profile.id, 'firered', eligibleFireRedSave(), null)
+  const lease = await acquirePlayerLease(baseUrl, 'firered', profile.id, 'real-event-release')
+  assert.equal(lease.response.status, 200)
+  const release = await fetch(`${baseUrl}/api/player-leases/real-event-release`, { method: 'DELETE', headers: { Cookie: lease.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: profile.id, gameId: 'firered', generation: lease.body.leaseGeneration, closeCompleted: true }) })
+  assert.equal(release.status, 200)
+  let saved
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    saved = await store.get(profile.id, 'firered')
+    if (saved.eventGrantReceipt) break
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+  assert.ok(saved.eventGrantReceipt)
+  assert.deepEqual(inspectPokemonGen3Inventory(saved.bytes, 'pokemon-firered').keyItems.slots.slice(0, 2).map(slot => slot.itemId), [370, 371])
+  assert.equal((await readdir(join(fixture.root, 'data', 'backups', 'gen3-events'))).length, 1)
+})
+
 afterEach(async () => {
   await Promise.all([...liveServers].map((server) => closeServer(server)))
   liveServers.clear()
@@ -98,6 +156,33 @@ afterEach(async () => {
 
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex')
+}
+
+function eligibleFireRedSave() {
+  const bytes = Buffer.alloc(0x20000)
+  const physical = (copy, section) => copy + ((section * 5 + 3) % 14) * 0x1000
+  const large = (copy, offset) => physical(copy, 1 + Math.floor(offset / 0xf80)) + offset % 0xf80
+  for (const [copy, index] of [[0, 1], [0xe000, 2]]) {
+    for (let section = 0; section < 14; section += 1) {
+      const start = physical(copy, section)
+      bytes.writeUInt16LE(section, start + 0xff4)
+      bytes.writeUInt32LE(0x08012025, start + 0xff8)
+      bytes.writeUInt32LE(index, start + 0xffc)
+    }
+    if (copy === 0xe000) {
+      bytes[physical(copy, 0) + 0x1b] = 0xb9
+      bytes.writeUInt16LE(0x6258, large(copy, 0x109c))
+      for (const flagId of [0x82c, 0x840, 0x844]) bytes[large(copy, 0xee0 + (flagId >> 3))] |= 1 << (flagId & 7)
+    }
+    for (let section = 0; section < 14; section += 1) {
+      const start = physical(copy, section)
+      const length = section === 0 ? 3884 : section === 13 ? 2000 : 3968
+      let sum = 0
+      for (let offset = 0; offset < length; offset += 4) sum = (sum + bytes.readUInt32LE(start + offset)) >>> 0
+      bytes.writeUInt16LE(((sum & 0xffff) + (sum >>> 16)) & 0xffff, start + 0xff6)
+    }
+  }
+  return bytes
 }
 
 function validIps(value = 1) {

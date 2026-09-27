@@ -19,7 +19,7 @@ test('writes a complete atomic backend state archive', async () => {
     await persistence.addToSortedSet('pokemon-hub:expiring-lease', 'session-a', 1234)
     const backup = createBackendStateBackup({
       persistence,
-      saveStore: { async listAll() { return [{ profileId: 'profile-red', gameId: 'red', revision: 3, sha256: 'abc', fenceGeneration: 2, bytes: Buffer.from([1, 2, 3]) }] } },
+      saveStore: { async listAll() { return [{ profileId: 'profile-red', gameId: 'red', revision: 3, sha256: 'abc', fenceGeneration: 2, runtimeStateInvalidatedAtRevision: 2, eventGrantReceipt: { romSha256: 'a'.repeat(64), recipeVersion: 1, eventIds: ['birth-island'], deliveredAt: '2026-09-26T00:00:00.000Z', saveRevision: 2, saveSha256: 'b'.repeat(64), backupFileName: 'event-backup.json' }, bytes: Buffer.from([1, 2, 3]) }] } },
       backupsPath: join(root, 'backups'),
       namespace: 'emulator-hub:test',
       now: () => new Date('2026-09-22T12:34:56.000Z'),
@@ -41,6 +41,8 @@ test('writes a complete atomic backend state archive', async () => {
       key: 'pokemon-hub:expiring-lease', type: 'zset', value: [{ value: 'session-a', score: 1234 }],
     })
     assert.equal(document.saves[0].bytesBase64, Buffer.from([1, 2, 3]).toString('base64'))
+    assert.equal(document.saves[0].runtimeStateInvalidatedAtRevision, 2)
+    assert.deepEqual(document.saves[0].eventGrantReceipt.eventIds, ['birth-island'])
     assert.deepEqual(await readdir(join(root, 'backups')), [result.fileName])
   } finally {
     await rm(root, { recursive: true, force: true })

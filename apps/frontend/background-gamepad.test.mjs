@@ -20,7 +20,7 @@ const broadcastSource = `${hub.slice(broadcastStart, broadcastEnd)}\nbroadcast`
 function context(overrides = {}) {
   return {
     hubPerformance: null, controlPanelOpen: false, profileGame: null, instancePicker: false,
-    closeLockRef: { current: false }, globalGamepadGateRef: { current: createGamepadInputGate() },
+    closeLockRef: { current: false }, huntActiveRef: { current: false }, globalGamepadGateRef: { current: createGamepadInputGate() },
     profileInfoGamepadGatesRef: { current: new Map() }, profileInfoSessionId: null, selectedPlayerSessionId: 'a',
     readGamepadSnapshot: () => [], activeGamepadBindings: snapshot => snapshot,
     triggerActions: { update() {} }, l2TriggerAction: null, r2TriggerAction: null, triggerBindings: {}, broadcast() {},

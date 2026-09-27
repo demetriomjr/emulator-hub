@@ -5,7 +5,7 @@ import { test } from 'node:test'
 test('the existing add guards share a nine-player cap', async () => {
   const hub = await readFile(new URL('./src/main.jsx', import.meta.url), 'utf8')
   assert.match(hub, /const MAX_PLAYER_INSTANCES = 9/)
-  assert.match(hub, /disabled=\{activeSessions\.length >= MAX_PLAYER_INSTANCES\}/)
+  assert.match(hub, /disabled=\{huntRunning \|\| activeSessions\.length >= MAX_PLAYER_INSTANCES\}/)
   assert.match(hub, /function openInstancePicker\(\)\s*\{\s*if \(isMobileLandscape \|\| activeSessions\.length >= MAX_PLAYER_INSTANCES\) return/)
   assert.match(hub, /async function launchWithProfile\(profile\)\s*\{\s*if \(profilePurpose === 'add-instance' && activeSessions\.length >= MAX_PLAYER_INSTANCES\) return/)
   assert.match(hub, /setActiveSessions\(current => current\.length >= MAX_PLAYER_INSTANCES \? current : \[\.\.\.current, session\]\)/)

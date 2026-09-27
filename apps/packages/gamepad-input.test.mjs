@@ -65,6 +65,16 @@ test('disconnect releases input while another controller holding the same bindin
   assert.deepEqual(events, [[0, 8, 1], [0, 8, 0]])
 })
 
+test('synthetic A remains owned across physical gamepad updates and releases explicitly', () => {
+  const events = []
+  const input = createEmulatorGamepadInput({ gamepad: { terminate() {} }, gameManager: { simulateInput: (...args) => events.push(args) } }, { 8: { gamepad: 'BUTTON_1' } })
+  events.length = 0
+  input.setSyntheticPressed(8, true)
+  input.update([])
+  input.setSyntheticPressed(8, false)
+  assert.deepEqual(events, [[0, 8, 1], [0, 8, 0]])
+})
+
 test('replaces gamepad bindings without restarting a running emulator', () => {
   const events = []
   const input = createEmulatorGamepadInput({

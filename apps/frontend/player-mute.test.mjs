@@ -27,6 +27,7 @@ test('newly loaded iframe receives the current mute toggle state', () => {
   const messages = []
   const configure = runInNewContext(`${hub.slice(begin, end)}\nconfigurePlayerFrameOnLoad`, {
     hubPerformance: null,
+    huntActiveRef: { current: false }, stopShinyHunt() {},
     fastForwardEnabled: false, fastForwardSpeed: 1.5, muted: true, oddsManipulatorEnabled: false,
     closeLockRef: { current: false }, profileInfoSessionId: null, sendPlayerInteractionLock() {},
     configurePlayerFrame(_frame, message) { messages.push({ ...message }) },

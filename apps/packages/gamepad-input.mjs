@@ -47,20 +47,33 @@ export function createEmulatorGamepadInput(emulator, bindings) {
   // the hub becomes the sole gamepad input producer for every instance.
   emulator.gamepad.terminate()
   let inputs = Object.entries(bindings).map(([id, binding]) => ({ id: Number(id), label: binding.gamepad, pressed: false }))
+  const synthetic = new Set()
+  let physicalLabels = []
   for (const input of inputs) emulator.gameManager.simulateInput(0, input.id, 0)
   const update = labels => {
+    physicalLabels = labels
     const active = new Set(labels)
     for (const input of inputs) {
-      const pressed = active.has(input.label)
+      const pressed = active.has(input.label) || synthetic.has(input.id)
       if (pressed === input.pressed) continue
       emulator.gameManager.simulateInput(0, input.id, pressed ? 1 : 0)
       input.pressed = pressed
     }
   }
   const setBindings = bindings => {
+    synthetic.clear()
     update([])
     inputs = Object.entries(bindings).map(([id, binding]) => ({ id: Number(id), label: binding.gamepad, pressed: false }))
     for (const input of inputs) emulator.gameManager.simulateInput(0, input.id, 0)
   }
-  return { update, release: () => update([]), setBindings }
+  const setSyntheticPressed = (id, pressed) => {
+    if (pressed) synthetic.add(id)
+    else synthetic.delete(id)
+    update(physicalLabels)
+  }
+  const release = () => {
+    synthetic.clear()
+    update([])
+  }
+  return { update, release, setBindings, setSyntheticPressed }
 }

@@ -13,6 +13,7 @@ function harness({ save = async () => true, load = () => true } = {}) {
   const failures = []
   const telemetry = []
   const handle = runInNewContext(actionSource, {
+    shinyHuntPlayer: null,
     offerPolicy: { recordManualStateSave() {} },
     saveEmulatorState: save,
     loadEmulatorState: load,

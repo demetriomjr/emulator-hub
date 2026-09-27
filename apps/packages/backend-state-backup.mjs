@@ -34,6 +34,8 @@ export function createBackendStateBackup({ persistence, saveStore, backupsPath, 
       revision: save.revision,
       sha256: save.sha256,
       fenceGeneration: save.fenceGeneration ?? 0,
+      ...(save.runtimeStateInvalidatedAtRevision ? { runtimeStateInvalidatedAtRevision: save.runtimeStateInvalidatedAtRevision } : {}),
+      ...(save.eventGrantReceipt ? { eventGrantReceipt: save.eventGrantReceipt } : {}),
       bytesBase64: Buffer.from(save.bytes).toString('base64'),
     }))
     const document = { schemaVersion: 1, createdAt, reason, redis: { namespace, records }, saves }

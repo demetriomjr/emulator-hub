@@ -22,6 +22,8 @@ import { createEmulatorAudioMute } from '../../packages/emulator-audio-mute.mjs'
 import { createPlayerInteractionLock } from '../../packages/player-interaction-lock.mjs'
 import { playerThreadFallbackUrl, selectPlayerThreadMode } from '../../packages/player-thread-policy.mjs'
 import { createPlayerOriginStorageClient } from '../../packages/player-origin-storage-bridge.mjs'
+import { findGen3EncounterLayout } from '../../packages/pokemon-gen3-encounter.mjs'
+import { createShinyHuntPlayer } from '../../packages/shiny-hunt-player.mjs'
 
 const parameters = new URLSearchParams(location.search)
 const suppliedHubOrigin = parameters.get('hubOrigin')
@@ -90,13 +92,37 @@ let launchDescriptor = null
 let emulatorGameId = null
 let gamepadInput = null
 let gamepadBindings = []
+let shinyHuntPlayer = null
+function getShinyHuntPlayer() {
+  if (!shinyHuntPlayer) shinyHuntPlayer = createShinyHuntPlayer({
+    getLayout: () => launchDescriptor && runtimeReady && !leaseLost && !closeRequested
+      ? findGen3EncounterLayout(launchDescriptor)
+      : null,
+    getState: () => window.EJS_emulator?.gameManager?.getState?.(),
+    configureOdds: count => oddsClock.configure({ enabled: true, oddsResetCount: count, virtualTimestamp: count * 60_000 }),
+    softReset: () => softResetEmulator(window.EJS_emulator?.gameManager),
+    setA: down => {
+      if (!gamepadInput) throw new Error('Emulator input is unavailable')
+      gamepadInput.setSyntheticPressed(8, down)
+    },
+    saveState: () => saveEmulatorState({ kind: 'user-state', reasonCode: 'user-request' }),
+  })
+  return shinyHuntPlayer
+}
 const interactionLock = createPlayerInteractionLock({
   getEmulator: () => window.EJS_emulator,
   releaseGamepadInput: () => gamepadInput?.release(),
   canResume: () => runtimeReady && !closeRequested && !leaseLost,
 })
 window.emulatorHubSetInteractionLock = locked => interactionLock.setLocked(locked)
-const blockLockedKeyboard = event => { interactionLock.blockKeyboard(event) }
+const blockLockedKeyboard = event => {
+  if (shinyHuntPlayer?.isActive()) {
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    return
+  }
+  interactionLock.blockKeyboard(event)
+}
 window.addEventListener('keydown', blockLockedKeyboard, true)
 window.addEventListener('keyup', blockLockedKeyboard, true)
 let cloudSaveSynchronizer = null
@@ -707,6 +733,30 @@ window.addEventListener('message', event => {
   if (event.origin !== hubOrigin) return
   const isClosePlayerMessage = event.data?.type === 'emulator-hub:close-player'
   if (!isClosePlayerMessage && event.source !== window.parent) return
+  const huntAction = {
+    'emulator-hub:hunt-prepare': 'prepare',
+    'emulator-hub:hunt-reset': 'reset',
+    'emulator-hub:hunt-input': 'input',
+    'emulator-hub:hunt-inspect': 'inspect',
+    'emulator-hub:hunt-save': 'save',
+    'emulator-hub:hunt-cancel': 'cancel',
+  }[event.data?.type]
+  if (huntAction) {
+    if (event.data.sessionId !== sessionId || typeof event.data.huntId !== 'string') return
+    void (async () => {
+      if (huntAction === 'prepare') {
+        gamepadInput?.release()
+        fastForwardRequest = { enabled: true, speed: 5 }
+        applyFastForward()
+        await new Promise(resolve => window.setTimeout(resolve, 30))
+      }
+      const result = await getShinyHuntPlayer().handle({ ...event.data, type: huntAction })
+      event.source?.postMessage({ type: 'emulator-hub:hunt-response', requestId: event.data.requestId, sessionId, huntId: event.data.huntId, cycleId: event.data.cycleId, ...result }, event.origin)
+    })().catch(error => {
+      event.source?.postMessage({ type: 'emulator-hub:hunt-response', requestId: event.data.requestId, sessionId, huntId: event.data.huntId, cycleId: event.data.cycleId, ok: false, error: error.message }, event.origin)
+    })
+    return
+  }
   if (event.data?.type === 'emulator-hub:interaction-lock') {
     if (typeof event.data.locked !== 'boolean' || !Number.isInteger(event.data.revision) || typeof event.data.requestId !== 'string' || event.data.sessionId !== sessionId) return
     if (event.data.revision > lastInteractionLockRevision) {
@@ -718,6 +768,7 @@ window.addEventListener('message', event => {
   }
   if (event.data?.type === 'emulator-hub:gamepad') {
     if (!Array.isArray(event.data.bindings) || !event.data.bindings.every(value => typeof value === 'string')) return
+    if (shinyHuntPlayer?.isActive()) { gamepadInput?.update([]); return }
     if (interactionLock.isLocked()) { gamepadInput?.release(); return }
     if (gamepadInput && event.data.bindings.some(binding => !lastGamepadBindings.has(binding))) offerPolicy?.recordInput()
     lastGamepadBindings = new Set(event.data.bindings)
@@ -768,6 +819,7 @@ window.addEventListener('message', event => {
     return
   }
   if (event.data?.type === 'emulator-hub:reset') {
+    if (shinyHuntPlayer?.isActive()) return
     if (event.data.oddsResetCount !== undefined || event.data.virtualTimestamp !== undefined) {
       const accepted = oddsClock.configure({ enabled: true, oddsResetCount: event.data.oddsResetCount, virtualTimestamp: event.data.virtualTimestamp })
       clientDiagnostics?.capture({ kind: 'odds-manipulator', message: accepted ? 'odds.hard-reset.clock-applied' : 'odds.hard-reset.clock-rejected', oddsResetCount: event.data.oddsResetCount ?? null, virtualTimestamp: event.data.virtualTimestamp ?? null, dateNow: Date.now(), managerReady: Boolean(window.EJS_emulator?.gameManager) })
@@ -776,6 +828,7 @@ window.addEventListener('message', event => {
     return
   }
   if (event.data?.type === 'emulator-hub:soft-reset') {
+    if (shinyHuntPlayer?.isActive()) return
     if (event.data.oddsResetCount !== undefined || event.data.virtualTimestamp !== undefined) {
       const accepted = oddsClock.configure({ enabled: true, oddsResetCount: event.data.oddsResetCount, virtualTimestamp: event.data.virtualTimestamp })
       clientDiagnostics?.capture({ kind: 'odds-manipulator', message: accepted ? 'odds.soft-reset.clock-applied' : 'odds.soft-reset.clock-rejected', oddsResetCount: event.data.oddsResetCount ?? null, virtualTimestamp: event.data.virtualTimestamp ?? null, dateNow: Date.now(), managerReady: Boolean(window.EJS_emulator?.gameManager) })
@@ -784,6 +837,7 @@ window.addEventListener('message', event => {
     return
   }
   if (event.data?.type === 'emulator-hub:save-state') {
+    if (shinyHuntPlayer?.isActive()) return
     offerPolicy?.recordManualStateSave()
     void saveEmulatorState({ kind: 'user-state', reasonCode: 'user-request' }).then(
       saved => {
@@ -795,6 +849,7 @@ window.addEventListener('message', event => {
     return
   }
   if (event.data?.type === 'emulator-hub:load-state') {
+    if (shinyHuntPlayer?.isActive()) return
     if (loadEmulatorState()) snapshotTelemetry.info('user-state-loaded', { snapshotKind: 'user-state', revision: userSnapshotRevision })
     else { snapshotTelemetry.warn('user-state-load-unavailable', { snapshotKind: 'user-state', revision: userSnapshotRevision }); reportPlayerActionFailure('manual-load') }
     return

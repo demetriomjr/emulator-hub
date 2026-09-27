@@ -1,5 +1,7 @@
 # Specifications
 
+- [Spec 074 — Generation III event save research](074-gen3-event-save-research.md): investigate safe Bag, PC item and event-flag inspection and direct Key Item delivery.
+
 - [Spec 073 - Nine-instance player surface and isolated origins](073-nine-instance-player.md): expand the player limit, 3 × 3 layout, development and production origin topology, and automatic full-capacity diagnostics.
 
 - [Spec 068 — Repeated profile names and controller unlock](068-profile-names-and-gamepad-unlock.md): allow repeated display names, preserve creation order, and repair controller input after lock and reopen.

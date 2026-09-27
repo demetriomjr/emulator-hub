@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "scope": "in-game encounters unlocked by distributed event items in the original GBA games",
+  "itemIdSourcesByTitle": {
+    "pokemon-ruby": "https://github.com/pret/pokeruby/blob/master/include/constants/items.h",
+    "pokemon-sapphire": "https://github.com/pret/pokeruby/blob/master/include/constants/items.h",
+    "pokemon-emerald": "https://github.com/pret/pokeemerald/blob/master/include/constants/items.h",
+    "pokemon-firered": "https://github.com/pret/pokefirered/blob/master/include/constants/items.h",
+    "pokemon-leafgreen": "https://github.com/pret/pokefirered/blob/master/include/constants/items.h"
+  },
+  "globalUnlockFlagIdsByTitle": {
+    "pokemon-ruby": [2124],
+    "pokemon-sapphire": [2124],
+    "pokemon-emerald": [2220, 2267],
+    "pokemon-firered": [2105],
+    "pokemon-leafgreen": [2105]
+  },
+  "keyItemsInsertion": {
+    "pocket": "key-items",
+    "slotBytes": 4,
+    "itemIdEncoding": "uint16-le",
+    "quantityEncoding": "uint16-le",
+    "quantity": 1,
+    "layoutByTitle": {
+      "pokemon-ruby": { "keyItemsOffset": 1456, "keyItemsSlots": 20, "pcItemsOffset": 1176, "pcItemsSlots": 50, "quantityXorKeySmallBlockOffset": null },
+      "pokemon-sapphire": { "keyItemsOffset": 1456, "keyItemsSlots": 20, "pcItemsOffset": 1176, "pcItemsSlots": 50, "quantityXorKeySmallBlockOffset": null },
+      "pokemon-emerald": { "keyItemsOffset": 1496, "keyItemsSlots": 30, "pcItemsOffset": 1176, "pcItemsSlots": 50, "quantityXorKeySmallBlockOffset": 172 },
+      "pokemon-firered": { "keyItemsOffset": 952, "keyItemsSlots": 30, "pcItemsOffset": 664, "pcItemsSlots": 30, "quantityXorKeySmallBlockOffset": 3872 },
+      "pokemon-leafgreen": { "keyItemsOffset": 952, "keyItemsSlots": 30, "pcItemsOffset": 664, "pcItemsSlots": 30, "quantityXorKeySmallBlockOffset": 3872 }
+    },
+    "description": "Offsets are logical SaveBlock offsets, not absolute file positions. Select and validate the newest unambiguous save copy; locate the logical large-block sector for each slot. Inspect Bag and PC for the title-specific item ID. If absent and a Key Items slot has ID zero, write the ID and quantity one there. Ruby and Sapphire store quantity directly; Emerald, FireRed, and LeafGreen XOR it with the low 16 bits of the security key in the small block. Recalculate the touched sector checksum and revalidate the copy. An existing item, full pocket, PC conflict, malformed save, or ambiguous copies must not overwrite occupied slots."
+  },
+  "events": [
+    {
+      "id": "southern-island",
+      "requiredItem": "eon-ticket",
+      "itemIdByTitle": { "pokemon-ruby": 275, "pokemon-sapphire": 275, "pokemon-emerald": 275 },
+      "grantFlagIdsByTitle": { "pokemon-ruby": [2131], "pokemon-sapphire": [2131], "pokemon-emerald": [2227] },
+      "location": "southern-island",
+      "encounters": [
+        { "title": "pokemon-ruby", "speciesNationalDex": 380, "level": 50 },
+        { "title": "pokemon-sapphire", "speciesNationalDex": 381, "level": 50 },
+        { "title": "pokemon-emerald", "speciesNationalDex": 381, "level": 50, "when": { "roamingSpeciesNationalDex": 380 } },
+        { "title": "pokemon-emerald", "speciesNationalDex": 380, "level": 50, "when": { "roamingSpeciesNationalDex": 381 } }
+      ],
+      "distributionNote": "In international Emerald, the Eon Ticket was obtainable through record mixing with an eligible Ruby or Sapphire game.",
+      "source": "https://bulbapedia.bulbagarden.net/wiki/Eon_Ticket"
+    },
+    {
+      "id": "faraway-island",
+      "requiredItem": "old-sea-map",
+      "itemIdByTitle": { "pokemon-emerald": 376 },
+      "grantFlagIdsByTitle": { "pokemon-emerald": [2262, 316] },
+      "location": "faraway-island",
+      "encounters": [
+        { "title": "pokemon-emerald", "speciesNationalDex": 151, "level": 30 }
+      ],
+      "distributionNote": "The Old Sea Map was officially distributed only for Japanese-language Emerald in Japan and Taiwan.",
+      "source": "https://bulbapedia.bulbagarden.net/wiki/Old_Sea_Map"
+    },
+    {
+      "id": "navel-rock",
+      "requiredItem": "mystic-ticket",
+      "itemIdByTitle": { "pokemon-emerald": 370, "pokemon-firered": 370, "pokemon-leafgreen": 370 },
+      "grantFlagIdsByTitle": { "pokemon-emerald": [2272, 315], "pokemon-firered": [2122, 680], "pokemon-leafgreen": [2122, 680] },
+      "location": "navel-rock",
+      "encounters": [
+        { "title": "pokemon-emerald", "speciesNationalDex": 249, "level": 70 },
+        { "title": "pokemon-emerald", "speciesNationalDex": 250, "level": 70 },
+        { "title": "pokemon-firered", "speciesNationalDex": 249, "level": 70 },
+        { "title": "pokemon-firered", "speciesNationalDex": 250, "level": 70 },
+        { "title": "pokemon-leafgreen", "speciesNationalDex": 249, "level": 70 },
+        { "title": "pokemon-leafgreen", "speciesNationalDex": 250, "level": 70 }
+      ],
+      "source": "https://bulbapedia.bulbagarden.net/wiki/MysticTicket"
+    },
+    {
+      "id": "birth-island",
+      "requiredItem": "aurora-ticket",
+      "itemIdByTitle": { "pokemon-emerald": 371, "pokemon-firered": 371, "pokemon-leafgreen": 371 },
+      "grantFlagIdsByTitle": { "pokemon-emerald": [2261, 314], "pokemon-firered": [2123, 679], "pokemon-leafgreen": [2123, 679] },
+      "location": "birth-island",
+      "encounters": [
+        { "title": "pokemon-emerald", "speciesNationalDex": 386, "level": 30, "forme": "speed" },
+        { "title": "pokemon-firered", "speciesNationalDex": 386, "level": 30 },
+        { "title": "pokemon-leafgreen", "speciesNationalDex": 386, "level": 30 }
+      ],
+      "source": "https://bulbapedia.bulbagarden.net/wiki/AuroraTicket"
+    }
+  ]
+}

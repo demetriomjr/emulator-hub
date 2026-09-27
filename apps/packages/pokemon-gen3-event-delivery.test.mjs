@@ -1,0 +1,130 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { createSaveStore } from './save-store.mjs'
+import { createPokemonGen3EventDeliveryService } from './pokemon-gen3-event-delivery.mjs'
+import { inspectPokemonGen3Inventory } from './pokemon-gen3-inventory.mjs'
+import { readPokemonGen3Flags } from './pokemon-gen3-event-flags.mjs'
+
+const profileId = 'profile-1'
+const gameId = 'firered-1'
+const romSha256 = 'a'.repeat(64)
+
+test('delivers FireRed tickets after release with a backup, readback, and durable receipt', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'emulator-hub-event-delivery-'))
+  try {
+    const saveStore = createSaveStore({ dataPath: join(root, 'saves'), eventBackupsPath: join(root, 'event-backups') })
+    const original = fireRedSave({ eligible: true })
+    await saveStore.put(profileId, gameId, original, null)
+    const deleted = []
+    const service = createPokemonGen3EventDeliveryService({
+      saveStore,
+      gameSaveLeases: { async get() { return null } },
+      snapshotStore: { async delete(_profile, _game, options) { deleted.push(options.kind) } },
+      resolveGame: async () => ({ title: 'pokemon-firered', romSha256 }),
+      now: () => new Date('2026-09-26T12:00:00.000Z'),
+    })
+
+    assert.deepEqual(await service.attempt({ profileId, gameId }), { status: 'delivered', revision: 2 })
+    const stored = await saveStore.get(profileId, gameId)
+    assert.deepEqual(inspectPokemonGen3Inventory(stored.bytes, 'pokemon-firered').keyItems.slots.slice(0, 2).map(slot => slot.itemId), [370, 371])
+    assert.deepEqual(readPokemonGen3Flags(stored.bytes, 'pokemon-firered', [0x839, 0x84a, 0x84b, 0x2a7, 0x2a8]), [true, true, true, true, true])
+    assert.equal(stored.runtimeStateInvalidatedAtRevision, 2)
+    assert.deepEqual(stored.eventGrantReceipt.eventIds, ['navel-rock', 'birth-island'])
+    assert.equal(stored.eventGrantReceipt.romSha256, romSha256)
+    assert.deepEqual(deleted, ['cloud-recovery', 'user-state'])
+    assert.equal((await readdir(join(root, 'event-backups'))).length, 1)
+    assert.deepEqual(original, fireRedSave({ eligible: true }))
+    assert.deepEqual(await service.attempt({ profileId, gameId }), { status: 'already-delivered', revision: 2 })
+    assert.equal((await readdir(join(root, 'event-backups'))).length, 1)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('event delivery skips a save before Celio repairs the machine without touching it', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'emulator-hub-event-delivery-'))
+  try {
+    const saveStore = createSaveStore({ dataPath: join(root, 'saves'), eventBackupsPath: join(root, 'event-backups') })
+    const original = fireRedSave({ eligible: false })
+    await saveStore.put(profileId, gameId, original, null)
+    const service = createPokemonGen3EventDeliveryService({ saveStore, gameSaveLeases: { async get() { return null } }, resolveGame: async () => ({ title: 'pokemon-firered', romSha256 }) })
+    assert.deepEqual(await service.attempt({ profileId, gameId }), { status: 'pending-progression' })
+    assert.deepEqual((await saveStore.get(profileId, gameId)).bytes, original)
+    await assert.rejects(() => readdir(join(root, 'event-backups')), error => error.code === 'ENOENT')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('event delivery skips a save when a lease appears just before commit', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'emulator-hub-event-delivery-'))
+  try {
+    const saveStore = createSaveStore({ dataPath: join(root, 'saves'), eventBackupsPath: join(root, 'event-backups') })
+    const original = fireRedSave({ eligible: true })
+    await saveStore.put(profileId, gameId, original, null)
+    let checks = 0
+    const service = createPokemonGen3EventDeliveryService({
+      saveStore,
+      gameSaveLeases: { async get() { checks += 1; return checks === 1 ? null : { ownerKind: 'player' } } },
+      resolveGame: async () => ({ title: 'pokemon-firered', romSha256 }),
+    })
+    assert.deepEqual(await service.attempt({ profileId, gameId }), { status: 'deferred-lease' })
+    assert.deepEqual((await saveStore.get(profileId, gameId)).bytes, original)
+    await assert.rejects(() => readdir(join(root, 'event-backups')), error => error.code === 'ENOENT')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('event delivery leaves the canonical save intact when its preimage cannot be backed up', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'emulator-hub-event-delivery-'))
+  try {
+    const blockedPath = join(root, 'blocked-backups')
+    await writeFile(blockedPath, 'not a directory')
+    const saveStore = createSaveStore({ dataPath: join(root, 'saves'), eventBackupsPath: blockedPath })
+    const original = fireRedSave({ eligible: true })
+    await saveStore.put(profileId, gameId, original, null)
+    const service = createPokemonGen3EventDeliveryService({ saveStore, gameSaveLeases: { async get() { return null } }, resolveGame: async () => ({ title: 'pokemon-firered', romSha256 }), onError() {} })
+    assert.equal((await service.attempt({ profileId, gameId })).status, 'skipped')
+    const saved = await saveStore.get(profileId, gameId)
+    assert.deepEqual(saved.bytes, original)
+    assert.equal(saved.revision, 1)
+    assert.equal(saved.eventGrantReceipt, undefined)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+function fireRedSave({ eligible }) {
+  const bytes = Buffer.alloc(0x20000)
+  for (const [copy, index] of [[0, 1], [0xe000, 2]]) {
+    for (let section = 0; section < 14; section += 1) {
+      const start = physical(copy, section)
+      bytes.writeUInt16LE(section, start + 0xff4)
+      bytes.writeUInt32LE(0x08012025, start + 0xff8)
+      bytes.writeUInt32LE(index, start + 0xffc)
+    }
+    if (copy === 0xe000) {
+      bytes[physical(copy, 0) + 0x1b] = 0xb9
+      bytes.writeUInt16LE(0x6258, large(copy, 0x109c))
+      for (const flagId of [0x82c, 0x840, ...(eligible ? [0x844] : [])]) {
+        bytes[large(copy, 0xee0 + (flagId >> 3))] |= 1 << (flagId & 7)
+      }
+    }
+    for (let section = 0; section < 14; section += 1) {
+      const start = physical(copy, section)
+      const length = section === 0 ? 3884 : section === 13 ? 2000 : 3968
+      let sum = 0
+      for (let offset = 0; offset < length; offset += 4) sum = (sum + bytes.readUInt32LE(start + offset)) >>> 0
+      bytes.writeUInt16LE(((sum & 0xffff) + (sum >>> 16)) & 0xffff, start + 0xff6)
+    }
+  }
+  return bytes
+}
+
+function physical(copy, section) { return copy + ((section * 5 + 3) % 14) * 0x1000 }
+function large(copy, offset) { return physical(copy, 1 + Math.floor(offset / 0xf80)) + offset % 0xf80 }
