@@ -1444,14 +1444,18 @@ function App() {
   }
 
   async function runMacro() {
-    if (huntActiveRef.current || !macroDraft) return
-    const validation = validateMacro(macroDraft)
-    if (!validation.valid) { setMacroError(validation.errors[0]); return }
+    if (huntActiveRef.current || macroSaving || !macroDraft) return
     const participants = activeSessionsRef.current.map(session => session.sessionId)
     if (!participants.length) { setMacroError('Nenhum player aberto'); return }
     setMacroError('')
-    try { await macroCoordinatorRef.current.start(structuredClone(macroDraft), participants) }
+    setMacroSaving(true)
+    try {
+      const saved = await persistMacro(macroDraft)
+      await macroCoordinatorRef.current.start(structuredClone(saved), participants)
+      if (['running', 'idle'].includes(macroCoordinatorRef.current.getState().phase)) setMacroModalOpen(false)
+    }
     catch (cause) { setMacroError(cause.message) }
+    finally { setMacroSaving(false) }
   }
 
   async function stopMacro() {
@@ -1459,21 +1463,24 @@ function App() {
     catch (cause) { setMacroError(cause.message); return false }
   }
 
+  async function persistMacro(draft) {
+    const validation = validateMacro(draft)
+    if (!validation.valid) throw new Error(validation.errors[0])
+    const saved = await saveMacroRequest(draft)
+    setMacroDraft(saved)
+    setMacroWarnings([])
+    setMacros(current => current.some(macro => macro.id === saved.id)
+      ? current.map(macro => macro.id === saved.id ? saved : macro) : [...current, saved])
+    return saved
+  }
+
   async function saveMacro() {
     if (macroSaving || !macroDraft) return
-    const validation = validateMacro(macroDraft)
-    if (!validation.valid) { setMacroError(validation.errors[0]); return }
     setMacroSaving(true)
-    try {
-      const saved = await saveMacroRequest(macroDraft)
-      setMacroDraft(saved)
-      setMacroWarnings([])
-      await refreshMacros()
-    } catch (cause) {
-      setMacroError(cause.message)
-    } finally {
-      setMacroSaving(false)
-    }
+    setMacroError('')
+    try { await persistMacro(macroDraft) }
+    catch (cause) { setMacroError(cause.message) }
+    finally { setMacroSaving(false) }
   }
 
   const activeProfileIds = new Set(activeSessions.map(session => `${session.gameId}:${session.profileId}`))
@@ -1551,7 +1558,7 @@ function App() {
             ? <React.Suspense fallback={<p>Carregando editor...</p>}>
               <form className="macro-name-form" onSubmit={event => { event.preventDefault(); void saveMacro() }}>
                 <input id="macro-name" aria-label="Nome da macro" placeholder="Nome da macro" value={macroDraft.name} onChange={event => setMacroDraft({ ...macroDraft, name: event.target.value })} maxLength="50" required disabled={macroSaving} />
-                <MacroEditor macro={macroDraft} onChange={setMacroDraft} onSave={() => void saveMacro()} onStart={() => void runMacro()} onStop={() => void stopMacro()} runPhase={macroRunState.phase} disabled={macroSaving} error={macroRunState.error || macroError} warnings={macroWarnings} />
+                <MacroEditor macro={macroDraft} onChange={setMacroDraft} onSave={() => void saveMacro()} onCancel={() => { setMacroDraft(null); setMacroWarnings([]); setMacroError('') }} onStart={() => void runMacro()} onStop={() => void stopMacro()} runPhase={macroRunState.phase} disabled={macroSaving} error={macroRunState.error || macroError} warnings={macroWarnings} />
               </form>
             </React.Suspense>
             : <>
@@ -1750,9 +1757,6 @@ function App() {
               <button className="player-control-button global-reset-button" type="button" aria-label="Hard Reset" title="Hard Reset" disabled={huntRunning} onClick={() => dispatchReset('emulator-hub:reset')}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v8M6.4 6.4a8 8 0 1 0 11.2 0" /></svg>
               </button>
-              <button className={`player-control-button${['starting', 'running', 'stopping'].includes(macroRunState.phase) ? ' is-active' : ''}`} type="button" aria-label={['starting', 'running', 'stopping'].includes(macroRunState.phase) ? 'Macros: macro ativa' : 'Macros'} title={macroRunState.phase === 'starting' ? 'Macro iniciando' : ['running', 'stopping'].includes(macroRunState.phase) ? 'Macro em execução' : 'Macros'} aria-expanded={macroModalOpen} onClick={openMacroModal}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5l7 7-7 7V5zm9 0h7v3h-7V5zm0 5h7v3h-7v-3zm0 5h7v3h-7v-3z" /></svg>
-              </button>
             </div>
             <span className="player-header-separator" aria-hidden="true" />
             <div className="player-header-group">
@@ -1779,6 +1783,9 @@ function App() {
             </button>
             <button className="player-control-button" type="button" aria-label="Informações do perfil" title="Informações do perfil" disabled={huntRunning || closeChooserOpen || saveCloseRows !== null || profileInfoSessionId !== null} onClick={openProfileInfo}>
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 10.5v6M12 7.5h.01" /></svg>
+            </button>
+            <button className={`player-control-button${['starting', 'running', 'stopping'].includes(macroRunState.phase) ? ' is-active' : ''}`} type="button" aria-label={['starting', 'running', 'stopping'].includes(macroRunState.phase) ? 'Macros: macro ativa' : 'Macros'} title={macroRunState.phase === 'starting' ? 'Macro iniciando' : ['running', 'stopping'].includes(macroRunState.phase) ? 'Macro em execução' : 'Macros'} aria-expanded={macroModalOpen} onClick={openMacroModal}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5l7 7-7 7V5zm9 0h7v3h-7V5zm0 5h7v3h-7v-3zm0 5h7v3h-7v-3z" /></svg>
             </button>
           </div>
           <div className="player-actions">

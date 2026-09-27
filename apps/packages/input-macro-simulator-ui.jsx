@@ -20,7 +20,7 @@ export function ControllerIcon() {
   </svg>
 }
 
-export default function MacroEditor({ macro, onChange, onSave, onStart, onStop, runPhase = 'idle', disabled = false, error = '', warnings = [] }) {
+export default function MacroEditor({ macro, onChange, onSave, onCancel, onStart, onStop, runPhase = 'idle', disabled = false, error = '', warnings = [] }) {
   const change = (id, updates) => onChange(updateItem(macro, id, updates))
   const reorder = (from, to) => { if (from !== to) onChange(reorderItems(macro, from, to)) }
   const busy = disabled || runPhase === 'preparing' || runPhase === 'starting' || runPhase === 'stopping'
@@ -47,6 +47,7 @@ export default function MacroEditor({ macro, onChange, onSave, onStart, onStop, 
     {error && <p className="macro-error" role="alert">{error}</p>}
     <div className="macro-actions">
       <Button className="macro-save" onClick={onSave} disabled={busy}>Salvar</Button>
+      <Button className="macro-cancel" htmlType="button" onClick={onCancel} disabled={disabled}>Cancelar</Button>
       <Button className={`macro-run-toggle${runPhase === 'running' || runPhase === 'stopping' ? ' is-running' : ''}`} type="primary"
         disabled={busy} onClick={runPhase === 'running' ? onStop : onStart}>
         {['preparing', 'starting'].includes(runPhase) ? 'Iniciando…' : runPhase === 'stopping' ? 'Parando…' : runPhase === 'running' ? 'Parar' : 'Iniciar'}
@@ -66,17 +67,18 @@ function MacroItemRow({ item, index, count, disabled, errors, onChange, onRemove
         if (event.key === 'ArrowDown' && index < count - 1) { event.preventDefault(); onMove(1) }
       }}><HolderOutlined /></button>
     <span className="macro-step-index">{index + 1}</span>
-    <div className="macro-step-fields">
+    <div className={`macro-step-fields macro-step-fields-${item.kind}`}>
       {item.kind === 'button' || item.kind === 'legacy' ? <>
         <label>Botão <Select aria-label={`Botão do item ${index + 1}`} value={item.input} disabled={disabled} onChange={input => onChange({ input })}
           options={AVAILABLE_INPUTS.map(input => ({ value: input, label: icons[input] }))} /></label>
         <label>Evento <Select aria-label={`Evento do item ${index + 1}`} value={item.kind === 'legacy' ? undefined : item.action} placeholder="Escolha" disabled={disabled}
           onChange={action => onChange({ action })} options={[{ value: 'press', label: 'Press' }, { value: 'hold', label: 'Hold' }]} /></label>
-        {item.kind === 'legacy' && <span className="macro-error">Valor antigo: {item.legacyDuration ?? 'sem duração'}. Escolha Press ou Hold finito.</span>}
+        {item.kind === 'legacy' && <span className="macro-error">Valor antigo: {item.legacyDuration ?? 'sem duração'}. Escolha Press ou Hold.</span>}
         {item.kind !== 'legacy' && <label>{item.action === 'press' ? 'Vezes' : 'Segurar (ms)'}
-          <InputNumber min={1} max={item.action === 'hold' ? 600000 : undefined} precision={0} value={item.action === 'press' ? item.count : item.holdMs} disabled={disabled}
+          <InputNumber min={0} max={item.action === 'hold' ? 600000 : undefined} precision={0} value={item.action === 'press' ? item.count : item.holdMs} disabled={disabled}
+            title={item.action === 'hold' ? '0 mantém pressionado até terminar ou parar a macro' : '0 repete infinitamente até parar a macro'}
             onChange={value => onChange(item.action === 'press' ? { count: value } : { holdMs: value })} /></label>}
-        <label>Delay depois (ms) <InputNumber min={0} max={600000} precision={0} value={item.delayAfterMs} disabled={disabled} onChange={delayAfterMs => onChange({ delayAfterMs })} /></label>
+        {!(item.action === 'press' && item.count === 0) && <label>Delay depois (ms) <InputNumber min={0} max={600000} precision={0} value={item.delayAfterMs} disabled={disabled} onChange={delayAfterMs => onChange({ delayAfterMs })} /></label>}
       </> : item.kind === 'delay' ? <label>Delay (ms) <InputNumber min={0} max={600000} precision={0} value={item.durationMs} disabled={disabled} onChange={durationMs => onChange({ durationMs })} /></label>
         : <label>Repeat (vezes; 0 = infinito) <InputNumber min={0} precision={0} value={item.count} disabled={disabled} onChange={value => onChange({ count: value })} /></label>}
     </div>

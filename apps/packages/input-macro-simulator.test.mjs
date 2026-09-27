@@ -61,6 +61,92 @@ test('invalid shapes and fractional counts return errors rather than throwing', 
   assert.equal(validateMacro({ ...macro, items: [{ ...macro.items[0], count: 1, unexpected: true }] }).valid, false)
 })
 
+test('Hold zero is valid while negative and excessive durations are rejected', () => {
+  const macro = addItem(createMacro('Continuous'), 'button', { action: 'hold', holdMs: 0 })
+  assert.equal(validateMacro(macro).valid, true)
+  assert.equal(validateMacro({ ...macro, items: [{ ...macro.items[0], holdMs: -1 }] }).valid, false)
+  assert.equal(validateMacro({ ...macro, items: [{ ...macro.items[0], holdMs: 600001 }] }).valid, false)
+})
+
+test('Press zero is valid while negative counts remain invalid', () => {
+  const macro = addItem(createMacro('Infinite Press'), 'button', { action: 'press', count: 0 })
+  assert.equal(validateMacro(macro).valid, true)
+  assert.equal(validateMacro({ ...macro, items: [{ ...macro.items[0], count: -1 }] }).valid, false)
+})
+
+test('Press zero pulses its own button indefinitely after one-time continuous Hold setup', () => {
+  let macro = addItem(createMacro('Infinite Press'), 'button', { input: 'b', action: 'hold', holdMs: 0, delayAfterMs: 300 })
+  macro = addItem(macro, 'button', { input: 'left', action: 'hold', holdMs: 0, delayAfterMs: 200 })
+  macro = addItem(macro, 'button', { input: 'a', action: 'press', count: 0, delayAfterMs: 0 })
+  macro = addItem(macro, 'button', { input: 'r', action: 'press', count: 1, delayAfterMs: 0 })
+  const jobs = new Map()
+  let time = 0
+  let id = 0
+  const events = []
+  const runner = createMacroRunner({ macro, setPressed: (input, down) => events.push([time, input, down]), schedule: (fn, ms) => { jobs.set(++id, { at: time + ms, fn }); return id }, clear: key => jobs.delete(key) })
+  runner.start()
+  while (jobs.size && Math.min(...[...jobs.values()].map(job => job.at)) <= 1400) {
+    const [key, job] = [...jobs].sort((a, b) => a[1].at - b[1].at)[0]
+    jobs.delete(key)
+    time = job.at
+    job.fn()
+  }
+  assert.deepEqual(events, [[0, 'b', true], [300, 'left', true], [500, 'a', true], [560, 'a', false], [1360, 'a', true]])
+  assert.equal(runner.isActive(), true)
+  runner.stop()
+  assert.deepEqual(events.slice(-3), [[1360, 'b', false], [1360, 'left', false], [1360, 'a', false]])
+  assert.equal(jobs.size, 0)
+})
+
+test('two continuous Holds remain down through another button and release on completion', () => {
+  let macro = addItem(createMacro('Chord'), 'button', { input: 'a', action: 'hold', holdMs: 0, delayAfterMs: 0 })
+  macro = addItem(macro, 'button', { input: 'b', action: 'hold', holdMs: 0, delayAfterMs: 0 })
+  macro = addItem(macro, 'button', { input: 'l', action: 'press', delayAfterMs: 0 })
+  const jobs = []
+  const events = []
+  let outcome
+  const runner = createMacroRunner({ macro, setPressed: (input, down) => events.push([input, down]), schedule: fn => { jobs.push(fn); return jobs.length }, clear() {}, onEnd: value => { outcome = value } })
+  runner.start()
+  while (jobs.length) jobs.shift()()
+  assert.deepEqual(events, [['a', true], ['b', true], ['l', true], ['l', false], ['a', false], ['b', false]])
+  assert.equal(outcome, 'completed')
+})
+
+test('a finite Hold releases while a preceding continuous Hold stays down', () => {
+  let macro = addItem(createMacro('Mixed Holds'), 'button', { input: 'a', action: 'hold', holdMs: 0, delayAfterMs: 0 })
+  macro = addItem(macro, 'button', { input: 'b', action: 'hold', holdMs: 200, delayAfterMs: 0 })
+  const jobs = []
+  const events = []
+  const runner = createMacroRunner({ macro, setPressed: (input, down) => events.push([input, down]), schedule: fn => { jobs.push(fn); return jobs.length }, clear() {} })
+  runner.start()
+  jobs.shift()()
+  assert.deepEqual(events, [['a', true], ['b', true]])
+  jobs.shift()()
+  assert.deepEqual(events, [['a', true], ['b', true], ['b', false]])
+  jobs.shift()()
+  assert.deepEqual(events.at(-1), ['a', false])
+})
+
+test('continuous Hold survives Repeat and a later action on the same input until stopped', () => {
+  let macro = addItem(createMacro('Loop'), 'button', { input: 'a', action: 'hold', holdMs: 0, delayAfterMs: 0 })
+  macro = addItem(macro, 'button', { input: 'a', action: 'press', delayAfterMs: 0 })
+  macro = addItem(macro, 'repeat', { count: 0 })
+  const jobs = new Map()
+  let id = 0
+  const events = []
+  const runner = createMacroRunner({ macro, setPressed: (input, down) => events.push([input, down]), schedule: fn => { jobs.set(++id, fn); return id }, clear: key => jobs.delete(key) })
+  runner.start()
+  for (let index = 0; index < 10; index += 1) {
+    const [key, job] = jobs.entries().next().value
+    jobs.delete(key)
+    job()
+  }
+  assert.deepEqual(events, [['a', true]])
+  runner.stop()
+  assert.deepEqual(events, [['a', true], ['a', false]])
+  assert.equal(jobs.size, 0)
+})
+
 test('legacy macro converts to an editable draft without changing stored data', () => {
   const old = { id: 'm', name: 'Old', steps: [{ id: 's', input: 'a', action: 'repeat', duration: 3, delay: 1000 }], createdAt: 1, updatedAt: 2 }
   const { macro, warnings } = migrateMacro(old)
@@ -76,13 +162,14 @@ test('old finite fractional values remain visible for review', () => {
   assert.equal(validateMacro(macro).valid, false)
 })
 
-test('legacy infinite Hold requires an explicit finite replacement', () => {
+test('legacy infinite Hold requires explicit review before choosing Hold zero', () => {
   const old = { id: 'old', name: 'Old', steps: [{ id: 's', input: 'a', action: 'hold', duration: 0, delay: 800 }], createdAt: 1, updatedAt: 2 }
   const { macro } = migrateMacro(old)
   assert.equal(validateMacro(macro).valid, false)
   const reviewed = updateItem(macro, 's', { action: 'hold' })
   assert.equal(reviewed.items[0].holdMs, 2000)
   assert.equal(validateMacro(reviewed).valid, true)
+  assert.equal(validateMacro(updateItem(reviewed, 's', { holdMs: 0 })).valid, true)
 })
 
 test('runner releases before waits and cancellation releases its held input', () => {

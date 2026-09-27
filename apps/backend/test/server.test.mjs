@@ -1822,7 +1822,10 @@ describe('hub backend HTTP contract', () => {
       schemaVersion: 2,
       id: 'macro-1',
       name: 'Dash Combo',
-      items: [{ id: 'item-1', kind: 'button', input: 'up', action: 'press', count: 1, delayAfterMs: 0 }],
+      items: [
+        { id: 'item-1', kind: 'button', input: 'up', action: 'hold', holdMs: 0, delayAfterMs: 0 },
+        { id: 'item-2', kind: 'button', input: 'a', action: 'press', count: 0, delayAfterMs: 0 },
+      ],
       createdAt: 1780000000000,
       updatedAt: 1780000000000,
     }
@@ -1834,6 +1837,8 @@ describe('hub backend HTTP contract', () => {
     assert.equal(savedMacro.id, 'macro-1')
     assert.equal(savedMacro.name, 'Dash Combo')
     assert.equal(savedMacro.createdAt, macro.createdAt)
+    assert.equal(savedMacro.items[0].holdMs, 0)
+    assert.equal(savedMacro.items[1].count, 0)
 
     const listed = await fetch(`${baseUrl}/api/macros`)
     assert.deepEqual(await jsonResponse(listed), { macros: [savedMacro] })

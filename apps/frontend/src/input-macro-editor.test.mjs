@@ -86,6 +86,29 @@ test('invalid count shows an error in its item row', () => {
   assert.ok(view.all.some(node => node.props?.className === 'macro-item-error' && String(node.props.children).includes('Item 1')))
 })
 
+test('Hold duration input accepts zero for a continuous hold', () => {
+  const macro = addItem(createMacro('Continuous'), 'button', { action: 'hold', holdMs: 2000 })
+  const view = render(macro)
+  const duration = view.all.find(node => node.type === context.InputNumber && node.props?.value === 2000)
+  assert.equal(duration.props.min, 0)
+  assert.match(duration.props.title, /0 mantém pressionado/)
+  duration.props.onChange(0)
+  assert.equal(view.changed().items[0].holdMs, 0)
+  assert.equal(validateMacro(view.changed()).valid, true)
+})
+
+test('Press count accepts zero and hides its inapplicable posterior delay', () => {
+  const macro = addItem(createMacro('Infinite Press'), 'button', { action: 'press', count: 1 })
+  const editable = render(macro)
+  editable.all.find(node => node.props?.precision === 0 && node.props?.value === 1).props.onChange(0)
+  const view = render(editable.changed())
+  const numbers = view.all.filter(node => node.props?.precision === 0)
+  assert.equal(numbers.length, 1)
+  assert.equal(numbers[0].props.min, 0)
+  assert.match(numbers[0].props.title, /0.*infinit/)
+  assert.equal(validateMacro(editable.changed()).valid, true)
+})
+
 test('item insertion is disabled at the 100 item limit', () => {
   let macro = createMacro('Cheia')
   for (let index = 0; index < MAX_ITEMS; index += 1) macro = addItem(macro, 'delay')

@@ -98,10 +98,10 @@ export function validateMacro(macro) {
       if (!AVAILABLE_INPUTS.includes(item.input)) errors.push(`${label}: botão inválido`)
       if (!integer(item.delayAfterMs, 0, MAX_DURATION_MS)) errors.push(`${label}: delay posterior inválido`)
       if (item.action === 'press') {
-        if (!integer(item.count, 1)) errors.push(`${label}: quantidade de pressões inválida`)
+        if (!integer(item.count, 0)) errors.push(`${label}: quantidade de pressões inválida`)
         if ('holdMs' in item) errors.push(`${label}: Hold não pertence a Press`)
       } else if (item.action === 'hold') {
-        if (!integer(item.holdMs, 1, MAX_DURATION_MS)) errors.push(`${label}: duração de Hold inválida`)
+        if (!integer(item.holdMs, 0, MAX_DURATION_MS)) errors.push(`${label}: duração de Hold inválida`)
         if ('count' in item) errors.push(`${label}: Count não pertence a Hold`)
       } else errors.push(`${label}: ação inválida`)
     } else if (item.kind === 'delay') {
@@ -158,15 +158,26 @@ export function createMacroCursor(macro) {
 export function createMacroRunner({ macro, setPressed, schedule = setTimeout, clear = clearTimeout, onEnd = () => {} }) {
   const cursor = createMacroCursor(macro)
   let timer = null
-  let held = null
+  const held = new Set()
+  const continuous = new Set()
   let active = false
-  const release = () => {
-    if (held === null) return true
-    const input = held
-    held = null
-    try { setPressed(input, false); return true } catch { return false }
+  const press = input => {
+    if (held.has(input)) return
+    held.add(input)
+    setPressed(input, true)
   }
-  const finish = outcome => { if (!active) return; active = false; if (timer !== null) clear(timer); timer = null; release(); onEnd(outcome) }
+  const release = input => {
+    if (!held.has(input) || continuous.has(input)) return true
+    try { setPressed(input, false); held.delete(input); return true } catch { return false }
+  }
+  const releaseAll = () => {
+    for (const input of held) {
+      try { setPressed(input, false) } catch { /* The controller also releases the macro source. */ }
+    }
+    held.clear()
+    continuous.clear()
+  }
+  const finish = outcome => { if (!active) return; active = false; if (timer !== null) clear(timer); timer = null; releaseAll(); onEnd(outcome) }
   const safe = next => { try { next() } catch { finish('failed') } }
   const wait = (ms, next) => { timer = schedule(() => { timer = null; if (active) safe(next) }, ms) }
   const advance = () => {
@@ -175,18 +186,24 @@ export function createMacroRunner({ macro, setPressed, schedule = setTimeout, cl
     if (!item) { finish('completed'); return }
     if (item.kind === 'yield') { wait(0, advance); return }
     if (item.kind === 'delay') { wait(item.durationMs, advance); return }
+    if (item.action === 'hold' && item.holdMs === 0) {
+      continuous.add(item.input)
+      press(item.input)
+      wait(item.delayAfterMs, advance)
+      return
+    }
     let remaining = item.action === 'press' ? item.count : 1
-    const press = () => {
-      held = item.input
-      setPressed(item.input, true)
+    const pressOnce = () => {
+      press(item.input)
       wait(item.action === 'hold' ? item.holdMs : PRESS_DURATION_MS, () => {
-        if (!release()) { finish('failed'); return }
+        if (!release(item.input)) { finish('failed'); return }
+        if (item.action === 'press' && item.count === 0) { wait(PRESS_INTERVAL_MS, pressOnce); return }
         remaining -= 1
-        if (remaining > 0) wait(PRESS_INTERVAL_MS, press)
+        if (remaining > 0) wait(PRESS_INTERVAL_MS, pressOnce)
         else wait(item.delayAfterMs, advance)
       })
     }
-    press()
+    pressOnce()
   }
   return {
     start() { if (active) return; const validation = validateMacro(macro); if (!validation.valid) throw new Error(validation.errors[0]); active = true; safe(advance) },
