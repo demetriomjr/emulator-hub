@@ -42,6 +42,7 @@ test('projects Emerald transfer capabilities from the newest validated save copy
     eventFlagBase: 0x1270,
     eventWorkBase: 0x139c,
     ordinaryTradeFlag: 0x861,
+    gameClearFlag: 0x864,
     nationalDexFlag: 0x896,
     nationalDexWork: { index: 0x46, value: 0x0302 },
   })
@@ -56,6 +57,7 @@ test('projects Emerald transfer capabilities from the newest validated save copy
     game: 'pokemon-emerald',
     ordinaryTradeReady: true,
     nationalDexUnlocked: true,
+    gameClear: true,
     networkMachineRestored: null,
   })
 })
@@ -92,6 +94,7 @@ test('requires every National Dex signal and reads FireRed Network Machine separ
     game: 'pokemon-firered',
     ordinaryTradeReady: true,
     nationalDexUnlocked: false,
+    gameClear: false,
     networkMachineRestored: true,
   })
 })
@@ -303,7 +306,7 @@ function refreshCopyChecksums(bytes, copyOffset) {
 
 function writeCapability(bytes, copyOffset, profile) {
   bytes[copyOffset + profile.smallOffset] = profile.magic
-  for (const flag of [profile.ordinaryTradeFlag, profile.omitNationalDexFlag ? null : profile.nationalDexFlag, profile.networkMachineFlag]) {
+  for (const flag of [profile.ordinaryTradeFlag, profile.gameClearFlag, profile.omitNationalDexFlag ? null : profile.nationalDexFlag, profile.networkMachineFlag]) {
     if (flag === null || flag === undefined) continue
     const offset = profile.eventFlagBase + Math.floor(flag / 8)
     writeLargeByte(bytes, copyOffset, offset, readLargeByte(bytes, copyOffset, offset) | (1 << (flag % 8)))

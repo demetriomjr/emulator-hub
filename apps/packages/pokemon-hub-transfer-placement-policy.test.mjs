@@ -27,7 +27,7 @@ test('uses the shared Gen III evaluator for a verified save-to-Hub export', () =
     origin: { location: gameBox },
     destination: { location: hub },
     record: { display: { species: 1, isEgg: true } },
-    source: { transferCapability: { title: 'pokemon-firered', ordinaryTradeReady: true, nationalDexUnlocked: false, networkMachineRestored: false } },
+    source: { transferCapability: { title: 'pokemon-firered', ordinaryTradeReady: true, nationalDexUnlocked: false, gameClear: true, networkMachineRestored: true } },
     sourcePokemonCount: 2,
   })
 
@@ -38,6 +38,17 @@ test('uses the shared Gen III evaluator for a verified save-to-Hub export', () =
       message: 'Este save ainda não pode enviar ou receber esse Pokémon sem a Pokédex Nacional.',
     },
   })
+})
+
+test('fails closed when a save-to-Hub export lacks verified capability or Pokemon data', () => {
+  const validate = createPokemonHubTransferPlacementPolicy()
+  const request = {
+    origin: { location: gameBox }, destination: { location: hub },
+    source: { sourceKey: 'save:may:ruby' }, destinationSource: { sourceKey: `hub:${hub.hubProfileId}` }, sourcePokemonCount: 2,
+    record: { display: { species: 25, isEgg: false } },
+  }
+  assert.equal(validate(request).reason.code, 'TRANSFER_EXPORT_UNVERIFIED')
+  assert.equal(validate({ ...request, source: { ...request.source, transferCapability: { title: 'pokemon-ruby', nationalDexUnlocked: true, gameClear: true } }, record: { display: { species: 25 } } }).reason.code, 'TRANSFER_EXPORT_UNVERIFIED')
 })
 
 test('never permits a PC or Hub Pokemon to enter any Party', () => {
@@ -94,7 +105,7 @@ test('creates an immutable first-admission Hub passport from a verified source t
     origin: { location: gameBox },
     destination: { location: hub },
     record: { display: { species: 252, isEgg: false } },
-    source: { transferCapability: { title: 'pokemon-ruby', ordinaryTradeReady: true, nationalDexUnlocked: false, networkMachineRestored: false } },
+    source: { transferCapability: { title: 'pokemon-ruby', ordinaryTradeReady: true, nationalDexUnlocked: true, gameClear: true, networkMachineRestored: null } },
     sourcePokemonCount: 2,
   })
 
@@ -104,7 +115,7 @@ test('creates an immutable first-admission Hub passport from a verified source t
 test('uses the adapter game capability as the rules title', () => {
   const decision = createPokemonHubTransferPlacementPolicy()({
     origin: { location: gameBox }, destination: { location: hub }, record: { display: { species: 252, isEgg: false } },
-    source: { transferCapability: { game: 'pokemon-ruby', ordinaryTradeReady: true, nationalDexUnlocked: false, networkMachineRestored: null } }, sourcePokemonCount: 2,
+    source: { transferCapability: { game: 'pokemon-ruby', ordinaryTradeReady: true, nationalDexUnlocked: true, gameClear: true, networkMachineRestored: null } }, sourcePokemonCount: 2,
   })
   assert.deepEqual(decision, { allowed: true, hubPassport: { sourceTitle: 'pokemon-ruby', sourceFamily: 'hoenn-rs' } })
 })

@@ -4,9 +4,12 @@ import transferRules from './rules/pokemon-gen3-transfer-rules.json' with { type
 const regionalDexMembers = new Map(Object.entries(regionalDexes.regionalDexes).map(([name, definition]) => [name, expandRegionalDex(definition.nationalDex)]))
 
 export function evaluateGenerationIIITransfer({ operation, source = null, destination = null, pokemon, sourcePokemonCount = null, hubPassport = null }) {
+  if (operation === 'hub-export') {
+    if (!verifiedHubExportInput(source, pokemon, sourcePokemonCount)) return rejected('TRANSFER_EXPORT_UNVERIFIED')
+    return evaluateHubExport({ source, sourcePokemonCount })
+  }
   assertPokemon(pokemon)
   if (operation === 'direct') return evaluateDirect({ source, destination, pokemon, sourcePokemonCount })
-  if (operation === 'hub-export') return evaluateHubExport({ source, pokemon, sourcePokemonCount })
   if (operation === 'hub-import') return evaluateHubImport({ destination, pokemon, hubPassport })
   throw new TypeError('Generation III transfer operation is invalid')
 }
@@ -30,11 +33,23 @@ function evaluateDirect({ source, destination, pokemon, sourcePokemonCount }) {
   return allowed()
 }
 
-function evaluateHubExport({ source, pokemon, sourcePokemonCount }) {
-  assertSave(source)
+function evaluateHubExport({ source, sourcePokemonCount }) {
   if (!retainsSourcePokemon(sourcePokemonCount, transferRules.hubBoundary.export.minimumPokemonAfterMove)) return rejected('TRANSFER_SOURCE_EMPTY_AFTER_MOVE')
-  if (!regionalGateAllows(source, pokemon)) return rejected('TRANSFER_NATIONAL_DEX_REQUIRED')
+  const requirements = transferRules.hubBoundary.export
+  if (requirements.requiresNationalDexUnlocked && !source.nationalDexUnlocked) return rejected('TRANSFER_NATIONAL_DEX_REQUIRED')
+  if (requirements.requiresGameClear && !source.gameClear) return rejected('TRANSFER_LEAGUE_REQUIRED')
+  if (requirements.requiresNetworkMachineWhenApplicable && transferRules.titles[source.title].networkMachineGate && !source.networkMachineRestored) return rejected('TRANSFER_NETWORK_MACHINE_REQUIRED')
   return allowed()
+}
+
+function verifiedHubExportInput(source, pokemon, sourcePokemonCount) {
+  const titlePolicy = transferRules.titles[source?.title]
+  return Boolean(titlePolicy)
+    && typeof source.nationalDexUnlocked === 'boolean'
+    && typeof source.gameClear === 'boolean'
+    && (!titlePolicy.networkMachineGate || typeof source.networkMachineRestored === 'boolean')
+    && Number.isInteger(pokemon?.nationalDexNumber) && pokemon.nationalDexNumber >= 1 && typeof pokemon.isEgg === 'boolean'
+    && Number.isInteger(sourcePokemonCount) && sourcePokemonCount >= 0
 }
 
 function evaluateHubImport({ destination, pokemon, hubPassport }) {

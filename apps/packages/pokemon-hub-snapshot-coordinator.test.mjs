@@ -419,13 +419,13 @@ test('returns a corrected snapshot rather than accepting a duplicated instance',
 })
 
 test('persists a first-admission Hub passport only after the rule policy permits the export', async () => {
-  const { coordinator } = await fixture({ validatePlacementChange: createPokemonHubTransferPlacementPolicy() })
+  const { coordinator, events } = await fixture({ validatePlacementChange: createPokemonHubTransferPlacementPolicy() })
   const game = await coordinator.adopt({
     profileId,
     sourceKey: 'save:profile-may:ruby',
     sourceRevision: 4,
     adapter: 'gen3-gba-v1',
-    transferCapability: { title: 'pokemon-ruby', ordinaryTradeReady: true, nationalDexUnlocked: false, networkMachineRestored: false },
+    transferCapability: { title: 'pokemon-ruby', ordinaryTradeReady: true, nationalDexUnlocked: false, gameClear: true, networkMachineRestored: null },
     slots: [
       { location: { kind: 'game', area: 'box', box: 0, slot: 0 }, record: record(7, { species: 252, shiny: false, isEgg: false }) },
       { location: { kind: 'game', area: 'box', box: 0, slot: 1 }, record: record(8, { species: 253, shiny: false, isEgg: false }) },
@@ -438,6 +438,20 @@ test('persists a first-admission Hub passport only after the rule policy permits
     coordinator.acquire({ profileId, sourceKey: hubSource.sourceKey, workspaceId: 'workspace-passport' }),
   ])
   const pokemonInstanceId = game.placements[0].pokemonInstanceId
+
+  const locked = await coordinator.sync({
+    profileId, workspaceId: 'workspace-passport', clientSequence: 1, idempotencyKey: 'locked-ruby',
+    sources: [
+      { sourceKey: game.sourceKey, sourceSessionId: gameLease.sourceSessionId, leaseToken: gameLease.leaseToken, baseRevision: game.sourceRevision, placements: [{ location: { kind: 'game', area: 'box', box: 0, slot: 0 }, pokemonInstanceId: null }, game.placements[1]] },
+      { sourceKey: hubSource.sourceKey, sourceSessionId: hubLease.sourceSessionId, leaseToken: hubLease.leaseToken, baseRevision: hubSource.sourceRevision, placements: [{ location: hub(hubProfileId, 0), pokemonInstanceId }] },
+    ],
+  })
+  assert.equal(locked.status, 'corrected')
+  assert.equal(locked.code, 'TRANSFER_NATIONAL_DEX_REQUIRED')
+  assert.deepEqual((await coordinator.getSnapshot({ profileId, sourceKey: game.sourceKey })).placements, game.placements)
+  assert.deepEqual((await coordinator.getSnapshot({ profileId, sourceKey: hubSource.sourceKey })).placements, hubSource.placements)
+  assert.equal((await events.listForPokemon(profileId, pokemonInstanceId)).filter(event => event.type === 'pokemon.placement-changed').length, 0)
+  await coordinator.refreshTransferCapability({ profileId, sourceKey: game.sourceKey, transferCapability: { title: 'pokemon-ruby', ordinaryTradeReady: false, nationalDexUnlocked: true, gameClear: true, networkMachineRestored: null } })
 
   const accepted = await coordinator.sync({
     profileId, workspaceId: 'workspace-passport', clientSequence: 1, idempotencyKey: 'admit-ruby',

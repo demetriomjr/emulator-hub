@@ -1,9 +1,8 @@
 import { pokemonGen3Adapter } from './pokemon-gen3-adapter.mjs'
-import { editPokemonGen3Flags, readPokemonGen3Flags } from './pokemon-gen3-event-flags.mjs'
+import { editPokemonGen3Flags } from './pokemon-gen3-event-flags.mjs'
 import { pokemonGen3SaveByteOffset, refreshPokemonGen3SaveSectionChecksums, selectUnambiguousPokemonGen3SaveCopy } from './pokemon-gen3-save-validation.mjs'
 
 const supportedTitles = new Set(['pokemon-ruby', 'pokemon-sapphire'])
-const gameClearFlag = 0x804
 const nationalDexFlag = 0x836
 
 // Mirrors the persistent Ruby/Sapphire fields written by EnableNationalPokedex.
@@ -11,8 +10,9 @@ const nationalDexFlag = 0x836
 export function enableRubySapphireNationalDex(saveBytes, title) {
   if (!supportedTitles.has(title)) throw dexError('National Dex auto-upgrade only supports Ruby and Sapphire.')
   const save = selectUnambiguousPokemonGen3SaveCopy(saveBytes)
-  if (!readPokemonGen3Flags(saveBytes, title, [gameClearFlag])[0]) throw dexError('Ruby/Sapphire League completion is required.')
-  if (pokemonGen3Adapter.inspect(saveBytes, { pokemonSaveTitle: title }).transferCapabilities.nationalDexUnlocked) return Buffer.from(saveBytes)
+  const { transferCapabilities } = pokemonGen3Adapter.inspect(saveBytes, { pokemonSaveTitle: title })
+  if (!transferCapabilities.gameClear) throw dexError('Ruby/Sapphire League completion is required.')
+  if (transferCapabilities.nationalDexUnlocked) return Buffer.from(saveBytes)
 
   const candidate = Buffer.from(saveBytes)
   candidate[pokemonGen3SaveByteOffset(save, 'small', 0x18)] = 0
