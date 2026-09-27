@@ -51,8 +51,20 @@ test('backend bootstrap completes the startup backup before listening', async ()
     once(event) { events.push(`once:${event}`) },
     listen(port, host, callback) { events.push(`listen:${host}:${port}`); callback() },
   }
-  await bootstrapHubServer({ persistence, host: '127.0.0.1', port: 0, migrateLegacy: async () => { events.push('legacy') }, makeServer: () => server })
+  await bootstrapHubServer({ persistence, host: '127.0.0.1', port: 0, startupBackup: true, migrateLegacy: async () => { events.push('legacy') }, makeServer: () => server })
   assert.deepEqual(events, ['connect', 'legacy', 'backup:startup', 'once:error', 'listen:127.0.0.1:0'])
+})
+
+test('backend bootstrap skips the startup backup in development', async () => {
+  const events = []
+  const persistence = { async connect() { events.push('connect') }, async close() { events.push('close') } }
+  const server = {
+    backendStateBackup: { async create(reason) { events.push(`backup:${reason}`) } },
+    once(event) { events.push(`once:${event}`) },
+    listen(port, host, callback) { events.push(`listen:${host}:${port}`); callback() },
+  }
+  await bootstrapHubServer({ persistence, host: '127.0.0.1', port: 0, startupBackup: false, migrateLegacy: async () => { events.push('legacy') }, makeServer: () => server })
+  assert.deepEqual(events, ['connect', 'legacy', 'once:error', 'listen:127.0.0.1:0'])
 })
 
 test('backend bootstrap closes persistence and never listens when the legacy import fails', async () => {

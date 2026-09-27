@@ -89,6 +89,7 @@ async function startDevelopmentServer() {
 
   const watcher = spawn(process.execPath, ['--env-file-if-exists=.env', '--watch', 'server.mjs', '--emulator-hub-dev-watcher'], {
     cwd: fileURLToPath(new URL('.', import.meta.url)),
+    env: { ...process.env, NODE_ENV: 'development' },
     stdio: 'inherit',
     windowsHide: true,
   })

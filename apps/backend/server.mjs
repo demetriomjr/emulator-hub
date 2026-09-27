@@ -2084,6 +2084,7 @@ export async function bootstrapHubServer({
   persistence,
   host,
   port,
+  startupBackup = process.env.NODE_ENV === 'production',
   legacyMigrationOptions,
   migrateLegacy = migrateLegacyJsonData,
   makeServer = () => createHubServer({ persistence }),
@@ -2095,7 +2096,7 @@ export async function bootstrapHubServer({
     await persistence.connect()
     await migrateLegacy({ persistence, ...legacyMigrationOptions })
     const server = makeServer()
-    if (server.backendStateBackup && typeof server.backendStateBackup.create === 'function') {
+    if (startupBackup && server.backendStateBackup && typeof server.backendStateBackup.create === 'function') {
       try {
         await server.backendStateBackup.create('startup')
       } catch (error) {

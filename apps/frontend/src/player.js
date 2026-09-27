@@ -105,6 +105,10 @@ function getShinyHuntPlayer() {
       if (!gamepadInput) throw new Error('Emulator input is unavailable')
       gamepadInput.setSyntheticPressed(8, down)
     },
+    setButton: (button, down) => {
+      if (!gamepadInput) throw new Error('Emulator input is unavailable')
+      gamepadInput.setSyntheticPressed({ A: 8, B: 0, UP: 4, DOWN: 5, LEFT: 6, RIGHT: 7 }[button], down)
+    },
     saveState: () => saveEmulatorState({ kind: 'user-state', reasonCode: 'user-request' }),
   })
   return shinyHuntPlayer
@@ -718,8 +722,12 @@ window.addEventListener('message', event => {
   const huntAction = {
     'emulator-hub:hunt-prepare': 'prepare',
     'emulator-hub:hunt-reset': 'reset',
+    'emulator-hub:hunt-confirm-reset': 'confirm-reset',
+    'emulator-hub:hunt-begin': 'begin',
     'emulator-hub:hunt-input': 'input',
+    'emulator-hub:hunt-release-input': 'release-input',
     'emulator-hub:hunt-inspect': 'inspect',
+    'emulator-hub:hunt-phase': 'phase',
     'emulator-hub:hunt-save': 'save',
     'emulator-hub:hunt-cancel': 'cancel',
   }[event.data?.type]

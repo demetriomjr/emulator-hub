@@ -79,6 +79,8 @@ cannot report the backend ready until the backup has completed.
 Tests that construct an isolated server may inject a backup service or disable
 the production startup hook explicitly; the default production entry point
 keeps the barrier enabled.
+The development watcher sets `NODE_ENV=development` and skips this automatic
+startup backup. The authenticated operator backup remains available.
 
 ## Integrity and consistency
 
