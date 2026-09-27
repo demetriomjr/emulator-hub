@@ -8,6 +8,7 @@ import { createSaveStore } from './save-store.mjs'
 import { createPokemonGen3EventDeliveryService } from './pokemon-gen3-event-delivery.mjs'
 import { inspectPokemonGen3Inventory } from './pokemon-gen3-inventory.mjs'
 import { readPokemonGen3Flags } from './pokemon-gen3-event-flags.mjs'
+import { inspectPokemonGen3EventEligibility } from './pokemon-gen3-event-eligibility.mjs'
 
 const profileId = 'profile-1'
 const gameId = 'firered-1'
@@ -40,6 +41,31 @@ test('delivers FireRed tickets after release with a backup, readback, and durabl
     assert.deepEqual(original, fireRedSave({ eligible: true }))
     assert.deepEqual(await service.attempt({ profileId, gameId }), { status: 'already-delivered', revision: 2 })
     assert.equal((await readdir(join(root, 'event-backups'))).length, 1)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('delivers Ruby National Dex and Eon Ticket in one backed-up save revision', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'emulator-hub-event-delivery-'))
+  try {
+    const saveStore = createSaveStore({ dataPath: join(root, 'saves'), eventBackupsPath: join(root, 'event-backups') })
+    const original = rubySave({ league: true })
+    await saveStore.put(profileId, 'ruby-1', original, null)
+    const service = createPokemonGen3EventDeliveryService({
+      saveStore,
+      gameSaveLeases: { async get() { return null } },
+      resolveGame: async () => ({ title: 'pokemon-ruby', romSha256 }),
+    })
+    assert.deepEqual(await service.attempt({ profileId, gameId: 'ruby-1' }), { status: 'delivered', revision: 2 })
+    const stored = await saveStore.get(profileId, 'ruby-1')
+    assert.equal(stored.revision, 2)
+    assert.equal(inspectPokemonGen3EventEligibility(stored.bytes, 'pokemon-ruby').nationalDexUnlocked, true)
+    assert.equal(inspectPokemonGen3Inventory(stored.bytes, 'pokemon-ruby').keyItems.slots[0].itemId, 275)
+    assert.deepEqual(stored.eventGrantReceipt.eventIds, ['southern-island'])
+    assert.equal((await readdir(join(root, 'event-backups'))).length, 1)
+    assert.deepEqual(original, rubySave({ league: true }))
+    assert.deepEqual(await service.attempt({ profileId, gameId: 'ruby-1' }), { status: 'already-delivered', revision: 2 })
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -115,6 +141,27 @@ function fireRedSave({ eligible }) {
         bytes[large(copy, 0xee0 + (flagId >> 3))] |= 1 << (flagId & 7)
       }
     }
+    for (let section = 0; section < 14; section += 1) {
+      const start = physical(copy, section)
+      const length = section === 0 ? 3884 : section === 13 ? 2000 : 3968
+      let sum = 0
+      for (let offset = 0; offset < length; offset += 4) sum = (sum + bytes.readUInt32LE(start + offset)) >>> 0
+      bytes.writeUInt16LE(((sum & 0xffff) + (sum >>> 16)) & 0xffff, start + 0xff6)
+    }
+  }
+  return bytes
+}
+
+function rubySave({ league }) {
+  const bytes = Buffer.alloc(0x20000)
+  for (const [copy, index] of [[0, 1], [0xe000, 2]]) {
+    for (let section = 0; section < 14; section += 1) {
+      const start = physical(copy, section)
+      bytes.writeUInt16LE(section, start + 0xff4)
+      bytes.writeUInt32LE(0x08012025, start + 0xff8)
+      bytes.writeUInt32LE(index, start + 0xffc)
+    }
+    if (copy === 0xe000 && league) bytes[large(copy, 0x1220 + (0x804 >> 3))] |= 1 << (0x804 & 7)
     for (let section = 0; section < 14; section += 1) {
       const start = physical(copy, section)
       const length = section === 0 ? 3884 : section === 13 ? 2000 : 3968

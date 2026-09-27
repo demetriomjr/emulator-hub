@@ -23,7 +23,7 @@ export function inspectPokemonGen3EventEligibility(saveBytes, pokemonSaveTitle) 
     gameClear,
     nationalDexUnlocked,
     networkMachineRestored,
-    eligible: gameClear && nationalDexUnlocked && networkMachineRestored !== false,
+    eligible: gameClear && (pokemonSaveTitle === 'pokemon-ruby' || pokemonSaveTitle === 'pokemon-sapphire' || nationalDexUnlocked) && networkMachineRestored !== false,
   }
 }
 

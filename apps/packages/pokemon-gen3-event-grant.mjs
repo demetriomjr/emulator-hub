@@ -2,6 +2,7 @@ import eventCatalog from './pokemon-gen3-event-encounters.json' with { type: 'js
 import { inspectPokemonGen3EventEligibility } from './pokemon-gen3-event-eligibility.mjs'
 import { editPokemonGen3Flags, readPokemonGen3Flags } from './pokemon-gen3-event-flags.mjs'
 import { addPokemonGen3KeyItems, inspectPokemonGen3Inventory } from './pokemon-gen3-inventory.mjs'
+import { enableRubySapphireNationalDex } from './pokemon-gen3-national-dex.mjs'
 
 const eventsById = new Map(eventCatalog.events.map(event => [event.id, event]))
 
@@ -32,7 +33,10 @@ export function materializePokemonGen3EventGrant(saveBytes, pokemonSaveTitle, ev
     throw error
   }
 
-  const withItems = addPokemonGen3KeyItems(saveBytes, pokemonSaveTitle, items)
+  const withNationalDex = pokemonSaveTitle === 'pokemon-ruby' || pokemonSaveTitle === 'pokemon-sapphire'
+    ? enableRubySapphireNationalDex(saveBytes, pokemonSaveTitle)
+    : saveBytes
+  const withItems = addPokemonGen3KeyItems(withNationalDex, pokemonSaveTitle, items)
   const flagIds = [...flags]
   const candidate = editPokemonGen3Flags(withItems, pokemonSaveTitle, flagIds.map(flagId => ({ flagId, value: true })))
   const owned = new Set(inspectPokemonGen3Inventory(candidate, pokemonSaveTitle).keyItems.slots

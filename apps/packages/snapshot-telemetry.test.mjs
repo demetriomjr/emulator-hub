@@ -87,6 +87,7 @@ test('container logger keeps save writes and snapshot decisions while limiting p
   const logger = createContainerPipelineLogger({ output, now: () => now })
   logger.info('save.backend.put-received', { profileId: 'profile', gameId: 'game' })
   logger.info('save.backend.persisted', { profileId: 'profile', gameId: 'game', revision: 2 })
+  logger.info('save.backend.event-delivery-committed', { profileId: 'profile', gameId: 'game', revision: 3 })
   logger.info('snapshot.backend.candidate-available', { profileId: 'profile', gameId: 'game', kind: 'cloud-recovery', revision: 3 })
   logger.warn('snapshot.backend.put-rejected', { profileId: 'profile', gameId: 'game', kind: 'cloud-recovery', code: 'SNAPSHOT_FENCE_CONFLICT' })
   logger.warn('snapshot.backend.put-rejected', { profileId: 'profile', gameId: 'game', kind: 'cloud-recovery', code: 'SNAPSHOT_FENCE_CONFLICT' })
@@ -96,6 +97,7 @@ test('container logger keeps save writes and snapshot decisions while limiting p
   logger.warn('snapshot.backend.put-rejected', { profileId: 'profile', gameId: 'game', kind: 'cloud-recovery', code: 'SNAPSHOT_FENCE_CONFLICT' })
   assert.deepEqual(records.map(record => [record.level, record.event]), [
     ['info', 'save.backend.persisted'],
+    ['info', 'save.backend.event-delivery-committed'],
     ['info', 'snapshot.backend.candidate-available'],
     ['warn', 'snapshot.backend.put-rejected'],
     ['warn', 'snapshot.backend.put-rejected'],

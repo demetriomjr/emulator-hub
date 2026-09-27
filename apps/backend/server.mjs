@@ -42,6 +42,7 @@ import { createGameSaveLeaseCoordinator } from '../packages/game-save-lease-coor
 import { createIpsPatchRegistry } from '../packages/game-patches.mjs'
 import { createBackendStateBackup } from '../packages/backend-state-backup.mjs'
 import { createPokemonGen3EventDeliveryService } from '../packages/pokemon-gen3-event-delivery.mjs'
+import { createPokemonGen3EventBatchDelivery } from '../packages/pokemon-gen3-event-batch-delivery.mjs'
 
 const backendDirectory = dirname(fileURLToPath(import.meta.url))
 const defaultCatalogPath = join(backendDirectory, 'catalog.json')
@@ -114,7 +115,7 @@ export function createHubServer(options = {}) {
     backupToken: options.backupToken ?? process.env.EMULATOR_HUB_BACKUP_TOKEN ?? '',
   }
   config.backupService = options.backupService ?? (typeof config.saveStore.listAll === 'function'
-    ? createBackendStateBackup({ persistence, saveStore: config.saveStore, backupsPath: options.backupsPath ?? defaultBackupsPath, namespace: options.redisNamespace ?? process.env.REDIS_NAMESPACE ?? null })
+    ? createBackendStateBackup({ persistence, saveStore: config.saveStore, backupsPath: options.backupsPath ?? (options.savesPath ? join(dirname(options.savesPath), 'backups') : defaultBackupsPath), namespace: options.redisNamespace ?? process.env.REDIS_NAMESPACE ?? null })
     : null)
   config.eventDeliveryService = options.eventDeliveryService ?? (typeof config.saveStore.put === 'function' && typeof config.gameSaveLeases.get === 'function'
     ? createPokemonGen3EventDeliveryService({
@@ -124,15 +125,19 @@ export function createHubServer(options = {}) {
       resolveGame: async gameId => {
         const entry = await findEntry(config, gameId)
         const layout = entry && getPokemonSaveLayout(entry.pokemonSave?.layoutProfile, entry.pokemonSave?.adapter, entry.pokemonSave?.title)
-        if (entry?.system !== 'gba' || !layout || entry.pokemonSave?.adapter !== pokemonGen3Adapter.id) return null
+        if (entry?.system !== 'gba' || !layout || entry.pokemonSave?.adapter !== pokemonGen3Adapter.id) return { unsupportedReason: 'unsupported-save-layout' }
         const rom = await verifyRom(entry, config.romsDirectory)
-        if (!rom.ok) return null
-        const patch = await verifyGamePatch(entry, config)
-        if (!patch.ok || patch.patch) return null
-        return { title: layout.pokemonSaveTitle, romSha256: entry.sha256 }
+        if (!rom.ok) return { unsupportedReason: 'rom-verification-failed' }
+        let patchSha256 = null
+        try { patchSha256 = (await verifyGamePatch(entry, config)).patch?.sha256 ?? null } catch {}
+        return { title: layout.pokemonSaveTitle, romSha256: entry.sha256, patchSha256 }
       },
       onError: (message, details) => config.savePipelineLogger.warn('save.backend.event-delivery-skipped', { message, ...details }),
+      onEvent: (phase, details) => emitSnapshotLog(config, 'info', `save.backend.event-delivery-${phase}`, details),
     })
+    : null)
+  config.eventBatchService = options.eventBatchService ?? (config.backupService && config.eventDeliveryService && typeof config.saveStore.listAll === 'function'
+    ? createPokemonGen3EventBatchDelivery({ backupService: config.backupService, saveStore: config.saveStore, profileStore: config.profileStore, eventDeliveryService: config.eventDeliveryService })
     : null)
   config.pokemonHubSnapshotCoordinator = options.pokemonHubSnapshotCoordinator ?? createPokemonHubSnapshotCoordinator({ persistence, eventStore: config.pokemonHubEventStore, logger: config.pokemonHubLogger, validatePlacementChange: createPokemonHubTransferPlacementPolicy(), gameSaveLeases: config.gameSaveLeases })
   const canCreatePokemonHubSessionService = ['getSnapshot', 'renew', 'release', 'sync', 'reconcileWorkspaceLeases'].every(method => typeof config.pokemonHubSnapshotCoordinator[method] === 'function')
@@ -278,7 +283,8 @@ async function handleRequest(request, response, config) {
   const pokemonHubProfileRoute = parsePokemonHubProfileRoute(route.pathname)
   const isClientDiagnosticsRoute = route.pathname === '/api/debug/client-events'
   const isBackupRoute = route.pathname === '/api/ops/backups/backend-state'
-  const supportedMethod = request.method === 'GET'
+  const isEventBatchRoute = route.pathname === '/api/ops/gen3-events/deliver'
+  const supportedMethod = (request.method === 'GET' && !isBackupRoute && !isEventBatchRoute)
     || (request.method === 'HEAD' && isRomRoute && !patchRoute)
     || (request.method === 'POST' && gameProfilesRoute)
     || (request.method === 'POST' && pokemonHubProfilesRoute)
@@ -293,15 +299,20 @@ async function handleRequest(request, response, config) {
     || (request.method === 'PATCH' && oddsStateRoute)
     || (request.method === 'DELETE' && gameProfileRoute)
     || (isClientDiagnosticsRoute && request.method === 'POST')
-    || (isBackupRoute && request.method === 'POST')
+    || ((isBackupRoute || isEventBatchRoute) && request.method === 'POST')
   if (!supportedMethod) {
-    response.setHeader('Allow', isClientDiagnosticsRoute ? 'GET, POST' : isUserPreferencesRoute ? 'GET, PATCH' : pokemonHubSessionRoute ? pokemonHubSessionRoute.kind === 'detach' || pokemonHubSessionRoute.kind === 'close' ? 'DELETE' : 'POST' : pokemonHubRoute ? ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute.kind) ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'PATCH, DELETE' : pokemonHubProfilesRoute || gameProfilesRoute ? 'GET, POST' : snapshotRoute ? 'GET, PUT, DELETE' : saveRoute || isControlProfileRoute ? 'GET, PUT' : gameProfileRoute ? 'GET, PATCH, DELETE' : patchRoute ? 'GET' : isRomRoute ? 'GET, HEAD' : 'GET')
+    response.setHeader('Allow', isBackupRoute || isEventBatchRoute ? 'POST' : isClientDiagnosticsRoute ? 'GET, POST' : isUserPreferencesRoute ? 'GET, PATCH' : pokemonHubSessionRoute ? pokemonHubSessionRoute.kind === 'detach' || pokemonHubSessionRoute.kind === 'close' ? 'DELETE' : 'POST' : pokemonHubRoute ? ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute.kind) ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'PATCH, DELETE' : pokemonHubProfilesRoute || gameProfilesRoute ? 'GET, POST' : snapshotRoute ? 'GET, PUT, DELETE' : saveRoute || isControlProfileRoute ? 'GET, PUT' : gameProfileRoute ? 'GET, PATCH, DELETE' : patchRoute ? 'GET' : isRomRoute ? 'GET, HEAD' : 'GET')
     json(response, 405, { error: 'Method is not supported for this route.' })
     return
   }
 
   if (isBackupRoute) {
     await handleBackendStateBackup(request, response, config)
+    return
+  }
+
+  if (isEventBatchRoute) {
+    await handleGen3EventBatch(request, response, config)
     return
   }
 
@@ -1766,10 +1777,13 @@ async function handlePlayerLease(request, response, config, route, searchParams)
       const released = await config.playerLeases.release(input)
       json(response, 200, released)
       if (config.eventDeliveryService && body.closeCompleted === true && body.preserveRecovery !== true) setImmediate(() => {
-        Promise.resolve(config.eventDeliveryService.attempt({ profileId: input.profileId, gameId: input.gameId })).catch(error => {
-          config.savePipelineLogger.warn('save.backend.event-delivery-skipped', { profileId: input.profileId, gameId: input.gameId, code: error.code ?? null, message: error.message })
+        Promise.resolve().then(() => config.eventDeliveryService.attempt({ profileId: input.profileId, gameId: input.gameId })).then(result => {
+          emitSnapshotLog(config, result?.status === 'skipped' || result?.status === 'rom-identity-changed' ? 'warn' : 'info', 'save.backend.event-delivery-result', { profileId: input.profileId, gameId: input.gameId, status: result?.status ?? 'unknown', ...(result?.reason ? { reason: result.reason } : {}), ...(result?.code ? { code: result.code } : {}), ...(result?.revision ? { revision: result.revision } : {}) })
+        }).catch(error => {
+          emitSnapshotLog(config, 'warn', 'save.backend.event-delivery-result', { profileId: input.profileId, gameId: input.gameId, status: 'failed', code: error.code ?? 'EVENT_DELIVERY_FAILED', message: error.message })
         })
       })
+      else emitSnapshotLog(config, 'info', 'save.backend.event-delivery-not-scheduled', { profileId: input.profileId, gameId: input.gameId, reason: !config.eventDeliveryService ? 'service-unavailable' : body.preserveRecovery === true ? 'recovery-preserved' : 'close-not-confirmed' })
       return
     }
     const entry = await findEntry(config, input.gameId)
@@ -2133,5 +2147,20 @@ function redisConfiguration(options = {}) {
     url: options.redisUrl ?? process.env.REDIS_URL,
     namespace: options.redisNamespace ?? process.env.REDIS_NAMESPACE,
     createClient,
+  }
+}
+
+async function handleGen3EventBatch(request, response, config) {
+  if (!config.backupToken || !config.eventBatchService) return json(response, 503, { error: 'Gen III event delivery is not configured.' })
+  if (request.headers.authorization !== `Bearer ${config.backupToken}`) return json(response, 401, { error: 'Operator authorization is required.' })
+  try {
+    const result = await config.eventBatchService.run()
+    for (const row of result.results) emitSnapshotLog(config, row.status === 'skipped' ? 'warn' : 'info', 'save.backend.event-delivery-result', { ...row, source: 'manual-batch' })
+    emitSnapshotLog(config, 'info', 'save.backend.event-delivery-batch-result', { backupFileName: result.backup.fileName, ...result.counts })
+    return json(response, 200, result)
+  } catch (error) {
+    const status = error.code === 'EVENT_BATCH_RUNNING' ? 409 : 500
+    emitSnapshotLog(config, 'warn', 'save.backend.event-delivery-batch-failed', { code: error.code ?? 'EVENT_BATCH_FAILED', message: error.message })
+    return json(response, status, { error: status === 409 ? 'A Gen III event batch is already running.' : 'Gen III event batch failed before candidate processing.' })
   }
 }

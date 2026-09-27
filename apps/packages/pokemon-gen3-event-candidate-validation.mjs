@@ -27,7 +27,11 @@ export function validatePokemonGen3EventCandidate(original, candidate, title, ev
   if (beforeSave.copyOffset !== afterSave.copyOffset || beforeSave.saveIndex !== afterSave.saveIndex) throw invalidCandidate('Event candidate changed active save identity.')
   const beforeEligibility = inspectPokemonGen3EventEligibility(original, title)
   const afterEligibility = inspectPokemonGen3EventEligibility(candidate, title)
-  if (!beforeEligibility.eligible || !afterEligibility.eligible || JSON.stringify(beforeEligibility) !== JSON.stringify(afterEligibility)) throw invalidCandidate('Event candidate changed progression.')
+  const rubySapphire = title === 'pokemon-ruby' || title === 'pokemon-sapphire'
+  if (!beforeEligibility.eligible || !afterEligibility.eligible || beforeEligibility.gameClear !== afterEligibility.gameClear
+    || beforeEligibility.networkMachineRestored !== afterEligibility.networkMachineRestored
+    || (!rubySapphire && beforeEligibility.nationalDexUnlocked !== afterEligibility.nationalDexUnlocked)
+    || (rubySapphire && !afterEligibility.nationalDexUnlocked)) throw invalidCandidate('Event candidate changed progression.')
 
   const beforeInventory = inspectPokemonGen3Inventory(original, title)
   const afterInventory = inspectPokemonGen3Inventory(candidate, title)
@@ -57,6 +61,24 @@ export function validatePokemonGen3EventCandidate(original, candidate, title, ev
     touchedSections.add(1 + Math.floor(logical / 0xf80))
   }
 
+  const allowedNationalBytes = new Set()
+  if (rubySapphire && !beforeEligibility.nationalDexUnlocked) {
+    for (const [offset, expected] of [[0x18, 0], [0x19, 1], [0x1a, 0xda]]) {
+      const address = pokemonGen3SaveByteOffset(beforeSave, 'small', offset)
+      if (candidate[address] !== expected) throw invalidCandidate('Event candidate has an invalid Ruby/Sapphire National Dex field.')
+      allowedNationalBytes.add(address)
+    }
+    const workAddress = pokemonGen3SaveByteOffset(beforeSave, 'large', 0x13cc)
+    if (candidate[workAddress] !== 0x02 || candidate[workAddress + 1] !== 0x03) throw invalidCandidate('Event candidate has an invalid Ruby/Sapphire National Dex variable.')
+    allowedNationalBytes.add(workAddress)
+    allowedNationalBytes.add(workAddress + 1)
+    const flagAddress = pokemonGen3SaveByteOffset(beforeSave, 'large', flagBase + (0x836 >> 3))
+    allowedFlagMasks.set(flagAddress, (allowedFlagMasks.get(flagAddress) ?? 0) | (1 << (0x836 & 7)))
+    touchedSections.add(0)
+    touchedSections.add(1 + Math.floor(0x13cc / 0xf80))
+    touchedSections.add(1 + Math.floor((flagBase + (0x836 >> 3)) / 0xf80))
+  }
+
   const checksumBytes = new Set()
   for (const sectionId of touchedSections) {
     const address = beforeSave.sectors.get(sectionId).offset + 0xff6
@@ -67,7 +89,7 @@ export function validatePokemonGen3EventCandidate(original, candidate, title, ev
   for (let address = 0; address < original.byteLength; address += 1) {
     if (original[address] === candidate[address]) continue
     changed = true
-    if (allowedItemBytes.has(address) || checksumBytes.has(address)) continue
+    if (allowedItemBytes.has(address) || allowedNationalBytes.has(address) || checksumBytes.has(address)) continue
     const mask = allowedFlagMasks.get(address)
     if (mask !== undefined && ((original[address] ^ candidate[address]) & ~mask) === 0) continue
     throw invalidCandidate('Event candidate changed unrelated save bytes.')

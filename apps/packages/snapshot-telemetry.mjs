@@ -33,7 +33,7 @@ export function createSnapshotTelemetry({ browser = window, source, sessionId, g
 export function createContainerPipelineLogger({ output = console, now = Date.now } = {}) {
   const repeated = new Map()
   const emit = (level, event, context = {}) => {
-    if (level === 'info' && event.startsWith('save.backend.') && !['save.backend.persisted', 'save.backend.adopted'].includes(event)) return
+    if (level === 'info' && event.startsWith('save.backend.') && !['save.backend.persisted', 'save.backend.adopted', 'save.backend.event-delivery-not-scheduled', 'save.backend.event-delivery-eligibility', 'save.backend.event-delivery-committed', 'save.backend.event-delivery-result', 'save.backend.event-delivery-batch-result'].includes(event)) return
     if (level !== 'info' && context.kind === 'cloud-recovery' && ['snapshot.backend.put-rejected', 'snapshot.backend.lease-rejected'].includes(event)) {
       const key = `${event}:${context.profileId}:${context.gameId}:${context.code ?? ''}:${context.reason ?? ''}`
       const current = now()

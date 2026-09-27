@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, test } from 'node:test'
+import { gunzipSync } from 'node:zlib'
 
 import { bootstrapHubServer, createHubServer, createListenFailureDiagnostic } from '../server.mjs'
 import { createMemoryRedisPersistence } from '../../packages/redis-persistence.mjs'
@@ -13,6 +14,7 @@ import { observeEmulatorSaveFiles } from '../../packages/emulator-save-events.mj
 import { createSaveStore } from '../../packages/save-store.mjs'
 import { createSnapshotStore } from '../../packages/snapshot-store.mjs'
 import { inspectPokemonGen3Inventory } from '../../packages/pokemon-gen3-inventory.mjs'
+import { readPokemonGen3Flags } from '../../packages/pokemon-gen3-event-flags.mjs'
 
 const liveServers = new Set()
 const liveFixtures = new Set()
@@ -90,6 +92,69 @@ test('creates an authenticated backend state backup without exposing its content
   assert.equal('saves' in result, false)
 })
 
+test('manual Gen III delivery backs up first, skips leased saves, and is idempotent', async () => {
+  const rom = Buffer.alloc(0xc0)
+  rom.write('BPRE', 0xac, 'ascii')
+  const entry = { id: 'firered', title: 'Pokémon FireRed Version', system: 'gba', core: 'mgba', file: 'firered.gba', sha256: sha256(rom), pokemonSave: { adapter: 'gen3-gba-v1', layoutProfile: 'pokemon-firered-leafgreen-gba', title: 'pokemon-firered', saveKind: 'battery', supported: true } }
+  const fixture = await startFixture([entry], { 'firered.gba': rom }, {}, { backupToken: 'event-operator' })
+  const first = await jsonResponse(await fetch(`${fixture.baseUrl}/api/games/firered/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'First' }) }))
+  const second = await jsonResponse(await fetch(`${fixture.baseUrl}/api/games/firered/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Second' }) }))
+  const store = createSaveStore({ dataPath: fixture.savesPath, eventBackupsPath: join(fixture.root, 'data', 'backups', 'gen3-events') })
+  await store.put(first.id, 'firered', eligibleFireRedSave(), null)
+  await store.put(second.id, 'firered', eligibleFireRedSave(), null)
+  const lease = await acquirePlayerLease(fixture.baseUrl, 'firered', second.id, 'batch-live-player')
+  assert.equal(lease.response.status, 200)
+  const url = `${fixture.baseUrl}/api/ops/gen3-events/deliver`
+  const wrongMethod = await fetch(url, { headers: { Authorization: 'Bearer event-operator' } })
+  assert.equal(wrongMethod.status, 405)
+  assert.equal(wrongMethod.headers.get('allow'), 'POST')
+  assert.equal((await fetch(url, { method: 'POST' })).status, 401)
+  assert.equal((await store.get(first.id, 'firered')).revision, 1)
+  const headers = { Authorization: 'Bearer event-operator' }
+  const response = await fetch(url, { method: 'POST', headers })
+  assert.equal(response.status, 200)
+  const result = await response.json()
+  assert.equal(result.backup.reason, 'gen3-event-delivery')
+  assert.equal(result.backup.recordCounts.saves, 2)
+  assert.deepEqual(result.counts, { scanned: 2, delivered: 1, 'deferred-lease': 1 })
+  assert.equal(result.results.find(row => row.profileId === first.id).status, 'delivered')
+  assert.equal(result.results.find(row => row.profileId === second.id).status, 'deferred-lease')
+  const saved = await store.get(first.id, 'firered')
+  assert.equal(saved.revision, 2)
+  assert.deepEqual(inspectPokemonGen3Inventory(saved.bytes, 'pokemon-firered').keyItems.slots.slice(0, 2).map(slot => slot.itemId), [370, 371])
+  assert.ok(saved.eventGrantReceipt.backupFileName)
+  assert.equal((await store.get(second.id, 'firered')).revision, 1)
+  assert.equal((await readdir(join(fixture.root, 'data', 'backups', 'gen3-events'))).length, 1)
+  assert.equal((await readdir(join(fixture.root, 'data', 'backups'))).some(file => file === result.backup.fileName), true)
+  const archive = JSON.parse(gunzipSync(await readFile(join(fixture.root, 'data', 'backups', result.backup.fileName))))
+  const archivedFirst = archive.saves.find(row => row.profileId === first.id)
+  assert.equal(archivedFirst.revision, 1)
+  assert.deepEqual(Buffer.from(archivedFirst.bytesBase64, 'base64'), eligibleFireRedSave())
+  const preimage = JSON.parse(await readFile(join(fixture.root, 'data', 'backups', 'gen3-events', saved.eventGrantReceipt.backupFileName), 'utf8'))
+  assert.deepEqual(Buffer.from(preimage.originalBytesBase64, 'base64'), eligibleFireRedSave())
+  const repeat = await jsonResponse(await fetch(url, { method: 'POST', headers }))
+  assert.equal(repeat.results.find(row => row.profileId === first.id).status, 'already-delivered')
+  assert.equal((await store.get(first.id, 'firered')).revision, 2)
+})
+
+test('manual Gen III delivery leaves saves untouched when the full backup fails', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'emulator-hub-batch-blocked-backup-'))
+  liveFixtures.add(root)
+  const blocked = join(root, 'blocked-backups')
+  await writeFile(blocked, 'not a directory')
+  const rom = Buffer.alloc(0xc0)
+  rom.write('BPRE', 0xac, 'ascii')
+  const entry = { id: 'firered', title: 'Pokémon FireRed Version', system: 'gba', core: 'mgba', file: 'firered.gba', sha256: sha256(rom), pokemonSave: { adapter: 'gen3-gba-v1', layoutProfile: 'pokemon-firered-leafgreen-gba', title: 'pokemon-firered', saveKind: 'battery', supported: true } }
+  const fixture = await startFixture([entry], { 'firered.gba': rom }, {}, { backupToken: 'event-operator', backupsPath: blocked })
+  const profile = await jsonResponse(await fetch(`${fixture.baseUrl}/api/games/firered/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'First' }) }))
+  const store = createSaveStore({ dataPath: fixture.savesPath })
+  await store.put(profile.id, 'firered', eligibleFireRedSave(), null)
+  const response = await fetch(`${fixture.baseUrl}/api/ops/gen3-events/deliver`, { method: 'POST', headers: { Authorization: 'Bearer event-operator' } })
+  assert.equal(response.status, 500)
+  assert.equal((await store.get(profile.id, 'firered')).revision, 1)
+  assert.equal((await store.get(profile.id, 'firered')).eventGrantReceipt, undefined)
+})
+
 test('player release schedules optional event delivery after the lease closes', async () => {
   const rom = Buffer.from('event release route fixture')
   let completeAttempt
@@ -107,8 +172,10 @@ test('player release schedules optional event delivery after the lease closes', 
 test('event delivery waits for a completed normal player close', async () => {
   const rom = Buffer.from('event close guard fixture')
   const attempts = []
+  const diagnostics = []
   const { baseUrl } = await startFixture([{ id: 'pokemon-red', title: 'Pokémon Red', system: 'gb', core: 'gambatte', file: 'pokemon-red.gb', sha256: sha256(rom) }], { 'pokemon-red.gb': rom }, {}, {
     eventDeliveryService: { async attempt(identity) { attempts.push(identity) } },
+    savePipelineLogger: { info: (event, context) => diagnostics.push({ event, context }), warn() {}, error() {} },
   })
   const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/pokemon-red/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Red' }) }))
   for (const [sessionId, extra] of [['no-close', {}], ['preserved-close', { closeCompleted: true, preserveRecovery: true }]]) {
@@ -118,6 +185,7 @@ test('event delivery waits for a completed normal player close', async () => {
   }
   await new Promise(resolve => setTimeout(resolve, 50))
   assert.deepEqual(attempts, [])
+  assert.deepEqual(diagnostics.filter(entry => entry.event === 'save.backend.event-delivery-not-scheduled').map(entry => entry.context.reason), ['close-not-confirmed', 'recovery-preserved'])
 })
 
 test('backend release delivers an eligible FireRed save through the real event service', async () => {
@@ -147,6 +215,60 @@ test('backend release delivers an eligible FireRed save through the real event s
   assert.equal((await readdir(join(fixture.root, 'data', 'backups', 'gen3-events'))).length, 1)
 })
 
+test('completed Emerald close grants events with an IPS and logs exact changes', async () => {
+  const rom = Buffer.alloc(0xc0)
+  rom.write('BPEE', 0xac, 'ascii')
+  const patch = validIps()
+  const entry = { id: 'emerald', title: 'Pokémon Emerald Version', system: 'gba', core: 'mgba', file: 'emerald.gba', sha256: sha256(rom), pokemonSave: { adapter: 'gen3-gba-v1', layoutProfile: 'pokemon-emerald-gba', title: 'pokemon-emerald', saveKind: 'battery', supported: true } }
+  const logs = []
+  const fixture = await startFixture([entry], { 'emerald.gba': rom }, {
+    'manifest.json': ipsManifestEntry(rom, patch, 'emerald.ips'),
+    'emerald.ips': patch,
+  }, { savePipelineLogger: { info: (event, context) => logs.push({ event, context }), warn: (event, context) => logs.push({ event, context }), error: (event, context) => logs.push({ event, context }) } })
+  const profile = await jsonResponse(await fetch(`${fixture.baseUrl}/api/games/emerald/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'May' }) }))
+  const store = createSaveStore({ dataPath: fixture.savesPath, eventBackupsPath: join(fixture.root, 'data', 'backups', 'gen3-events') })
+  await store.put(profile.id, 'emerald', eligibleEmeraldSave(), null)
+  const lease = await acquirePlayerLease(fixture.baseUrl, 'emerald', profile.id, 'emerald-close')
+  const response = await fetch(`${fixture.baseUrl}/api/player-leases/emerald-close`, { method: 'DELETE', headers: { Cookie: lease.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: profile.id, gameId: 'emerald', generation: lease.body.leaseGeneration, closeCompleted: true }) })
+  assert.equal(response.status, 200)
+  let saved
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    saved = await store.get(profile.id, 'emerald')
+    if (saved.eventGrantReceipt) break
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+  assert.ok(saved.eventGrantReceipt)
+  assert.deepEqual(inspectPokemonGen3Inventory(saved.bytes, 'pokemon-emerald').keyItems.slots.slice(0, 4).map(slot => slot.itemId), [275, 376, 370, 371])
+  assert.deepEqual(readPokemonGen3Flags(saved.bytes, 'pokemon-emerald', [0x8ac, 0x8db, 0x8b3, 0x8d6, 0x8e0, 0x8d5, 0x13a, 0x13b, 0x13c]), Array(9).fill(true))
+  const committed = logs.find(log => log.event === 'save.backend.event-delivery-committed')?.context
+  assert.deepEqual(committed.addedItemIds, [275, 376, 370, 371])
+  assert.deepEqual(committed.enabledFlagIds, [0x13a, 0x13b, 0x13c, 0x8ac, 0x8b3, 0x8d5, 0x8d6, 0x8db, 0x8e0])
+  assert.equal(committed.backupFileName, saved.eventGrantReceipt.backupFileName)
+  assert.equal(logs.find(log => log.event === 'save.backend.event-delivery-result')?.context.status, 'delivered')
+})
+
+test('a different Emerald IPS still permits event delivery', async () => {
+  const rom = Buffer.alloc(0xc0)
+  rom.write('BPEE', 0xac, 'ascii')
+  const patch = validIps(2)
+  const entry = { id: 'emerald', title: 'Pokémon Emerald Version', system: 'gba', core: 'mgba', file: 'emerald.gba', sha256: sha256(rom), pokemonSave: { adapter: 'gen3-gba-v1', layoutProfile: 'pokemon-emerald-gba', title: 'pokemon-emerald', saveKind: 'battery', supported: true } }
+  const logs = []
+  const fixture = await startFixture([entry], { 'emerald.gba': rom }, { 'manifest.json': ipsManifestEntry(rom, patch, 'emerald.ips'), 'emerald.ips': patch }, {
+    savePipelineLogger: { info: (event, context) => logs.push({ event, context }), warn: (event, context) => logs.push({ event, context }), error: (event, context) => logs.push({ event, context }) },
+  })
+  const profile = await jsonResponse(await fetch(`${fixture.baseUrl}/api/games/emerald/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'May' }) }))
+  const store = createSaveStore({ dataPath: fixture.savesPath, eventBackupsPath: join(fixture.root, 'data', 'backups', 'gen3-events') })
+  await store.put(profile.id, 'emerald', eligibleEmeraldSave(), null)
+  const lease = await acquirePlayerLease(fixture.baseUrl, 'emerald', profile.id, 'emerald-incompatible')
+  const response = await fetch(`${fixture.baseUrl}/api/player-leases/emerald-incompatible`, { method: 'DELETE', headers: { Cookie: lease.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: profile.id, gameId: 'emerald', generation: lease.body.leaseGeneration, closeCompleted: true }) })
+  assert.equal(response.status, 200)
+  for (let attempt = 0; attempt < 40 && !logs.some(log => log.event === 'save.backend.event-delivery-result'); attempt += 1) await new Promise(resolve => setTimeout(resolve, 20))
+  const result = logs.find(log => log.event === 'save.backend.event-delivery-result')?.context
+  assert.equal(result?.status, 'delivered')
+  assert.equal((await store.get(profile.id, 'emerald')).eventGrantReceipt.eventIds.length, 4)
+  assert.equal(logs.find(log => log.event === 'save.backend.event-delivery-eligibility')?.context.patchSha256, sha256(patch))
+})
+
 afterEach(async () => {
   await Promise.all([...liveServers].map((server) => closeServer(server)))
   liveServers.clear()
@@ -173,6 +295,34 @@ function eligibleFireRedSave() {
       bytes[physical(copy, 0) + 0x1b] = 0xb9
       bytes.writeUInt16LE(0x6258, large(copy, 0x109c))
       for (const flagId of [0x82c, 0x840, 0x844]) bytes[large(copy, 0xee0 + (flagId >> 3))] |= 1 << (flagId & 7)
+    }
+    for (let section = 0; section < 14; section += 1) {
+      const start = physical(copy, section)
+      const length = section === 0 ? 3884 : section === 13 ? 2000 : 3968
+      let sum = 0
+      for (let offset = 0; offset < length; offset += 4) sum = (sum + bytes.readUInt32LE(start + offset)) >>> 0
+      bytes.writeUInt16LE(((sum & 0xffff) + (sum >>> 16)) & 0xffff, start + 0xff6)
+    }
+  }
+  return bytes
+}
+
+function eligibleEmeraldSave() {
+  const bytes = Buffer.alloc(0x20000)
+  const physical = (copy, section) => copy + ((section * 5 + 3) % 14) * 0x1000
+  const large = (copy, offset) => physical(copy, 1 + Math.floor(offset / 0xf80)) + offset % 0xf80
+  for (const [copy, index] of [[0, 1], [0xe000, 2]]) {
+    for (let section = 0; section < 14; section += 1) {
+      const start = physical(copy, section)
+      bytes.writeUInt16LE(section, start + 0xff4)
+      bytes.writeUInt32LE(0x08012025, start + 0xff8)
+      bytes.writeUInt32LE(index, start + 0xffc)
+    }
+    if (copy === 0xe000) {
+      bytes[physical(copy, 0) + 0x1a] = 0xda
+      bytes.writeUInt16LE(0x0302, large(copy, 0x1428))
+      bytes.writeUInt32LE(0x12345678, physical(copy, 0) + 0xac)
+      for (const flagId of [0x864, 0x896]) bytes[large(copy, 0x1270 + (flagId >> 3))] |= 1 << (flagId & 7)
     }
     for (let section = 0; section < 14; section += 1) {
       const start = physical(copy, section)

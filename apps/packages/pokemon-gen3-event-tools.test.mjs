@@ -72,6 +72,58 @@ test('Ruby and Sapphire grants use Mystery Event and Eon flags without Emerald f
   }
 })
 
+test('Ruby and Sapphire unlock National Dex with Eon Ticket after League completion', () => {
+  for (const title of ['pokemon-ruby', 'pokemon-sapphire']) {
+    const original = fixture()
+    original[physicalOffset(0xe000, 0) + 0x18] = 3
+    original[largeAddress(0xe000, 0x1220 + (0x804 >> 3))] |= 1 << (0x804 & 7)
+    refresh(original, 0xe000)
+    const before = Buffer.from(original)
+    assert.deepEqual(inspectPokemonGen3EventEligibility(original, title), {
+      gameClear: true, nationalDexUnlocked: false, networkMachineRestored: null, eligible: true,
+    })
+    const candidate = materializePokemonGen3EventGrant(original, title, ['southern-island'])
+    assert.equal(candidate[physicalOffset(0xe000, 0) + 0x18], 0)
+    assert.equal(candidate[physicalOffset(0xe000, 0) + 0x19], 1)
+    assert.equal(candidate[physicalOffset(0xe000, 0) + 0x1a], 0xda)
+    assert.equal(candidate.readUInt16LE(largeAddress(0xe000, 0x13cc)), 0x0302)
+    assert.deepEqual(readPokemonGen3Flags(candidate, title, [0x804, 0x836, 0x84c, 0x853]), [true, true, true, true])
+    assert.equal(inspectPokemonGen3EventEligibility(candidate, title).nationalDexUnlocked, true)
+    assert.equal(inspectPokemonGen3Inventory(candidate, title).keyItems.slots[0].itemId, 275)
+    assert.deepEqual(validatePokemonGen3EventCandidate(original, candidate, title, ['southern-island']), { changed: true })
+    const tampered = Buffer.from(candidate)
+    tampered[physicalOffset(0xe000, 0) + 0x1b] ^= 1
+    refresh(tampered, 0xe000)
+    assert.throws(() => validatePokemonGen3EventCandidate(original, tampered, title, ['southern-island']), /unrelated/i)
+    assert.deepEqual(candidate.subarray(0, 0xe000), original.subarray(0, 0xe000))
+    assert.deepEqual(original, before)
+    assert.deepEqual(materializePokemonGen3EventGrant(candidate, title, ['southern-island']), candidate)
+  }
+})
+
+test('Ruby and Sapphire preserve an existing National Dex display choice', () => {
+  for (const title of ['pokemon-ruby', 'pokemon-sapphire']) {
+    const original = eligibleFixture(title)
+    original[physicalOffset(0xe000, 0) + 0x18] = 2
+    original[physicalOffset(0xe000, 0) + 0x19] = 0
+    refresh(original, 0xe000)
+    const candidate = materializePokemonGen3EventGrant(original, title, ['southern-island'])
+    assert.equal(candidate[physicalOffset(0xe000, 0) + 0x18], 2)
+    assert.equal(candidate[physicalOffset(0xe000, 0) + 0x19], 0)
+    assert.deepEqual(validatePokemonGen3EventCandidate(original, candidate, title, ['southern-island']), { changed: true })
+  }
+})
+
+test('Ruby and Sapphire still require League completion when National Dex is already unlocked', () => {
+  for (const title of ['pokemon-ruby', 'pokemon-sapphire']) {
+    const original = eligibleFixture(title)
+    original[largeAddress(0xe000, 0x1220 + (0x804 >> 3))] &= ~(1 << (0x804 & 7))
+    refresh(original, 0xe000)
+    assert.equal(inspectPokemonGen3EventEligibility(original, title).eligible, false)
+    assert.throws(() => materializePokemonGen3EventGrant(original, title, ['southern-island']), /eligible|progress/i)
+  }
+})
+
 test('FireRed and LeafGreen grants include their Mystery Gift, ferry, and receipt flags', () => {
   for (const title of ['pokemon-firered', 'pokemon-leafgreen']) {
     const original = eligibleFixture(title)
@@ -126,7 +178,7 @@ test('partial National Dex state does not qualify even after Celio repairs the m
   })
 })
 
-test('Ruby, Sapphire, and Emerald use League and National Dex without a Network Machine gate', () => {
+test('Emerald requires League and National Dex while Ruby and Sapphire recognize an existing unlock', () => {
   for (const [title, profile] of [
     ['pokemon-ruby', { magicOffset: 0x1a, magic: 0xda, flagBase: 0x1220, dexFlag: 0x836, workOffset: 0x13cc, workValue: 0x0302, clearFlag: 0x804 }],
     ['pokemon-sapphire', { magicOffset: 0x1a, magic: 0xda, flagBase: 0x1220, dexFlag: 0x836, workOffset: 0x13cc, workValue: 0x0302, clearFlag: 0x804 }],
