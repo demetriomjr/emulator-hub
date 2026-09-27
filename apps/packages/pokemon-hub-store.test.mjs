@@ -1,13 +1,11 @@
 import assert from 'node:assert/strict'
-import { mkdtemp } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import test from 'node:test'
 
-import { createPokemonHubStore } from './pokemon-hub-store.mjs'
+import { createRedisPokemonHubStore } from './pokemon-hub-store.mjs'
+import { createMemoryRedisPersistence } from './redis-persistence.mjs'
 
-async function createStore() {
-  return createPokemonHubStore({ dataPath: await mkdtemp(join(tmpdir(), 'emulator-hub-pokemon-hub-')) })
+function createStore() {
+  return createRedisPokemonHubStore({ persistence: createMemoryRedisPersistence() })
 }
 
 test('creates a stable empty inventory for a profile', async () => {

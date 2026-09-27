@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { createInitialPokemonHubCanonicalSnapshot, validatePokemonHubCanonicalSnapshot } from './pokemon-hub-canonical-session-snapshot.mjs'
+import { createInitialPokemonHubCanonicalSnapshot, extendPokemonHubPlacements, validatePokemonHubCanonicalSnapshot } from './pokemon-hub-canonical-session-snapshot.mjs'
 import { pokemonHubRedisKeys } from './pokemon-hub-redis-keys.mjs'
 
 const claimSessionTransition = Object.freeze({
@@ -379,9 +379,9 @@ export function createPokemonHubSessionService({ persistence, coordinator, logge
         canonicalCommitted = true
         trace.info('snapshot.canonical.session-persisted', { profileId, sessionId, idempotencyKey, revision: session.version, sourceKeys: session.sources.map(source => source.sourceKey), expiresAt: session.expiresAt })
         const dirtySourceKeys = desiredSources
-          .filter(source => requested.has(source.sourceKey) && source.placements.some((placement, index) => placement.pokemonInstanceId !== baseSnapshots.get(source.sourceKey).placements[index].pokemonInstanceId))
+          .filter(source => source.sourceKey.startsWith('save:'))
+          .filter(source => requested.has(source.sourceKey) && source.placements.some((placement, index) => placement.pokemonInstanceId !== baseSnapshots.get(source.sourceKey).placements[index]?.pokemonInstanceId))
           .map(source => source.sourceKey)
-          .filter(sourceKey => sourceKey.startsWith('save:'))
         const response = { status: 'accepted', dirtySourceKeys: [...new Set(dirtySourceKeys)].sort() }
         await persistence.set(operationKeyValue, JSON.stringify({ fingerprint, response }), { NX: true })
         trace.info('snapshot.canonical.accepted', { profileId, sessionId, idempotencyKey, revision: session.version, dirtySourceKeys: response.dirtySourceKeys })
@@ -776,12 +776,16 @@ function placementsForCanonicalPane(source, pane) {
   for (const [location, pokemonInstanceId] of entries) requested.set(canonicalLocationKey(location), pokemonInstanceId)
   const expected = pane.profile.type === 'hub-profile' ? 'hub' : 'game'
   if (source.placements.some(placement => placement.location?.kind !== expected)) throw sessionError('SNAPSHOT_INVALID', 'Snapshot source type is invalid.')
-  const placements = source.placements.map(placement => ({
+  const available = expected === 'hub' && pane.hub.length > 0
+    ? extendPokemonHubPlacements(source.placements, pane.profile.hubProfileId, Math.max(...pane.hub.map(entry => entry.slot)))
+    : source.placements
+  if (!available) throw sessionError('SNAPSHOT_INVALID', 'Snapshot slot exceeds the Hub growth window or source topology is invalid.')
+  const placements = available.map(placement => ({
     location: structuredClone(placement.location),
     pokemonInstanceId: requested.get(canonicalLocationKey(placement.location)) ?? null,
   }))
   for (const location of requested.keys()) {
-    if (!source.placements.some(placement => canonicalLocationKey(placement.location) === location)) throw sessionError('SNAPSHOT_INVALID', 'Snapshot slot is invalid.')
+    if (!available.some(placement => canonicalLocationKey(placement.location) === location)) throw sessionError('SNAPSHOT_INVALID', 'Snapshot slot is invalid.')
   }
   return placements
 }

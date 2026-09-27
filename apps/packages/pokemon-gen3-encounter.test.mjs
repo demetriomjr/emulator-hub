@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { inspectGen3Encounter, findGen3EncounterLayout } from './pokemon-gen3-encounter.mjs'
+import { inspectGen3BattlePhase, inspectGen3Encounter, findGen3EncounterLayout } from './pokemon-gen3-encounter.mjs'
 
 const playerAddress = 0x03004360
 const enemyAddress = 0x030045c0
@@ -84,6 +84,48 @@ test('rejects a state from another game code', () => {
 })
 
 test('finds enemy and player addresses by the verified ROM identity', () => {
-  assert.deepEqual(findGen3EncounterLayout({ romSha256: '0fdd36e92b75bed65d09df4635ab0b707b288c2bf1dc4c6e7a4a4f0eebe9d64c', core: 'gba', runtimeId: 'emulatorjs-4.2.3' }), layout)
+  assert.deepEqual(findGen3EncounterLayout({ romSha256: '0fdd36e92b75bed65d09df4635ab0b707b288c2bf1dc4c6e7a4a4f0eebe9d64c', core: 'gba', runtimeId: 'emulatorjs-4.2.3' }), { ...layout, battleFlag: { main: 0x03001770, inBattleOffset: 0x43d } })
   assert.equal(findGen3EncounterLayout({ romSha256: 'unknown', core: 'gba', runtimeId: 'emulatorjs-4.2.3' }), null)
+})
+
+test('Ruby waits for a battle even if an enemy record changes on the map', () => {
+  const ruby = findGen3EncounterLayout({ romSha256: '0fdd36e92b75bed65d09df4635ab0b707b288c2bf1dc4c6e7a4a4f0eebe9d64c', core: 'gba', runtimeId: 'emulatorjs-4.2.3' })
+  const state = makeState()
+  writeMon(state, ruby.enemyAddress, { pid: 1 })
+  assert.deepEqual(inspectGen3Encounter(state, ruby), { status: 'pending' })
+  state[stateOffset(ruby.battleFlag.main + ruby.battleFlag.inBattleOffset)] = 2
+  assert.equal(inspectGen3Encounter(state, ruby).status, 'shiny')
+})
+
+test('Ruby battle reader distinguishes an active battle from the map', () => {
+  const ruby = findGen3EncounterLayout({ romSha256: '0fdd36e92b75bed65d09df4635ab0b707b288c2bf1dc4c6e7a4a4f0eebe9d64c', core: 'gba', runtimeId: 'emulatorjs-4.2.3' })
+  const state = makeState()
+  assert.deepEqual(inspectGen3BattlePhase(state, ruby), { status: 'map' })
+  state[stateOffset(ruby.battleFlag.main + ruby.battleFlag.inBattleOffset)] = 2
+  assert.deepEqual(inspectGen3BattlePhase(state, ruby), { status: 'battle' })
+})
+
+test('Emerald battle reader distinguishes action menu, run cursor and returned map', () => {
+  const emerald = findGen3EncounterLayout({ romSha256: 'a9dec84dfe7f62ab2220bafaef7479da0929d066ece16a6885f6226db19085af', core: 'gba', runtimeId: 'emulatorjs-4.2.3' })
+  const state = makeState()
+  state.set([66, 80, 69, 69], 0x2c)
+  const memory = new DataView(state.buffer)
+  const { battle } = emerald
+  state[stateOffset(battle.main + 0x439)] = 2
+  state[stateOffset(battle.positions)] = 0
+  memory.setUint32(stateOffset(battle.controllers), battle.chooseAction + 1, true)
+  state[stateOffset(battle.cursor)] = 3
+  assert.deepEqual(inspectGen3BattlePhase(state, emerald), { status: 'menu', cursor: 3 })
+  state[stateOffset(battle.main + 0x439)] = 0
+  state[stateOffset(battle.outcome)] = 4
+  memory.setUint32(stateOffset(battle.main + 4), battle.overworld + 1, true)
+  assert.deepEqual(inspectGen3BattlePhase(state, emerald), { status: 'map' })
+})
+
+test('Emerald ignores a residual enemy record while back on the map', () => {
+  const emerald = findGen3EncounterLayout({ romSha256: 'a9dec84dfe7f62ab2220bafaef7479da0929d066ece16a6885f6226db19085af', core: 'gba', runtimeId: 'emulatorjs-4.2.3' })
+  const state = makeState()
+  state.set([66, 80, 69, 69], 0x2c)
+  writeMon(state, emerald.enemyAddress, { pid: 1, species: 25 })
+  assert.deepEqual(inspectGen3Encounter(state, emerald), { status: 'pending' })
 })

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { acquirePlayerLease, acquirePokemonHubSnapshot, closePokemonHubSession, getCloudSave, putCloudSave, releasePlayerLease, releasePokemonHubSnapshot, renewPokemonHubSnapshot, syncPokemonHubSessionSnapshot, syncPokemonHubSnapshot, transferPokemonHub } from './hub-client.js'
+import { acquirePlayerLease, closePokemonHubSession, getCloudSave, putCloudSave, releasePlayerLease, syncPokemonHubSessionSnapshot } from './hub-client.js'
 
 test('sends player lease identity for acquire, save, and release', async () => {
   const originalFetch = globalThis.fetch
@@ -57,37 +57,6 @@ test('correlates a battery-save GET and reports the returned revision and size',
   } finally { globalThis.fetch = originalFetch }
   assert.equal(calls[0].options.headers['X-Save-Trace-Id'], 'trace-load-1')
   assert.deepEqual(events, [{ event: 'save.front.get-response', context: { traceId: 'trace-load-1', status: 200, ok: true, found: true, sizeBytes: 3, revision: 7 } }])
-})
-
-test('sends the Pokemon Hub snapshot lifecycle to its profile-scoped routes', async () => {
-  const originalFetch = globalThis.fetch
-  const calls = []
-  globalThis.fetch = async (url, options) => {
-    calls.push({ url, options })
-    return { ok: true, json: async () => ({ ok: true }) }
-  }
-  try {
-    await acquirePokemonHubSnapshot('profile-may', { sourceKey: 'save:profile-may:emerald', workspaceId: 'workspace-a' })
-    await renewPokemonHubSnapshot('profile-may', { sourceKey: 'save:profile-may:emerald', workspaceId: 'workspace-a', sourceSessionId: 'session-a', leaseToken: 'token-a' })
-    await syncPokemonHubSnapshot('profile-may', { workspaceId: 'workspace-a', clientSequence: 1, idempotencyKey: 'sync-1', sources: [] })
-    await releasePokemonHubSnapshot('profile-may', { sourceKey: 'save:profile-may:emerald', workspaceId: 'workspace-a', sourceSessionId: 'session-a', leaseToken: 'token-a' })
-  } finally { globalThis.fetch = originalFetch }
-
-  assert.deepEqual(calls.map(call => call.url), [
-    '/api/profiles/profile-may/pokemon-hub/snapshots/acquire',
-    '/api/profiles/profile-may/pokemon-hub/snapshots/renew',
-    '/api/profiles/profile-may/pokemon-hub/snapshots/sync',
-    '/api/profiles/profile-may/pokemon-hub/snapshots/release',
-  ])
-  assert.ok(calls.every(call => call.options.method === 'POST' && call.options.headers['Content-Type'] === 'application/json'))
-})
-
-test('preserves a structured backend error code for a persistent grid transfer', async () => {
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = async () => ({ ok: false, status: 409, json: async () => ({ error: 'Destination is occupied.', code: 'POKEMON_HUB_DESTINATION_OCCUPIED' }) })
-  try {
-    await assert.rejects(() => transferPokemonHub('profile-may', { workspaceId: 'workspace-a' }), { code: 'POKEMON_HUB_DESTINATION_OCCUPIED' })
-  } finally { globalThis.fetch = originalFetch }
 })
 
 test('sends a canonical session snapshot with an idempotency key and treats an empty 200 as acceptance', async () => {

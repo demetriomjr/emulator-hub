@@ -1001,9 +1001,6 @@ async function handlePokemonHub(request, response, config, route) {
       const result = body.workspaceId && Array.isArray(body.sources)
         ? await transferPokemonHubGrid(config, route.profileId, body)
         : await config.pokemonHubService.transfer({ ...body, profileId: route.profileId })
-      if (result.status === 'accepted') for (const snapshot of result.snapshots ?? []) {
-        if (snapshot.sourceKey.startsWith(`save:${route.profileId}:`)) config.pokemonHubSaveFlush.markDirty({ profileId: route.profileId, sourceKey: snapshot.sourceKey })
-      }
       json(response, 200, result)
     }
     else if (route.kind === 'snapshot-acquire') json(response, 200, await acquirePokemonHubSnapshot(config, route.profileId, body))
@@ -1014,7 +1011,6 @@ async function handlePokemonHub(request, response, config, route) {
       json(response, 200, await config.pokemonHubSnapshotCoordinator.release({ ...body, profileId: route.profileId }))
     } else {
       const result = await config.pokemonHubSnapshotCoordinator.sync({ ...body, profileId: route.profileId })
-      if (result.status === 'accepted') for (const snapshot of result.snapshots) config.pokemonHubSaveFlush.markDirty({ profileId: route.profileId, sourceKey: snapshot.sourceKey })
       json(response, 200, result)
     }
   } catch (error) { jsonPokemonHubError(response, error) }
@@ -1079,7 +1075,7 @@ async function handlePokemonHubSession(request, response, config, route, logger 
         flushOutgoingSource: source => flushPokemonHubSessionSource(config, route.profileId, source, trace),
         releaseSource: source => releasePokemonHubSessionSourceLease(config, route.profileId, route.sessionId, source, trace),
       })
-      if (result.status === 'corrected') json(response, 409, { ...result.snapshot, ...(result.reason ? { reason: result.reason } : {}) })
+      if (result.status === 'corrected') json(response, 409, result.snapshot)
       else empty(response, 200)
       return
     }
@@ -1122,13 +1118,12 @@ async function handlePokemonHubSession(request, response, config, route, logger 
       throw error
     }
     if (result.status === 'accepted') {
-      for (const sourceKey of result.dirtySourceKeys ?? []) config.pokemonHubSaveFlush.markDirty({ profileId: route.profileId, sourceKey })
       trace.info('snapshot.http.accepted', { dirtySourceKeys: result.dirtySourceKeys ?? [] })
       empty(response, 200)
       return
     }
     trace.warn('snapshot.http.corrected', { snapshot: summarizeCanonicalSnapshot(result.snapshot) })
-    json(response, 409, { ...result.snapshot, ...(result.reason ? { reason: result.reason } : {}) })
+    json(response, 409, result.snapshot)
   } catch (error) {
     if (route.kind === 'snapshot') trace.error('snapshot.http.failed', { error: errorDetails(error) })
     if (route.kind === 'heartbeat') trace.error('heartbeat.http.failed', { error: errorDetails(error) })
@@ -2143,6 +2138,7 @@ export async function bootstrapHubServer({
   persistence,
   host,
   port,
+  startupBackup = process.env.NODE_ENV === 'production',
   legacyMigrationOptions,
   migrateLegacy = migrateLegacyJsonData,
   makeServer = () => createHubServer({ persistence }),
@@ -2154,7 +2150,7 @@ export async function bootstrapHubServer({
     await persistence.connect()
     await migrateLegacy({ persistence, ...legacyMigrationOptions })
     const server = makeServer()
-    if (server.backendStateBackup && typeof server.backendStateBackup.create === 'function') {
+    if (startupBackup && server.backendStateBackup && typeof server.backendStateBackup.create === 'function') {
       try {
         await server.backendStateBackup.create('startup')
       } catch (error) {

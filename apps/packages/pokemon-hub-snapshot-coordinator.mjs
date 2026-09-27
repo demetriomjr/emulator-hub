@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { extendPokemonHubPlacements } from './pokemon-hub-canonical-session-snapshot.mjs'
 import { pokemonHubRedisKeys } from './pokemon-hub-redis-keys.mjs'
 import { pokemonHubLocationKey } from './pokemon-hub-location-key.mjs'
 
@@ -322,7 +323,7 @@ export function createPokemonHubSnapshotCoordinator({ persistence, eventStore, l
             trace.warn('snapshot.coordinator.stale', { ...summarizeSyncRequest(request), sourceKey: source.sourceKey, expectedRevision: source.sourceRevision, submittedRevision: submitted.baseRevision })
             return correction('SNAPSHOT_STALE', request, sources.length ? sources : await readRequestSources(request), now().getTime())
           }
-          assertSameLocations(source.placements, submitted.placements)
+          assertSameLocations(source.placements, submitted.placements, source.adapter)
           assertGen3PartyShape(source, submitted)
         }
 
@@ -590,9 +591,15 @@ function normalizeLocation(location) {
   if (!location || typeof location !== 'object' || !Number.isInteger(location.slot) || location.slot < 0) throw new TypeError('Pokemon Hub placement location is invalid')
   return structuredClone(location)
 }
-function assertSameLocations(expected, actual) {
+function assertSameLocations(expected, actual, adapter) {
   const expectedKeys = new Set(expected.map(placement => pokemonHubLocationKey(placement.location)))
-  if (expectedKeys.size !== actual.length || actual.some(placement => !expectedKeys.delete(pokemonHubLocationKey(placement.location)))) throw coordinatorError('SNAPSHOT_INVALID', 'Pokemon Hub snapshot locations are invalid.')
+  if (expectedKeys.size === actual.length && actual.every(placement => expectedKeys.delete(pokemonHubLocationKey(placement.location)))) return
+  const hubProfileId = expected[0]?.location?.hubProfileId
+  if (adapter === 'hub-grid-v1' && hubProfileId && actual.length > expected.length) {
+    const extended = extendPokemonHubPlacements(expected, hubProfileId, actual.length - 1)
+    if (extended && actual.every((placement, slot) => pokemonHubLocationKey(placement.location) === pokemonHubLocationKey(extended[slot].location))) return
+  }
+  throw coordinatorError('SNAPSHOT_INVALID', 'Pokemon Hub snapshot locations are invalid.')
 }
 function assertGen3PartyShape(source, submitted) {
   if (source.adapter !== 'gen3-gba-v1' || !source.sourceKey.startsWith('save:')) return

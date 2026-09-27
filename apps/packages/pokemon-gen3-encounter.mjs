@@ -1,9 +1,9 @@
 import { getGen3NationalDex } from './pokemon-gen3-species.mjs'
 
 const layouts = new Map([
-  ['0fdd36e92b75bed65d09df4635ab0b707b288c2bf1dc4c6e7a4a4f0eebe9d64c', { playerAddress: 0x03004360, enemyAddress: 0x030045c0, gameCode: 'AXVE' }],
-  ['02ca41513580a8b780989dee428df747b52a0b1a55bec617886b4059eb1152fb', { playerAddress: 0x03004360, enemyAddress: 0x030045c0, gameCode: 'AXPE' }],
-  ['a9dec84dfe7f62ab2220bafaef7479da0929d066ece16a6885f6226db19085af', { playerAddress: 0x020244ec, enemyAddress: 0x02024744, gameCode: 'BPEE' }],
+  ['0fdd36e92b75bed65d09df4635ab0b707b288c2bf1dc4c6e7a4a4f0eebe9d64c', { playerAddress: 0x03004360, enemyAddress: 0x030045c0, gameCode: 'AXVE', battleFlag: { main: 0x03001770, inBattleOffset: 0x43d } }],
+  ['02ca41513580a8b780989dee428df747b52a0b1a55bec617886b4059eb1152fb', { playerAddress: 0x03004360, enemyAddress: 0x030045c0, gameCode: 'AXPE', battleFlag: { main: 0x03001770, inBattleOffset: 0x43d } }],
+  ['a9dec84dfe7f62ab2220bafaef7479da0929d066ece16a6885f6226db19085af', { playerAddress: 0x020244ec, enemyAddress: 0x02024744, gameCode: 'BPEE', battle: { main: 0x030022c0, controllers: 0x03005d60, positions: 0x02024076, cursor: 0x020244ac, outcome: 0x0202433a, chooseAction: 0x08057588, overworld: 0x08085e5c } }],
 ])
 
 const knownEmeraldPatch = 'e12480bad322c9bbb20ebba943ab5d1987001657e0f69d74f5cd94d6ba20a6b3'
@@ -63,6 +63,7 @@ function decodeRecord(bytes, offset) {
 
 export function inspectGen3Encounter(bytes, layout) {
   if (!stateMatches(bytes, layout)) return { status: 'error', reason: 'state-mismatch' }
+  if ((layout.battle || layout.battleFlag) && !gen3InBattle(bytes, layout.battle ?? layout.battleFlag)) return { status: 'pending' }
   const offset = gen3StateOffset(layout.enemyAddress)
   if (offset === null || offset + 80 > bytes.length) return { status: 'error', reason: 'state-mismatch' }
   const enemy = bytes.subarray(offset, offset + 80)
@@ -71,6 +72,28 @@ export function inspectGen3Encounter(bytes, layout) {
   if (!record) return { status: 'pending' }
   if (record.invalid) return { status: 'error', reason: 'invalid-enemy-record' }
   return { status: record.shiny ? 'shiny' : 'normal', species: record.species, pid: record.pid, otid: record.otid }
+}
+
+function gen3InBattle(bytes, battle) {
+  const offset = gen3StateOffset(battle.main + (battle.inBattleOffset ?? 0x439))
+  return offset !== null && (bytes[offset] & 2) !== 0
+}
+
+export function inspectGen3BattlePhase(bytes, layout) {
+  if (!stateMatches(bytes, layout)) return { status: 'error', reason: 'state-mismatch' }
+  if (layout.battleFlag) return { status: gen3InBattle(bytes, layout.battleFlag) ? 'battle' : 'map' }
+  if (!layout.battle) return { status: 'error', reason: 'battle-layout-unavailable' }
+  const battle = layout.battle
+  const main = gen3StateOffset(battle.main)
+  const outcome = bytes[gen3StateOffset(battle.outcome)]
+  const callback = readWord(bytes, main + 4) & ~1
+  if (!gen3InBattle(bytes, battle)) return callback === battle.overworld && outcome === 4 ? { status: 'map' } : { status: 'pending' }
+  const positions = gen3StateOffset(battle.positions)
+  const battler = [0, 1, 2, 3].find(index => (bytes[positions + index] & 3) === 0)
+  if (battler === undefined) return { status: 'error', reason: 'player-battler-unavailable' }
+  const controller = readWord(bytes, gen3StateOffset(battle.controllers) + battler * 4) & ~1
+  if (controller === battle.chooseAction) return { status: 'menu', cursor: bytes[gen3StateOffset(battle.cursor) + battler] }
+  return { status: outcome === 4 ? 'exit-message' : 'intro' }
 }
 
 export function captureGen3EnemyBaseline(bytes, layout) {

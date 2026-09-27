@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import { evaluateGenerationIIITransfer } from './pokemon-gen3-transfer-rules.mjs'
 
-const ruby = { title: 'pokemon-ruby', ordinaryTradeReady: true, nationalDexUnlocked: false, networkMachineRestored: false }
+const ruby = { title: 'pokemon-ruby', ordinaryTradeReady: true, nationalDexUnlocked: false, gameClear: false, networkMachineRestored: false }
 const sapphire = { ...ruby, title: 'pokemon-sapphire' }
 const emeraldBeforeNational = { ...ruby, title: 'pokemon-emerald' }
 const emeraldAfterNational = { ...emeraldBeforeNational, nationalDexUnlocked: true }
@@ -16,13 +16,9 @@ const nonRegionalPokemon = { nationalDexNumber: 152, isEgg: false }
 const egg = { nationalDexNumber: 252, isEgg: true }
 
 function expectRejected(input, code) {
-  assert.deepEqual(evaluateGenerationIIITransfer(input), {
-    allowed: false,
-    reason: {
-      code,
-      message: evaluateGenerationIIITransfer(input).reason.message,
-    },
-  })
+  const decision = evaluateGenerationIIITransfer(input)
+  assert.equal(decision.allowed, false)
+  assert.equal(decision.reason?.code, code)
 }
 
 test('allows Ruby to Sapphire eggs after both saves are ready for an ordinary trade', () => {
@@ -35,9 +31,24 @@ test('applies the exact Hoenn gate to pre-National Emerald destinations', () => 
   expectRejected({ operation: 'direct', source: ruby, destination: emeraldBeforeNational, pokemon: nonRegionalPokemon, sourcePokemonCount: 2 }, 'TRANSFER_NATIONAL_DEX_REQUIRED')
 })
 
-test('allows an exact Kanto species but rejects an egg at a pre-National FireRed Hub boundary', () => {
-  assert.deepEqual(evaluateGenerationIIITransfer({ operation: 'hub-export', source: fireRedBeforeNational, pokemon: kantoPokemon, sourcePokemonCount: 2 }), { allowed: true })
-  expectRejected({ operation: 'hub-export', source: fireRedBeforeNational, pokemon: egg, sourcePokemonCount: 2 }, 'TRANSFER_NATIONAL_DEX_REQUIRED')
+test('requires National Dex and League completion, plus the Sevii computer where applicable, before Hub export', () => {
+  for (const title of ['pokemon-ruby', 'pokemon-sapphire', 'pokemon-emerald', 'pokemon-firered', 'pokemon-leafgreen']) {
+    const unlocked = { title, ordinaryTradeReady: false, nationalDexUnlocked: true, gameClear: true, networkMachineRestored: title === 'pokemon-firered' || title === 'pokemon-leafgreen' ? true : null }
+    const input = { operation: 'hub-export', source: unlocked, pokemon: kantoPokemon, sourcePokemonCount: 2 }
+    assert.deepEqual(evaluateGenerationIIITransfer(input), { allowed: true }, title)
+    expectRejected({ ...input, source: { ...unlocked, nationalDexUnlocked: false } }, 'TRANSFER_NATIONAL_DEX_REQUIRED')
+    expectRejected({ ...input, source: { ...unlocked, gameClear: false } }, 'TRANSFER_LEAGUE_REQUIRED')
+    if (unlocked.networkMachineRestored === true) expectRejected({ ...input, source: { ...unlocked, networkMachineRestored: false } }, 'TRANSFER_NETWORK_MACHINE_REQUIRED')
+  }
+})
+
+test('rejects a Hub export when capability, record, or source population cannot be verified', () => {
+  const input = { operation: 'hub-export', source: { ...ruby, nationalDexUnlocked: true, gameClear: true }, pokemon: kantoPokemon, sourcePokemonCount: 2 }
+  expectRejected({ ...input, source: null }, 'TRANSFER_EXPORT_UNVERIFIED')
+  expectRejected({ ...input, source: { title: 'pokemon-ruby', nationalDexUnlocked: true } }, 'TRANSFER_EXPORT_UNVERIFIED')
+  expectRejected({ ...input, pokemon: null }, 'TRANSFER_EXPORT_UNVERIFIED')
+  expectRejected({ ...input, sourcePokemonCount: null }, 'TRANSFER_EXPORT_UNVERIFIED')
+  expectRejected({ ...input, sourcePokemonCount: 1 }, 'TRANSFER_SOURCE_EMPTY_AFTER_MOVE')
 })
 
 test('requires the Network Machine when a Hoenn-passported Hub Pokemon enters FireRed', () => {

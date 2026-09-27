@@ -100,6 +100,7 @@ function readTransferCapabilities(saveBytes, newest, layout) {
     game: profile.game,
     ordinaryTradeReady: readEventFlag(saveBytes, newest, profile, profile.ordinaryTradeFlag),
     nationalDexUnlocked,
+    gameClear: readEventFlag(saveBytes, newest, profile, profile.gameClearFlag),
     networkMachineRestored: profile.networkMachineFlag === undefined ? null : readEventFlag(saveBytes, newest, profile, profile.networkMachineFlag),
   }
 }

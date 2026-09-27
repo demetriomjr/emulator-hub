@@ -1,18 +1,17 @@
 import assert from 'node:assert/strict'
-import { mkdtemp } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import test from 'node:test'
 
 import { createPokemonHubService } from './pokemon-hub-service.mjs'
-import { createPokemonHubStore } from './pokemon-hub-store.mjs'
+import { createRedisPokemonHubStore } from './pokemon-hub-store.mjs'
+import { createMemoryRedisPersistence } from './redis-persistence.mjs'
 
 const profileId = '00000000-0000-4000-8000-000000000001'
+const createHubStore = () => createRedisPokemonHubStore({ persistence: createMemoryRedisPersistence() })
 
 test('moves one record from an inactive game into an empty Hub slot', async () => {
   let save = Buffer.from([1])
   const invalidations = []
-  const hubStore = createPokemonHubStore({ dataPath: await mkdtemp(join(tmpdir(), 'pokemon-hub-service-')) })
+  const hubStore = createHubStore()
   const adapter = {
     id: 'gen3-gba-v1',
     inspect: () => ({ boxes: [] }),
@@ -38,7 +37,7 @@ test('moves one record from an inactive game into an empty Hub slot', async () =
 })
 
 test('refuses a transfer while the source game has a live session', async () => {
-  const hubStore = createPokemonHubStore({ dataPath: await mkdtemp(join(tmpdir(), 'pokemon-hub-service-')) })
+  const hubStore = createHubStore()
   const service = createPokemonHubService({
     profileStore: { get: async () => ({ id: profileId }) }, saveStore: { get: async () => null }, hubStore,
     registry: { get: () => null }, sessions: { hasLiveSession: () => true }, catalogLoader: async () => [],
@@ -49,7 +48,7 @@ test('refuses a transfer while the source game has a live session', async () => 
 
 test('withdraws a retained native record from Hub into an empty game slot', async () => {
   let save = Buffer.from([0])
-  const hubStore = createPokemonHubStore({ dataPath: await mkdtemp(join(tmpdir(), 'pokemon-hub-service-')) })
+  const hubStore = createHubStore()
   const hubPokemonId = '00000000-0000-4000-8000-000000000002'
   const inventory = await hubStore.getProfileState(profileId)
   inventory.slots[0] = hubPokemonId
@@ -65,7 +64,7 @@ test('withdraws a retained native record from Hub into an empty game slot', asyn
 })
 
 test('restores the Hub claim when a withdrawal save write fails', async () => {
-  const hubStore = createPokemonHubStore({ dataPath: await mkdtemp(join(tmpdir(), 'pokemon-hub-service-')) })
+  const hubStore = createHubStore()
   const hubPokemonId = '00000000-0000-4000-8000-000000000003'
   const inventory = await hubStore.getProfileState(profileId)
   inventory.slots[0] = hubPokemonId
@@ -80,7 +79,7 @@ test('restores the Hub claim when a withdrawal save write fails', async () => {
 
 test('moves a record directly between two inactive compatible games', async () => {
   const saves = new Map([['pokemon-emerald', Buffer.from([5])], ['pokemon-firered', Buffer.from([0])]])
-  const hubStore = createPokemonHubStore({ dataPath: await mkdtemp(join(tmpdir(), 'pokemon-hub-service-')) })
+  const hubStore = createHubStore()
   const adapter = { id: 'gen3-gba-v1', readSlot: bytes => bytes[0] ? { bytes: Buffer.alloc(80, bytes[0]), canonical: { species: 25 } } : null, writeSlot: (_bytes, _box, _slot, record) => Buffer.from([record ? record.bytes[0] : 0]), inspect: () => ({ boxes: [] }) }
   const service = createPokemonHubService({ profileStore: { get: async () => ({ id: profileId }) }, saveStore: { get: async (_p, game) => ({ bytes: saves.get(game), revision: 1 }), put: async (_p, game, bytes) => saves.set(game, bytes) }, hubStore, registry: { get: () => adapter }, sessions: { hasLiveSession: () => false }, catalogLoader: async () => ['pokemon-emerald', 'pokemon-firered'].map(id => ({ id, pokemonSave: { supported: true, adapter: adapter.id } })) })
 
@@ -95,7 +94,7 @@ test('moves a record directly between two inactive compatible games', async () =
 
 test('restores the source game when a direct-transfer destination write fails', async () => {
   const saves = new Map([['pokemon-emerald', Buffer.from([5])], ['pokemon-firered', Buffer.from([0])]])
-  const hubStore = createPokemonHubStore({ dataPath: await mkdtemp(join(tmpdir(), 'pokemon-hub-service-')) })
+  const hubStore = createHubStore()
   const adapter = { id: 'gen3-gba-v1', readSlot: bytes => bytes[0] ? { bytes: Buffer.alloc(80, bytes[0]), canonical: { species: 25 } } : null, writeSlot: (_bytes, _box, _slot, record) => Buffer.from([record ? record.bytes[0] : 0]), inspect: () => ({ boxes: [] }) }
   const revisions = new Map([['pokemon-emerald', 1], ['pokemon-firered', 1]])
   const service = createPokemonHubService({

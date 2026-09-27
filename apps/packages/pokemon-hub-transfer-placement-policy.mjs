@@ -16,16 +16,15 @@ export function createPokemonHubTransferPlacementPolicy() {
     }
     if (source?.sourceKey && source.sourceKey === destinationSource?.sourceKey) return { allowed: true }
     if (sourceLocation.kind === 'hub' && destinationLocation.kind === 'hub') return { allowed: true }
-    const pokemon = pokemonForRules(record)
-    if (!pokemon) return { allowed: true }
-
     if (sourceLocation.kind === 'game' && destinationLocation.kind === 'hub') {
       const sourceCapability = ruleCapability(source?.transferCapability)
-      if (!sourceCapability) return { allowed: true }
-      const decision = evaluateGenerationIIITransfer({ operation: 'hub-export', source: sourceCapability, pokemon, sourcePokemonCount })
+      const decision = evaluateGenerationIIITransfer({ operation: 'hub-export', source: sourceCapability, pokemon: pokemonForRules(record), sourcePokemonCount })
       if (!decision.allowed) return decision
       return { ...decision, ...(record?.hubPassport ? {} : { hubPassport: passportFor(sourceCapability) }) }
     }
+
+    const pokemon = pokemonForRules(record)
+    if (!pokemon) return { allowed: true }
 
     if (sourceLocation.kind === 'hub' && destinationLocation.kind === 'game') {
       const destinationCapability = ruleCapability(destinationSource?.transferCapability)

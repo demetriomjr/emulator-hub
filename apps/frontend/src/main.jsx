@@ -75,6 +75,11 @@ const playerActionFailureMessages = Object.freeze({
   'game-save-load': 'Não foi possível carregar o save do jogo.',
   'game-save-missing': 'O save do jogo esperado para este perfil não foi encontrado.',
 })
+const huntErrorMessages = Object.freeze({
+  'unsupported-rom': 'Esta ROM não é compatível com a leitura de encontros da caça.',
+  'enemy-already-created': 'O encontro começou antes do próximo comando; a caça foi parada para preservar o Pokémon.',
+  'state-unavailable': 'Não foi possível ler o estado deste emulador.',
+})
 const MAX_PLAYER_INSTANCES = 9
 let playerOriginPorts = []
 try { playerOriginPorts = parsePlayerOriginPorts(window.location, import.meta.env.VITE_PLAYER_PORTS) }
@@ -262,7 +267,9 @@ function App() {
   const [fastForwardEnabled, setFastForwardEnabled] = useState(false)
   const [muted, setMuted] = useState(false)
   const [oddsManipulatorEnabled, setOddsManipulatorEnabled] = useState(false)
-  const [huntStatus, setHuntStatus] = useState({ phase: 'idle', resetCount: 0 })
+  const [huntStatus, setHuntStatus] = useState({ phase: 'idle', running: false, attemptCount: 0, completedSessionIds: [] })
+  const [huntModalOpen, setHuntModalOpen] = useState(false)
+  const [huntConfig, setHuntConfig] = useState({ resetMode: 'soft-reset', startMode: 'interact-a', stopMode: 'first-shiny' })
   const huntControllerRef = useRef(null)
   const huntActiveRef = useRef(false)
   const huntParticipantsRef = useRef('')
@@ -336,12 +343,6 @@ function App() {
   useEffect(() => {
     if (huntActiveRef.current && activeSessions.map(session => session.sessionId).join('|') !== huntParticipantsRef.current) huntControllerRef.current?.stop()
   }, [activeSessions])
-
-  useEffect(() => {
-    const stopHiddenHunt = () => { if (document.hidden) huntControllerRef.current?.stop() }
-    document.addEventListener('visibilitychange', stopHiddenHunt)
-    return () => document.removeEventListener('visibilitychange', stopHiddenHunt)
-  }, [])
 
   function setPlayerInteractionLocked(locked) {
     if (closeLockRef.current !== locked || profileInfoLockSessionIdRef.current !== profileInfoSessionId) closeLockRevisionRef.current += 1
@@ -607,11 +608,11 @@ function App() {
     let active = true
     let revision = null
     const checkFrontendRevision = async () => {
-      if (document.visibilityState === 'hidden') return
+      if (document.visibilityState === 'hidden' || huntActiveRef.current) return
       try {
         const response = await fetch('/', { method: 'HEAD', cache: 'no-store' })
         const nextRevision = response.headers.get('etag')
-        if (!active || !nextRevision) return
+        if (!active || !nextRevision || huntActiveRef.current) return
         if (shouldReloadForFrontendRevision(revision, nextRevision)) {
           window.location.reload()
           return
@@ -886,6 +887,20 @@ function App() {
       if (reply.huntId !== huntId || (cycleId !== null && reply.cycleId !== cycleId)) throw new Error('Resposta antiga de um player')
       return reply
     }
+    const recordHuntReset = (session, nextCount) => {
+      if ((session.oddsResetCount ?? 0) >= nextCount) return
+      session.oddsResetCount = nextCount
+      const current = activeSessionsRef.current.find(candidate => candidate.sessionId === session.sessionId)
+      if (current) current.oddsResetCount = nextCount
+      oddsSyncRef.current.get(session.sessionId)?.markDirty(nextCount)
+    }
+    const ensureHuntOddsClock = async (session, count) => {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (await configureOddsClock(frameFor(session), session, count, count * 60_000)) return true
+        if (attempt < 2) await new Promise(resolve => window.setTimeout(resolve, 500))
+      }
+      return false
+    }
     const controller = createShinyHuntController({
       prepare: async selected => {
         assertParticipants()
@@ -895,40 +910,49 @@ function App() {
         await saveUserPreferences({ fastForwardEnabled: true, fastForwardSpeed: 5 })
         for (const session of selected) configurePlayerFrame(frameFor(session), { type: 'emulator-hub:fast-forward', enabled: true, speed: 5 })
         await Promise.all(selected.map(async session => {
-          const ready = await configureOddsClock(frameFor(session), session, session.oddsResetCount ?? 0, (session.oddsResetCount ?? 0) * 60_000)
+          const ready = await ensureHuntOddsClock(session, session.oddsResetCount ?? 0)
           if (!ready) throw new Error('Relógio do Odds Manipulator não confirmado: ' + (session.profileName ?? session.sessionId))
         }))
-        await Promise.all(selected.map(session => requestHunt(session, 'prepare', null)))
+        await Promise.all(selected.map(session => requestHunt(session, 'prepare', null, { resetMode: huntConfig.resetMode })))
       },
       reset: async (session, _signal, cycleId) => {
         const nextCount = (session.oddsResetCount ?? 0) + 1
-        const ready = await configureOddsClock(frameFor(session), session, nextCount, nextCount * 60_000)
+        const ready = await ensureHuntOddsClock(session, nextCount)
         if (!ready) throw new Error('Relógio do Odds Manipulator não confirmado: ' + (session.profileName ?? session.sessionId))
         await requestHunt(session, 'reset', cycleId, { oddsResetCount: nextCount })
-        session.oddsResetCount = nextCount
-        const current = activeSessionsRef.current.find(candidate => candidate.sessionId === session.sessionId)
-        if (current) current.oddsResetCount = nextCount
-        oddsSyncRef.current.get(session.sessionId)?.markDirty(nextCount)
+        recordHuntReset(session, nextCount)
       },
-      pulse: (selected, down, pressIndex, _signal, cycleId) => Promise.all(selected.map(session => requestHunt(session, 'input', cycleId, { pressIndex, down }, 2000))),
+      confirmReset: async (session, _signal, cycleId) => {
+        const reply = await requestHunt(session, 'confirm-reset', cycleId)
+        if (reply.confirmed) recordHuntReset(session, (session.oddsResetCount ?? 0) + 1)
+        return reply.confirmed === true
+      },
+      begin: (session, _signal, cycleId, details) => requestHunt(session, 'begin', cycleId, details),
+      input: (session, button, down, _signal, cycleId, stage) => requestHunt(session, 'input', cycleId, { button, down, stage }, 2000),
+      releaseInput: (session, _signal, cycleId) => requestHunt(session, 'release-input', cycleId, {}, 5000),
       inspect: async (session, _signal, cycleId) => {
-        const reply = await requestHunt(session, 'inspect', cycleId, {}, 10000)
+        const reply = await requestHunt(session, 'inspect', cycleId, { configured: true }, 10000)
         return { status: reply.status, species: reply.species }
       },
-      saveState: (session, _signal, cycleId) => requestHunt(session, 'save', cycleId, {}, 30000),
+      inspectPhase: async (session, _signal, cycleId) => {
+        const reply = await requestHunt(session, 'phase', cycleId, {}, 10000)
+        return { status: reply.status, cursor: reply.cursor }
+      },
+      saveState: (session, _signal, cycleId) => requestHunt(session, 'save', cycleId, { complete: huntConfig.stopMode === 'all-shiny' }, 30000),
       release: async selected => {
         for (const session of selected) configurePlayerFrame(frameFor(session), { type: 'emulator-hub:hunt-cancel', sessionId: session.sessionId, huntId })
       },
       onStatus: status => {
         setHuntStatus(status)
-        const running = ['starting', 'resetting', 'pressing', 'inspecting', 'saving'].includes(status.phase)
+        if (status.phase === 'error') clientDiagnostics?.capture({ kind: 'shiny-hunt', message: 'hunt.failed', error: status.error, playerSessionId: status.failedSessionId, attemptCount: status.attemptCount, activeSessionIds: status.activeSessionIds })
+        const running = status.running === true
         huntActiveRef.current = running
         if (!running) globalGamepadGateRef.current.unlock(activeGamepadBindings(readGamepadSnapshot()))
-        if (status.phase === 'found') setFocusedSessionId(status.foundSessionId)
+        if (status.phase === 'found' && status.foundSessionId) setFocusedSessionId(status.foundSessionId)
       },
     })
     huntControllerRef.current = controller
-    void controller.start(sessions).finally(() => {
+    void controller.start(sessions, { ...huntConfig }).finally(() => {
       huntControllerRef.current = null
       huntActiveRef.current = false
       globalGamepadGateRef.current.unlock(activeGamepadBindings(readGamepadSnapshot()))
@@ -1453,8 +1477,9 @@ function App() {
   }
 
   const activeProfileIds = new Set(activeSessions.map(session => `${session.gameId}:${session.profileId}`))
-  const huntRunning = ['starting', 'resetting', 'pressing', 'inspecting', 'saving'].includes(huntStatus.phase)
+  const huntRunning = huntStatus.running === true || huntActiveRef.current
   const huntFoundSession = activeSessions.find(session => session.sessionId === huntStatus.foundSessionId)
+  const huntCount = huntStatus.attemptCount ?? huntStatus.resetCount ?? 0
   const gameSections = groupGamesByLayout(games, hubLayout)
   const isStandalone = window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true
   const isNarrowPortrait = isNarrowPortraitViewport(viewport)
@@ -1659,6 +1684,42 @@ function App() {
         <p>Depois, abra o ícone “Emulator Hub” pela Tela de Início.</p>
       </div>
     </div>)}
+    {huntModalOpen && activeSessions.length > 0 && renderLayer(<div className="profile-overlay hunt-overlay" role="dialog" aria-modal="true" aria-labelledby="hunt-modal-title">
+      <div className="profile-panel hunt-panel">
+        <div className="profile-header"><h2 id="hunt-modal-title">Caça shiny</h2><button className="dialog-close" type="button" aria-label="Fechar configuração da caça" onClick={() => setHuntModalOpen(false)}>×</button></div>
+        <div className="hunt-modal-body">
+          <div className="hunt-binary-options">
+            <fieldset className="hunt-choice-group" disabled={huntRunning}>
+              <legend>1. Tipo de reset</legend>
+              <div className="hunt-choice-options">
+                <label><input type="radio" name="hunt-reset-mode" value="soft-reset" checked={huntConfig.resetMode === 'soft-reset'} onChange={() => setHuntConfig(current => ({ ...current, resetMode: 'soft-reset' }))} />Soft reset</label>
+                <label><input type="radio" name="hunt-reset-mode" value="exit-encounter" checked={huntConfig.resetMode === 'exit-encounter'} onChange={() => setHuntConfig(current => ({ ...current, resetMode: 'exit-encounter' }))} />Sair do encounter</label>
+              </div>
+            </fieldset>
+            <fieldset className="hunt-choice-group" disabled={huntRunning}>
+              <legend>3. Condição de parada</legend>
+              <div className="hunt-choice-options">
+                <label><input type="radio" name="hunt-stop-mode" value="first-shiny" checked={huntConfig.stopMode === 'first-shiny'} onChange={() => setHuntConfig(current => ({ ...current, stopMode: 'first-shiny' }))} />Apenas um shiny</label>
+                <label><input type="radio" name="hunt-stop-mode" value="all-shiny" checked={huntConfig.stopMode === 'all-shiny'} onChange={() => setHuntConfig(current => ({ ...current, stopMode: 'all-shiny' }))} />Todos shiny</label>
+              </div>
+            </fieldset>
+          </div>
+          <fieldset className="hunt-choice-group" disabled={huntRunning}>
+            <legend>2. Iniciar encounter</legend>
+            <div className="hunt-choice-options hunt-start-options">
+              <label><input type="radio" name="hunt-start-mode" value="interact-a" checked={huntConfig.startMode === 'interact-a'} onChange={() => setHuntConfig(current => ({ ...current, startMode: 'interact-a' }))} />Interação com A</label>
+              <label><input type="radio" name="hunt-start-mode" value="walk-right" checked={huntConfig.startMode === 'walk-right'} onChange={() => setHuntConfig(current => ({ ...current, startMode: 'walk-right' }))} />Andar para a direita</label>
+              <label><input type="radio" name="hunt-start-mode" value="walk-left" checked={huntConfig.startMode === 'walk-left'} onChange={() => setHuntConfig(current => ({ ...current, startMode: 'walk-left' }))} />Andar para a esquerda</label>
+              <label><input type="radio" name="hunt-start-mode" value="walk-up" checked={huntConfig.startMode === 'walk-up'} onChange={() => setHuntConfig(current => ({ ...current, startMode: 'walk-up' }))} />Andar para cima</label>
+              <label><input type="radio" name="hunt-start-mode" value="common" checked={huntConfig.startMode === 'common'} onChange={() => setHuntConfig(current => ({ ...current, startMode: 'common' }))} />Encounter comum</label>
+            </div>
+          </fieldset>
+          {huntStatus.phase === 'error' && <p role="alert">{huntErrorMessages[huntStatus.error] ?? huntStatus.error}</p>}
+          {huntStatus.phase === 'found' && <p role="status">Shiny encontrado.</p>}
+          <button className="hunt-modal-action" type="button" onClick={huntRunning ? stopShinyHunt : startShinyHunt}>{huntRunning ? 'Parar' : 'Iniciar'}</button>
+        </div>
+      </div>
+    </div>)}
     {activeSessions.length > 0 && <div className="player-overlay" role="dialog" aria-modal="true" aria-label="Emulator">
       <div className={`player-shell player-shell-${activeSessions.length}`} ref={playerShellRef}>
         <header className="player-header" inert={closeChooserOpen || saveCloseRows !== null ? true : undefined}>
@@ -1712,9 +1773,9 @@ function App() {
             <button className={`player-control-button${oddsManipulatorEnabled ? ' is-active' : ''}`} type="button" aria-label="Manipulador de odds" title="Manipulador de odds" aria-pressed={oddsManipulatorEnabled} disabled={huntRunning} onClick={toggleOddsManipulator}>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M5 8.5h14M5 15.5h14M8 5.5v14M16 5.5v14" /></svg>
             </button>
-            <button className={`player-control-button hunt-button${huntRunning ? ' is-active' : ''}`} type="button" aria-label={huntRunning ? `Parar caça shiny, ${huntStatus.resetCount} resets` : huntStatus.phase === 'found' ? `Shiny em ${huntFoundSession?.profileName ?? huntStatus.foundSessionId}, ${huntStatus.resetCount} resets` : `Iniciar caça shiny, ${huntStatus.resetCount} resets`} title={huntStatus.phase === 'error' ? `Caça interrompida: ${huntStatus.error}` : huntStatus.phase === 'found' ? `Shiny em ${huntFoundSession?.profileName ?? huntStatus.foundSessionId}` : huntRunning ? 'Parar caça shiny' : 'Iniciar caça shiny'} aria-pressed={huntRunning} onClick={huntRunning ? stopShinyHunt : startShinyHunt}>
+            <button className={`player-control-button hunt-button${huntRunning ? ' is-active' : ''}`} type="button" aria-label={`Configurar caça shiny, ${huntCount} tentativas${huntRunning ? ', em andamento' : ''}`} title={huntStatus.phase === 'error' ? `Caça interrompida: ${huntErrorMessages[huntStatus.error] ?? huntStatus.error}` : huntStatus.phase === 'found' ? huntStatus.foundSessionId ? `Shiny em ${huntFoundSession?.profileName ?? huntStatus.foundSessionId}` : 'Todos os shinies encontrados' : 'Configurar caça shiny'} aria-haspopup="dialog" aria-expanded={huntModalOpen} onClick={() => setHuntModalOpen(true)}>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 1-2.3-5.7M20 4v7h-7" /></svg>
-              <span>{huntStatus.resetCount}</span>
+              <span>{huntCount}</span>
             </button>
             <button className="player-control-button" type="button" aria-label="Informações do perfil" title="Informações do perfil" disabled={huntRunning || closeChooserOpen || saveCloseRows !== null || profileInfoSessionId !== null} onClick={openProfileInfo}>
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 10.5v6M12 7.5h.01" /></svg>
@@ -1736,7 +1797,7 @@ function App() {
         </header>
         <div className={`player-panel player-panel-${activeSessions.length}`} inert={huntRunning || closeChooserOpen || saveCloseRows !== null ? true : undefined}>
           <div className="player-grid">
-            {activeSessions.map(session => <div className={`player-cell${huntStatus.phase === 'found' && huntStatus.foundSessionId === session.sessionId ? ' hunt-found' : ''}`} data-session-id={session.sessionId} key={`${session.gameId}:${session.profileId}`} onPointerDown={() => setFocusedSessionId(session.sessionId)}>
+            {activeSessions.map(session => <div className={`player-cell${(huntStatus.completedSessionIds?.includes(session.sessionId) || huntStatus.foundSessionIds?.includes(session.sessionId) || huntStatus.phase === 'found' && huntStatus.foundSessionId === session.sessionId) ? ' hunt-found' : ''}`} data-session-id={session.sessionId} key={`${session.gameId}:${session.profileId}`} onPointerDown={() => setFocusedSessionId(session.sessionId)}>
               <iframe src={playerFrameUrl(session)} title="EmulatorJS" allow="fullscreen; gamepad" inert={profileInfoSessionId === session.sessionId ? true : undefined} onLoad={event => configurePlayerFrameOnLoad(event.currentTarget, session)} />
               {profileInfoSessionId === session.sessionId && <div className="profile-info-overlay" role="dialog" aria-modal="true" aria-labelledby={`profile-info-title-${session.sessionId}`}>
                 <form className="profile-info-card" onSubmit={submitProfileInfo}>

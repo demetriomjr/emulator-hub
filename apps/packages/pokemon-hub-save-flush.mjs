@@ -7,10 +7,6 @@ export function createPokemonHubSaveFlushService({ coordinator, saveStore, snaps
   const loggedFailures = new Map()
 
   const api = {
-    markDirty() {},
-
-    async flushDue() {},
-
     async flushSource({ profileId, sourceKey, generation }) {
       try {
         const plan = await coordinator.getSaveFlushPlan({ profileId, sourceKey })
@@ -34,8 +30,6 @@ export function createPokemonHubSaveFlushService({ coordinator, saveStore, snaps
         await coordinator.releaseExpiredLease(lease)
       }
     },
-
-    isDirty() { return false },
 
     dispose() { loggedFailures.clear() },
   }

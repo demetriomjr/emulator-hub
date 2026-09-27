@@ -1,5 +1,5 @@
 export function createPokemonHubWorkspaceState() {
-  return { profile: null, panes: [null], boxes: {} }
+  return { panes: [null], boxes: {} }
 }
 
 export function choosePaneSource(panes, index, nextSource) {
@@ -24,23 +24,6 @@ export function hasAvailableSaveProfile(panes, index, gameId, profiles) {
     profile && typeof profile.id === 'string'
       && isPaneSourceAvailable(panes, index, { kind: 'game', gameId, profileId: profile.id })
   ))
-}
-
-export function firstAvailableSaveSource(panes, index, games, profilesByGame) {
-  for (const game of games ?? []) {
-    const profile = (profilesByGame?.[game.id] ?? []).find(candidate => (
-      isPaneSourceAvailable(panes, index, { kind: 'game', gameId: game.id, profileId: candidate.id })
-    ))
-    if (profile) return { kind: 'game', gameId: game.id, profileId: profile.id }
-  }
-  return { kind: 'game' }
-}
-
-export function firstAvailableHubSource(panes, index, profiles) {
-  const profile = (profiles ?? []).find(candidate => (
-    isPaneSourceAvailable(panes, index, { kind: 'hub', hubProfileId: candidate.hubProfileId })
-  ))
-  return profile ? { kind: 'hub', hubProfileId: profile.hubProfileId } : { kind: 'hub' }
 }
 
 export function activePaneSourceKind(source, selectionDraft) {

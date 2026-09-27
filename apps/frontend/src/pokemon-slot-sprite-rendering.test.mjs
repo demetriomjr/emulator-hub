@@ -73,7 +73,7 @@ test('opens a Hub profile through the canonical snapshot without the legacy atta
   const source = await readFile(sourceFile, 'utf8')
 
   assert.doesNotMatch(source, /attachPokemonHubSessionSource/)
-  assert.match(source, /sourceProjectionFromHubProfile\(profile\)/)
+  assert.match(source, /createHubSessionSourceSnapshot\(\{ profileId, profile \}\)/)
 })
 
 test('keeps display metadata with the instance during an optimistic cross-source move', async () => {
@@ -158,8 +158,9 @@ test('renders only the transparent Pokémon sprite in the drag preview', async (
   assert.doesNotMatch(css, /\.pokemon-hub-drag-preview\s*\{[^}]*box-shadow:/)
 })
 
-test('shows the authoritative transfer-rule message after the backend corrects a workspace snapshot', async () => {
+test('shows a generic correction message for the public canonical snapshot contract', async () => {
   const source = await readFile(sourceFile, 'utf8')
 
-  assert.match(source, /setPokemonHubError\(snapshot\.reason\?\.message \?\? 'The backend corrected the workspace snapshot\.'\)/)
+  assert.match(source, /setPokemonHubError\('The backend corrected the workspace snapshot\.'\)/)
+  assert.doesNotMatch(source, /snapshot\.reason/)
 })

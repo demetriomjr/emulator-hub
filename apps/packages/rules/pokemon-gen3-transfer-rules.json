@@ -13,6 +13,8 @@
     "TRANSFER_TRADE_NOT_READY": "Os dois saves precisam estar prontos para trocar Pokémon.",
     "TRANSFER_NATIONAL_DEX_REQUIRED": "Este save ainda não pode enviar ou receber esse Pokémon sem a Pokédex Nacional.",
     "TRANSFER_NETWORK_MACHINE_REQUIRED": "FireRed ou LeafGreen precisa ter a Máquina de Rede restaurada para esta transferência.",
+    "TRANSFER_LEAGUE_REQUIRED": "Este save precisa ter vencido a Liga para enviar Pokémon ao Hub.",
+    "TRANSFER_EXPORT_UNVERIFIED": "Não foi possível confirmar os requisitos de troca deste save para enviar Pokémon ao Hub.",
     "TRANSFER_GAME_PAIR_UNSUPPORTED": "Esta combinação de jogos ainda não é compatível com o Pokémon Hub."
   },
   "directTrade": {
@@ -27,10 +29,11 @@
     ]
   },
   "hubBoundary": {
-    "requiresOrdinaryTradeReady": false,
     "export": {
       "minimumPokemonAfterMove": 1,
-      "useSourceRegionalGate": true,
+      "requiresGameClear": true,
+      "requiresNationalDexUnlocked": true,
+      "requiresNetworkMachineWhenApplicable": true,
       "preserveFirstAdmissionPassport": true
     },
     "import": {

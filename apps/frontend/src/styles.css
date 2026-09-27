@@ -117,7 +117,10 @@ button { font: inherit; }
 .pokemon-hub-slot.dragging .pokemon-hub-slot-sprite { opacity: .18; }
 .pokemon-hub-slot.drag-blocked { cursor: not-allowed; }
 .pokemon-hub-slot.drag-blocked .pokemon-hub-slot-sprite { opacity: .48; }
+.pokemon-hub-slot.drop-forbidden { border-color: #d92d2d; cursor: not-allowed; }
+.pokemon-hub-slot.drop-forbidden .pokemon-hub-slot-sprite { opacity: .48; }
 .pokemon-hub-slot-block-icon { position: absolute; z-index: 4; right: 3px; bottom: 3px; display: grid; place-items: center; width: 21px; height: 21px; border: 1px solid #fff; border-radius: 50%; color: #fff; background: #d92d2d; box-shadow: 0 1px 3px #00000070; font-size: 14px; line-height: 1; }
+.pokemon-save-party .pokemon-hub-slot-block-icon { bottom: 24px; }
 .pokemon-hub-slot-index { position: absolute; z-index: 2; top: -1px; right: auto; left: -1px; display: grid; place-items: center; min-width: 22px; height: 21px; padding: 0 5px; border-radius: 5px 0 7px 0; color: #fff; background: #08131a; box-shadow: 1px 1px 3px #00000038; font-size: 10px; font-variant-numeric: tabular-nums; font-weight: 750; line-height: 1; }
 .pokemon-hub-slot-content { position: absolute; z-index: 2; top: 4px; right: 4px; max-width: calc(100% - 32px); overflow: hidden; color: #143b34; font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .pokemon-hub-slot-sprite { position: absolute; z-index: 1; inset: 8px; width: calc(100% - 16px); height: calc(100% - 16px); object-fit: contain; pointer-events: none; user-select: none; }
@@ -299,6 +302,24 @@ button { font: inherit; }
 .player-control-button.is-active { border-color: #77e2af; color: #fff; }
 .hunt-button { width: auto; min-width: 55px; grid-auto-flow: column; gap: 3px; padding: 0 5px; font-variant-numeric: tabular-nums; }
 .hunt-button svg { width: 16px; height: 16px; }
+.hunt-overlay { place-items: center; }
+.hunt-panel { width: min(680px, 100%); }
+.hunt-modal-body { display: grid; gap: 16px; padding: 20px 22px 22px; }
+.hunt-modal-body label { display: grid; gap: 7px; color: #e8f5ef; font-weight: 650; }
+.hunt-binary-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.hunt-choice-group { min-width: 0; margin: 0; padding: 0; border: 0; }
+.hunt-choice-group legend { margin-bottom: 7px; padding: 0; color: #e8f5ef; font-weight: 650; }
+.hunt-choice-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.hunt-choice-options label { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 40px; padding: 6px; border: 1px solid #397c67; border-radius: 7px; background: #0d2026; font-size: .85rem; line-height: 1.2; text-align: center; cursor: pointer; }
+.hunt-choice-options label:has(input:checked) { border-color: #77e2af; background: #22624f; }
+.hunt-choice-options label:focus-within { outline: 2px solid #ddffe9; outline-offset: 2px; }
+.hunt-choice-options input { flex: none; margin: 0; accent-color: #77e2af; }
+.hunt-start-options { display: flex; flex-wrap: wrap; }
+.hunt-start-options label { flex: 1 1 170px; min-width: 0; }
+.hunt-choice-group:disabled label { opacity: .7; cursor: default; }
+.hunt-modal-body p { margin: 0; color: #e8f5ef; }
+.hunt-modal-action { min-height: 42px; border: 1px solid #77e2af; border-radius: 7px; color: #062017; background: #77e2af; font-weight: 700; cursor: pointer; }
+@media (max-width: 620px) { .hunt-binary-options { grid-template-columns: minmax(0, 1fr); } }
 .player-cell.hunt-found { outline: 3px solid #77e2af; outline-offset: -3px; z-index: 1; }
 .fast-forward-button { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 1px solid #a0dcc4a0; border-radius: 9px; color: #e8f5ef; background: #102b30e8; cursor: pointer; }
 .fast-forward-button:hover, .fast-forward-button.is-active { background: #22624f; }
