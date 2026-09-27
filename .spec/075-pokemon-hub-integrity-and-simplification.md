@@ -9,11 +9,11 @@ status: proposed
 
 ## Como usar este documento no próximo chat
 
-Este é o **único spec de trabalho** desta investigação no projeto Emulator Hub. Consolida o diagnóstico do incidente, o relatório literal do subagente Astra e quatro revisões críticas do plano. A seção anterior ao apêndice é o entendimento vigente; o apêndice preserva palavra por palavra a análise original do Astra como registro histórico, inclusive propostas que foram refinadas depois. Em caso de diferença, prevalece o contrato consolidado nesta seção, seguido dos Specs de produto citados.
+Este spec consolida a investigação original do projeto Emulator Hub: o diagnóstico do incidente, o relatório literal do subagente Astra e quatro revisões críticas do plano. A seção anterior ao apêndice é o entendimento vigente para esse rework; o apêndice preserva palavra por palavra a análise original do Astra como registro histórico, inclusive propostas que foram refinadas depois. Em caso de diferença, prevalece o contrato consolidado nesta seção, seguido dos Specs de produto citados. A manutenção de duplicatas observadas em produção está registrada no Spec 077.
 
 **Estado histórico até 27/09/2026:** somente análise e redação; nenhum código do produto, dado de produção, configuração, deploy ou build havia sido alterado por esse trabalho. **Fase atual autorizada pelo usuário:** iniciar, neste branch, redução de código e complexidade com preservação de integridade e comportamento; a cada recorte, consultar este spec, levantar contrato, verificar/testar e registrar resultado e motivo neste mesmo arquivo. O usuário pediu uma solução coesa, enxuta e íntegra, construída ponto por ponto, e rejeitou planos rasos e arquivos paralelos.
 
-**Branch exclusivo do rework:** `rework/pokemon-hub` (confirmado por `git branch --show-current`). Toda alteração deste rework — código, teste, documentação e experimentos que permanecerem — deve acontecer nele. **Não desenvolver nem aplicar partes deste rework na `master` antes de estarmos prontos para o merge**, mesmo por engano humano. Antes de qualquer edição, verificar o branch ativo; se for `master`, parar o trabalho do rework e voltar a `rework/pokemon-hub`. O merge será uma decisão posterior, após revisão e provas de integridade. Esta regra vale também para cherry-pick e aplicação manual de commits do rework.
+**Estado do branch:** o usuário informou em 27/09/2026 que o desenvolvimento do rework foi concluído e autorizou voltar à `master` e apagar `rework/pokemon-hub`. O branch foi removido localmente; `master` e o branch apontavam para o mesmo commit `b2ca47c`. A restrição anterior de desenvolver exclusivamente naquele branch não está mais vigente.
 
 **Repositório:** `D:/PROJETOS/emulator-hub`. **Arquivo do incidente:** `C:/Users/dm3o/AppData/Local/Temp/emulator-hub-backend-1-2026-09-26T15-45-04.log`. **Astra:** auditou HEAD `59ad053`; seu texto literal começa no apêndice. **Levantamento ampliado:** leitura do código em HEAD `bf6a82c` e da árvore de trabalho em 27/09/2026; as afirmações históricas sobre o código precisam ser reconferidas antes de cada implementação. **Regra local:** `AGENTS.md` exige contratos em `.spec/`, build apenas se pedido no prompt atual e commit apenas se pedido no prompt atual.
 
@@ -425,9 +425,9 @@ O rollback não é sempre “por fonte”: catálogo é global, sessão e movime
 - Política de ambiguidade de records nativos byte a byte idênticos após reimportação.
 - Consumidores externos das rotas antigas e configuração/durabilidade efetiva de produção.
 
-## Diário do rework no branch `rework/pokemon-hub`
+## Diário histórico do rework
 
-Cada entrada registra: código e contrato atual, motivo da redução ou da preservação, alteração, teste antes/depois e risco residual. Antes de cada edição, conferir o branch; não transportar este trabalho à `master` até o merge deliberado. Nenhum build/commit faz parte desta fase sem pedido no prompt correspondente.
+Cada entrada registra: código e contrato atual, motivo da redução ou da preservação, alteração, teste antes/depois e risco residual. As referências a “este branch” nas entradas abaixo descrevem o período histórico de desenvolvimento no branch já concluído. Build e commit dependem de pedido explícito no prompt correspondente, conforme `AGENTS.md`.
 
 ### Passagem 1 — baseline e classificação
 
@@ -523,7 +523,7 @@ Ainda **merecem redução estrutural** os dois caminhos de escrita Hub, `coordin
 
 ### Inventário de compatibilidade após resposta do usuário
 
-O usuário confirmou que há uma versão **atual da `master` em produção**. O frontend dessa versão usa o fluxo canônico na árvore do repositório; isso não é prova de ausência de scripts externos nem de sessões/instâncias antigas durante rollout. O branch de rework não altera a produção até merge. A decisão conservadora é manter rotas backend legadas por ora e exigir evidência de uso e migração antes de removê-las. O arquivo de log originalmente anexado não estava mais disponível no caminho temporário nesta passagem; não inferir ausência de uso a partir dele.
+O usuário confirmou que há uma versão **atual da `master` em produção**. O frontend dessa versão usa o fluxo canônico na árvore do repositório; isso não é prova de ausência de scripts externos nem de sessões/instâncias antigas durante rollout. A observação antiga sobre o branch de rework deixar a produção inalterada deixou de valer após a publicação do commit `b2ca47c` em `master` e seu deploy, autorizados pelo usuário. A decisão conservadora é manter rotas backend legadas por ora e exigir evidência de uso e migração antes de removê-las. O arquivo de log originalmente anexado não estava mais disponível no caminho temporário nesta passagem; não inferir ausência de uso a partir dele.
 
 ## Registro das quatro revisões críticas
 

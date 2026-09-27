@@ -1,5 +1,6 @@
 # Specifications
 
+- [Spec 077 — Pokémon Hub duplicate save maintenance](077-pokemon-hub-duplicate-save-maintenance.md): production evidence for two Hub/save duplicates, targeted data reconciliation and snapshot integrity requirements.
 - [Spec 074 — Generation III event save research](074-gen3-event-save-research.md): investigate safe Bag, PC item and event-flag inspection and direct Key Item delivery.
 
 - [Spec 073 - Nine-instance player surface and isolated origins](073-nine-instance-player.md): expand the player limit, 3 × 3 layout, development and production origin topology, and automatic full-capacity diagnostics.
