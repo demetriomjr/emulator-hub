@@ -63,6 +63,7 @@ test('a newly loaded iframe receives the already enabled wrapper odds clock', ()
     huntActiveRef: { current: false }, stopShinyHunt() {},
     macroCoordinatorRef: { current: { lost(sessionId) { lostSessions.push(sessionId); return Promise.resolve() } } }, setMacroError() {},
     fastForwardEnabled: false, fastForwardSpeed: 1.5, muted: false, oddsManipulatorEnabled: true,
+    crypto: { randomUUID: () => 'test-request' },
     closeLockRef: { current: false }, profileInfoSessionId: null, window: { location: { origin: 'http://localhost' } },
     sendPlayerInteractionLock() {},
     configurePlayerFrame: (frame, message) => actions.push(['frame', frame, { ...message }]),
@@ -73,8 +74,10 @@ test('a newly loaded iframe receives the already enabled wrapper odds clock', ()
   configure(frame, session)
   assert.deepEqual(lostSessions, ['session-2'])
   assert.deepEqual(actions, [
+    ['frame', frame, { type: 'emulator-hub:user-state-availability-request', sessionId: 'session-2' }],
     ['frame', frame, { type: 'emulator-hub:fast-forward', enabled: false, speed: 1.5 }],
     ['frame', frame, { type: 'emulator-hub:mute', muted: false }],
+    ['frame', frame, { type: 'emulator-hub:get-playback-state', requestId: 'test-request' }],
     ['odds', frame, session, 3, 180_000],
   ])
 })
@@ -91,7 +94,7 @@ test('closing the whole wrapper clears the odds toggle before a later first laun
     snapshotDeleteWatchdogRef: { current: { cancel() {} } }, clearRestoreChoiceTimer() {},
     oddsSyncRef: { current: new Map() }, oddsClockReadyRef: { current: new Map() }, oddsResetQueueRef: { current: new Map() },
     setSnapshotRestoreRequests() {}, snapshotRestoreRequestsRef: { current: {} },
-    setUserStateAvailable() {}, setPlayerActionErrors() {}, setFocusedSessionId() {},
+    setUserStateAvailable() {}, setPlayerPaused() {}, setPlayerActionErrors() {}, setFocusedSessionId() {},
     setCloseChooserOpen() {}, setSelectedCloseSessionIds() {}, Set, Object,
     setActiveSessions: sessions => actions.push(['sessions', sessions.length]),
     setOddsManipulatorEnabled: enabled => actions.push(['odds', enabled]),

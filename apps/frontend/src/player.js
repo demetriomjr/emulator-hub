@@ -529,15 +529,24 @@ async function persistEmulatorState({ kind, reasonCode, promptOnLaunch }) {
   if (!state) throw new Error('Emulator snapshot bytes are unavailable.')
   const metadata = { profileId, gameId: id, core: launchDescriptor.core, romSha256: launchDescriptor.romSha256, runtimeId: launchDescriptor.runtimeId, saveRevision: cloudSaveSynchronizer.getRevision(), promptOnLaunch, kind, reasonCode, ...(installationIdentity.id ? { originInstallationId: installationIdentity.id } : {}), ...(launchDescriptor.patchSha256 ? { patchSha256: launchDescriptor.patchSha256 } : {}) }
   const uploadState = measureSynchronousOperation(performanceTimings, `copyState.${kind}`, () => new Uint8Array(state))
-  const accepted = await putEmulatorSnapshot(snapshotUrlForKind(launchDescriptor.snapshotUrl, kind), {
-    metadata,
-    state: uploadState,
-  }, kind === 'user-state' ? userSnapshotRevision : snapshotRevision, { sessionId, generation: leaseGeneration })
+  if (kind === 'user-state') {
+    userSnapshot = { state: uploadState, metadata, revision: userSnapshotRevision }
+    announceUserStateAvailability()
+  }
+  let accepted
+  try {
+    accepted = await putEmulatorSnapshot(snapshotUrlForKind(launchDescriptor.snapshotUrl, kind), {
+      metadata,
+      state: uploadState,
+    }, kind === 'user-state' ? userSnapshotRevision : snapshotRevision, { sessionId, generation: leaseGeneration })
+  } catch (error) {
+    if (kind === 'user-state' && error && typeof error === 'object') error.localStateCaptured = true
+    throw error
+  }
   const captured = { state: measureSynchronousOperation(performanceTimings, `copyState.${kind}`, () => new Uint8Array(state)), metadata: { ...metadata, capturedAt: accepted.capturedAt }, revision: accepted.revision }
   if (kind === 'user-state') {
     userSnapshotRevision = accepted.revision
     userSnapshot = captured
-    announceUserStateAvailability()
   } else {
     snapshotRevision = accepted.revision
     savedSnapshot = captured
@@ -547,6 +556,11 @@ async function persistEmulatorState({ kind, reasonCode, promptOnLaunch }) {
 
 function announceUserStateAvailability() {
   window.parent.postMessage({ type: 'emulator-hub:user-state-availability', sessionId, gameId: id, profileId, available: Boolean(userSnapshot) }, hubOrigin)
+}
+
+function announcePlaybackState() {
+  const paused = window.EJS_emulator?.paused
+  if (runtimeReady && typeof paused === 'boolean') window.parent.postMessage({ type: 'emulator-hub:playback-state', sessionId, gameId: id, profileId, ok: true, paused }, hubOrigin)
 }
 
 function reportPlayerActionFailure(action) {
@@ -872,6 +886,10 @@ window.addEventListener('message', event => {
     macroReply('emulator-hub:macro-stopped', event.data, true)
     return
   }
+  if (event.data?.type === 'emulator-hub:user-state-availability-request') {
+    if (event.data.sessionId === sessionId) announceUserStateAvailability()
+    return
+  }
   if (event.data?.type === 'emulator-hub:save-state') {
     if (shinyHuntPlayer?.isActive() || !isEmulatorPlaying(window.EJS_emulator, runtimeReady)) return
     offerPolicy?.recordManualStateSave()
@@ -880,7 +898,7 @@ window.addEventListener('message', event => {
         if (saved) snapshotTelemetry.info('user-state-saved', { snapshotKind: 'user-state', revision: userSnapshotRevision, saveRevision: cloudSaveSynchronizer?.getRevision() })
         else { snapshotTelemetry.warn('user-state-save-unavailable', { snapshotKind: 'user-state' }); reportPlayerActionFailure('manual-save') }
       },
-      error => { snapshotTelemetry.error('user-state-save-failed', { snapshotKind: 'user-state', code: error.code, error: error.message, status: error.status }); reportPlayerActionFailure('manual-save') },
+      error => { snapshotTelemetry.error('user-state-save-failed', { snapshotKind: 'user-state', code: error.code, error: error.message, status: error.status }); reportPlayerActionFailure(error.localStateCaptured ? 'manual-save-backup' : 'manual-save') },
     )
     return
   }
@@ -917,7 +935,7 @@ window.addEventListener('message', event => {
   if (event.data?.type === 'emulator-hub:set-playback') {
     if (shinyHuntPlayer?.isActive()) return
     if (event.data.action === 'pause') stopMacro()
-    applyPlayerPlayback(window.EJS_emulator, event.data.action, { ready: runtimeReady, locked: interactionLock.isLocked() })
+    if (applyPlayerPlayback(window.EJS_emulator, event.data.action, { ready: runtimeReady, locked: interactionLock.isLocked() })) announcePlaybackState()
     return
   }
   if (event.data?.type === 'emulator-hub:close-player') {
@@ -1167,6 +1185,7 @@ async function start() {
     startEmulatedFpsOverlay()
     if (restoreCandidates.length && !interactionLock.isLocked()) window.EJS_emulator.play()
     interactionLock.apply()
+    announcePlaybackState()
     if (restoreChoice?.explicit && localRecoveryPrompt && localRecoveryCandidateId) scheduleLocalRecoveryDeleteAfterChoice(localRecoveryCandidateId)
     else startLocalRecoveryCapture()
     if (restoreChoice?.explicit && savedSnapshot && (!selectedCandidateId || restoredRuntimeState)) scheduleCloudRecoveryDeleteAfterChoice(savedSnapshot.revision)

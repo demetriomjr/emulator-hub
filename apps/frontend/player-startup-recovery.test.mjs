@@ -18,6 +18,7 @@ function harness({ selection, localRecoveryPrompt = false, localRecovery = null,
     interactionLock: { isLocked: () => false, apply() {} },
     runtimeReady: false,
     setPlayerReady() {},
+    announcePlaybackState() {},
     startEmulatedFpsOverlay() {},
     restoreCandidates: [
       ...(selection === 'local' || localRecoveryPrompt ? [{ candidateId: 'local-1', kind: 'local-recovery' }] : []),

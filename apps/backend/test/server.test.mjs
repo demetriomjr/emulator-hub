@@ -414,7 +414,7 @@ async function acquirePlayerLease(baseUrl, gameId, profileId, sessionId = 'playe
 }
 
 describe('hub backend HTTP contract', () => {
-  test('launch signals a Hub save and hides runtime states older than that save', async () => {
+  test('launch signals a Hub save while retaining a user state older than that save', async () => {
     const rom = Buffer.from('hub-invalidated-state-rom')
     const fixture = await createFixture([{ id: 'ruby', title: 'Ruby', system: 'gba', core: 'gba', file: 'ruby.gba', sha256: sha256(rom) }], { 'ruby.gba': rom })
     const snapshotStore = createSnapshotStore({ dataPath: join(fixture.root, 'data', 'snapshots') })
@@ -434,7 +434,7 @@ describe('hub backend HTTP contract', () => {
     assert.equal(lease.body.runtimeStateInvalidatedAtRevision, 2)
     const headers = { Cookie: lease.cookie, 'X-Player-Session-Id': 'hub-state-session', 'X-Player-Lease-Generation': String(lease.body.leaseGeneration) }
     assert.equal((await fetch(`${baseUrl}${lease.body.snapshotUrl}`, { headers })).status, 404)
-    assert.equal((await fetch(`${baseUrl}${lease.body.snapshotUrl}?kind=user-state`, { headers })).status, 404)
+    assert.equal((await fetch(`${baseUrl}${lease.body.snapshotUrl}?kind=user-state`, { headers })).status, 200)
     const launch = await jsonResponse(await fetch(`${baseUrl}/api/player-leases/hub-state-session/launch?profileId=${profile.id}&gameId=ruby&generation=${lease.body.leaseGeneration}`, { headers }))
     assert.equal(launch.runtimeStateInvalidatedAtRevision, 2)
   })

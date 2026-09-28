@@ -31,6 +31,7 @@ test('newly loaded iframe receives the current mute toggle state', () => {
     huntActiveRef: { current: false }, stopShinyHunt() {},
     macroCoordinatorRef: { current: { lost(sessionId) { lostSessions.push(sessionId); return Promise.resolve() } } }, setMacroError() {},
     fastForwardEnabled: false, fastForwardSpeed: 1.5, muted: true, oddsManipulatorEnabled: false,
+    crypto: { randomUUID: () => 'test-request' },
     closeLockRef: { current: false }, profileInfoSessionId: null, sendPlayerInteractionLock() {},
     configurePlayerFrame(_frame, message) { messages.push({ ...message }) },
   })

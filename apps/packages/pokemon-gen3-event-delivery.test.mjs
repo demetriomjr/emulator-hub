@@ -37,7 +37,7 @@ test('delivers FireRed tickets after release with a backup, readback, and durabl
     assert.equal(stored.runtimeStateInvalidatedAtRevision, 2)
     assert.deepEqual(stored.eventGrantReceipt.eventIds, ['navel-rock', 'birth-island'])
     assert.equal(stored.eventGrantReceipt.romSha256, romSha256)
-    assert.deepEqual(deleted, ['cloud-recovery', 'user-state'])
+    assert.deepEqual(deleted, ['cloud-recovery'])
     assert.equal((await readdir(join(root, 'event-backups'))).length, 1)
     assert.deepEqual(original, fireRedSave({ eligible: true }))
     assert.deepEqual(await service.attempt({ profileId, gameId }), { status: 'already-delivered', revision: 2 })

@@ -60,7 +60,7 @@ export function reconcileCanonicalSessionSnapshot(snapshot, visiblePaneCount, so
   const snapshots = {}
   for (const pane of snapshot.panes.slice(0, visiblePaneCount)) {
     if (pane === null) continue
-    const key = pane.profile.type === 'hub-profile' ? `hub:${pane.profile.hubProfileId}` : `save:${pane.profile.profileId}:${pane.profile.gameId}`
+    const key = pane.profile.type === 'hub-profile' ? `hub:${pane.profile.hubProfileId}` : `${pane.profile.gameId}:${pane.profile.profileId}`
     const existing = sourceSnapshots[key]
     if (!existing) continue
     const projected = pane.profile.type === 'hub-profile' && pane.hub.length > 0

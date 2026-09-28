@@ -48,7 +48,7 @@ function harness(sessions, { preferenceFailure = false } = {}) {
     snapshotDeleteWatchdogRef: { current: { cancel() {} } },
     clearRestoreChoiceTimer() {},
     setSnapshotRestoreRequests() {}, snapshotRestoreRequestsRef: { current: {} },
-    setUserStateAvailable() {}, setPlayerActionErrors() {},
+    setUserStateAvailable() {}, setPlayerPaused() {}, setPlayerActionErrors() {},
     setFocusedSessionId(value) { context.focusUpdate = value },
     setActiveSessions(value) { context.activeSessions = typeof value === 'function' ? value(context.activeSessions) : value; context.activeSessionsRef.current = context.activeSessions },
     setOddsManipulatorEnabled(value) { calls.push(['odds', value]) },

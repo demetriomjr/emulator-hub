@@ -52,7 +52,7 @@ export function createFrontendViteConfiguration(environment) {
       host: environment.HOST ?? '127.0.0.1',
       port: Number.parseInt(environment.PORT ?? '5173', 10),
       strictPort: true,
-      hmr: { clientPort: Number.parseInt(environment.PORT ?? '5173', 10) },
+      hmr: environment.E2E_DISABLE_HMR === '1' ? false : { clientPort: Number.parseInt(environment.PORT ?? '5173', 10) },
       fs: { allow: ['..'] },
       proxy: {
         '/api': backendUrl,

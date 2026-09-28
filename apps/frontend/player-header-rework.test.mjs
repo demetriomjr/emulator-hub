@@ -35,7 +35,7 @@ test('player frame uses Ant Design controls in the requested order and groups', 
   assert.match(frame, /<Button\b/)
   assert.match(frame, /<Select\b[^>]*className="player-header-select player-speed-select"[^>]*suffixIcon=\{null\}/)
   assert.equal((frame.match(/className="player-header-select player-trigger-select"/g) ?? []).length, 2)
-  assert.ok(frame.indexOf('aria-label="Play/Pause"') < frame.indexOf('aria-label="Informações do perfil"'))
+  assert.ok(frame.indexOf("'Reproduzir todos'") < frame.indexOf('aria-label="Informações do perfil"'))
   assert.ok(frame.indexOf('aria-label="Informações do perfil"') < frame.indexOf('aria-label={muted'))
   const stateControls = frame.slice(frame.indexOf('aria-label="Salvar estado"'), frame.indexOf('aria-label="Hard Reset"'))
   assert.doesNotMatch(stateControls, /player-header-separator/)
@@ -45,10 +45,10 @@ test('player frame uses Ant Design controls in the requested order and groups', 
   assert.match(css, /\.player-trigger-select\s*\{\s*width:\s*126px;/)
 })
 
-test('player toolbar keeps the combined playback glyph and uses distinct odds and macro icons', async () => {
+test('player toolbar switches playback glyph and uses distinct odds and macro icons', async () => {
   const hub = await readFile(new URL('./src/main.jsx', import.meta.url), 'utf8')
   const header = hub.slice(hub.indexOf('<header className="player-header"'), hub.indexOf('</header>', hub.indexOf('<header className="player-header"')))
-  assert.match(header, /icon=\{<svg[^>]*className="player-play-pause-glyph"[^>]*><path d="M2 5v14l9-7-9-7ZM14 5h3v14h-3ZM20 5h3v14h-3Z"/)
+  assert.match(header, /icon=\{<PlaybackGlyph paused=\{playerPaused\[activeSessions\[0\]\?\.sessionId\]\} className="player-play-pause-glyph"\s*\/>\}/)
   assert.doesNotMatch(header, /PlayCircleOutlined|PauseCircleOutlined|BarChartOutlined|UnorderedListOutlined/)
   assert.match(header, /icon=\{<NumberOutlined\s*\/>\} aria-label="Manipulador de odds"/)
   assert.match(header, /icon=\{<ThunderboltOutlined\s*\/>\} aria-label=\{macroRunState/)

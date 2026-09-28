@@ -1169,7 +1169,7 @@ async function releasePokemonHubSessionSources(config, profileId, sessionId, sou
       await config.pokemonHubSnapshotCoordinator.release({ profileId, sourceKey: source.sourceKey, workspaceId: sessionId, sourceSessionId: source.sourceSessionId, leaseToken: source.leaseToken })
     } catch (error) {
       // An expired workspace no longer owns a lease that another cleanup path has already released.
-      if (!ignoreLeaseInvalid || error.code !== 'LEASE_INVALID') throw error
+      if (!ignoreLeaseInvalid || !['LEASE_INVALID', 'HUB_LEASE_INVALID'].includes(error.code)) throw error
     }
   }
 }
@@ -1291,7 +1291,7 @@ async function handleSnapshot(request, response, config, { profileId, gameId }, 
     catch (error) { log('error', 'read-failed', { code: error.code ?? null, error: error.message }); throw error }
     if (!snapshot) return json(response, 404, { error: 'Snapshot was not found.' })
     const save = await config.saveStore.get(profileId, gameId)
-    if (save?.runtimeStateInvalidatedAtRevision && snapshot.metadata.saveRevision < save.runtimeStateInvalidatedAtRevision) {
+    if (kind === 'cloud-recovery' && save?.runtimeStateInvalidatedAtRevision && snapshot.metadata.saveRevision < save.runtimeStateInvalidatedAtRevision) {
       return json(response, 404, { error: 'Snapshot was invalidated by a Pokémon Hub save.' })
     }
     log('info', 'candidate-available', { revision: snapshot.metadata.revision, reason: snapshot.metadata.reasonCode, saveRevision: snapshot.metadata.saveRevision })
@@ -2081,8 +2081,8 @@ function hubProfileIdFromSourceKey(sourceKey) {
 function normalizePokemonHubLogger(logger) {
   if (logger && typeof logger.info === 'function' && typeof logger.warn === 'function' && typeof logger.error === 'function') {
     return {
-      info() {},
-      warn() {},
+      info(event, context = {}) { logger.info(event, context) },
+      warn(event, context = {}) { logger.warn(event, context) },
       error(event, context = {}) { logger.error(event, context) },
     }
   }

@@ -20,7 +20,7 @@ test('keeps the visual workspace at its current pane count when reconciling a th
 test('a correction preserves the snapshot of a pane added after session opening', () => {
   assert.equal(typeof sessionView.reconcileCanonicalSessionSnapshot, 'function')
   const sourceSnapshots = {
-    'save:may:emerald': {
+    'emerald:may': {
       sourceKey: 'save:may:emerald',
       placements: [{ location: { kind: 'game', area: 'party', slot: 0 }, pokemonInstanceId: 'old-save' }],
     },
@@ -38,7 +38,7 @@ test('a correction preserves the snapshot of a pane added after session opening'
   const result = sessionView.reconcileCanonicalSessionSnapshot(correction, 2, sourceSnapshots)
 
   assert.equal(result.panes.length, 2)
-  assert.equal(result.snapshots['save:may:emerald'].placements[0].pokemonInstanceId, 'new-save')
+  assert.equal(result.snapshots['emerald:may'].placements[0].pokemonInstanceId, 'new-save')
   assert.equal(result.snapshots['hub:living-dex'].placements[0].pokemonInstanceId, 'new-hub')
   assert.equal(sourceSnapshots['hub:living-dex'].placements[0].pokemonInstanceId, 'old-hub')
 })

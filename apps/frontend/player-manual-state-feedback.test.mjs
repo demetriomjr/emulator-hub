@@ -63,6 +63,14 @@ test('a failed manual Save state is reported to the player', async () => {
   assert.deepEqual(failures, ['manual-save'])
 })
 
+test('a failed backend copy after local capture reports the backup failure', async () => {
+  const error = Object.assign(new Error('offline'), { localStateCaptured: true })
+  const { handle, failures } = harness({ save: async () => { throw error } })
+  await handle({ data: { type: 'emulator-hub:save-state' } })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(failures, ['manual-save-backup'])
+})
+
 test('a manual Load state with no available state is reported to the player', async () => {
   const { handle, failures } = harness({ load: () => false })
   await handle({ data: { type: 'emulator-hub:load-state' } })

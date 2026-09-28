@@ -59,7 +59,7 @@ export function createPokemonGen3EventDeliveryService({ saveStore, gameSaveLease
       }
       emit('committed', { profileId, gameId, title, romSha256, patchSha256: game.patchSha256 ?? null, previousRevision: original.revision, revision: saved.revision, previousSha256: original.sha256, sha256: saved.sha256, backupFileName: saved.eventGrantReceipt.backupFileName, eventIds, addedItemIds, enabledFlagIds: enabledFlagIds.sort((a, b) => a - b), clearedFlagIds })
       if (validation.changed && snapshotStore) {
-        for (const kind of ['cloud-recovery', 'user-state']) {
+        for (const kind of ['cloud-recovery']) {
           try { await snapshotStore.delete(profileId, gameId, { kind }) }
           catch (error) { onError('[Gen III events] stale snapshot cleanup failed', { profileId, gameId, kind, code: error.code ?? null }) }
         }

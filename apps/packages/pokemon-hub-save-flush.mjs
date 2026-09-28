@@ -67,7 +67,6 @@ export function createPokemonHubSaveFlushService({ coordinator, saveStore, snaps
       }
       if (snapshotStore) {
         await snapshotStore.delete(sourceProfileId, target.gameId, { kind: 'cloud-recovery' })
-        await snapshotStore.delete(sourceProfileId, target.gameId, { kind: 'user-state' })
       }
       await coordinator.markSaveFlushed({ profileId: job.profileId, sourceKey: job.sourceKey, sourceRevision: plan.source.sourceRevision, saveRevision })
       loggedFailures.delete(JSON.stringify([job.profileId, job.sourceKey]))

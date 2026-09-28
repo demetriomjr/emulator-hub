@@ -74,6 +74,7 @@ const triggerControls = Object.freeze({
 const fastForwardSpeeds = Object.freeze([1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5])
 const playerActionFailureMessages = Object.freeze({
   'manual-save': 'Não foi possível salvar o estado.',
+  'manual-save-backup': 'Estado salvo neste emulador, mas a cópia no servidor falhou.',
   'manual-load': 'Não foi possível carregar o estado salvo.',
   'restore-state': 'Não foi possível restaurar o estado escolhido.',
   'game-save-load': 'Não foi possível carregar o save do jogo.',
@@ -165,6 +166,10 @@ function ControlBinding({ control, profile, captureTarget, onCapture }) {
       {isCapturingGamepad ? 'Pressione no joystick' : formatGamepadBinding(binding.gamepad)}
     </button>
   </div>
+}
+
+function PlaybackGlyph({ paused, className }) {
+  return <svg viewBox="0 0 24 24" className={className} aria-hidden="true"><path d={paused ? 'M3 2v20l19-10z' : 'M5 3h5v18H5zM14 3h5v18h-5z'} /></svg>
 }
 
 function TriggerBinding({ trigger, profile, captureTarget, onCapture }) {
@@ -268,6 +273,7 @@ function App() {
   const [multiProfileBusy, setMultiProfileBusy] = useState(false)
   const [multiProfileError, setMultiProfileError] = useState('')
   const [userStateAvailable, setUserStateAvailable] = useState({})
+  const [playerPaused, setPlayerPaused] = useState({})
   const [playerActionErrors, setPlayerActionErrors] = useState({})
   const [instancePicker, setInstancePicker] = useState(false)
   const [controlPanelOpen, setControlPanelOpen] = useState(false)
@@ -526,6 +532,12 @@ function App() {
         setUserStateAvailable(current => ({ ...current, [session.sessionId]: event.data.available }))
         return
       }
+      if (event.data?.type === 'emulator-hub:playback-state') {
+        const session = activeSessions.find(candidate => trustedFrame.closest('.player-cell')?.dataset.sessionId === candidate.sessionId)
+        if (!session || event.data.sessionId !== session.sessionId || typeof event.data.paused !== 'boolean' || event.data.ok !== true) return
+        setPlayerPaused(current => current[session.sessionId] === event.data.paused ? current : { ...current, [session.sessionId]: event.data.paused })
+        return
+      }
       if (event.data?.type === 'emulator-hub:player-action-failed') {
         const frame = [...document.querySelectorAll('.player-cell iframe')].find(candidate => candidate.contentWindow === event.source)
         const session = activeSessions.find(candidate => frame?.closest('.player-cell')?.dataset.sessionId === candidate.sessionId)
@@ -617,6 +629,7 @@ function App() {
       setError('A sessão do emulador foi substituída ou expirou.')
     }
     window.addEventListener('message', receive)
+    for (const session of activeSessions) configurePlayerFrame(playerFrameForSession(session.sessionId), { type: 'emulator-hub:user-state-availability-request', sessionId: session.sessionId })
     return () => window.removeEventListener('message', receive)
   }, [activeSessions])
 
@@ -1035,10 +1048,16 @@ function App() {
     if (huntActiveRef.current) stopShinyHunt()
     void macroCoordinatorRef.current.lost(session.sessionId).catch(cause => setMacroError(cause.message))
     hubPerformance?.frameLoaded(session.sessionId)
+    configurePlayerFrame(frame, { type: 'emulator-hub:user-state-availability-request', sessionId: session.sessionId })
     sendPlayerInteractionLock(frame, closeLockRef.current || profileInfoSessionId === session.sessionId)
     configurePlayerFrame(frame, { type: 'emulator-hub:fast-forward', enabled: fastForwardEnabled, speed: fastForwardSpeed })
     configurePlayerFrame(frame, { type: 'emulator-hub:mute', muted })
+    configurePlayerFrame(frame, { type: 'emulator-hub:get-playback-state', requestId: crypto.randomUUID() })
     if (oddsManipulatorEnabled) void configureOddsClock(frame, session, session.oddsResetCount ?? 0, (session.oddsResetCount ?? 0) * 60_000)
+  }
+
+  function requestPlaybackStatus(sessionId) {
+    configurePlayerFrame(playerFrameForSession(sessionId), { type: 'emulator-hub:get-playback-state', requestId: crypto.randomUUID() })
   }
 
   function toggleOddsManipulator() {
@@ -1144,6 +1163,7 @@ function App() {
     setSnapshotRestoreRequests(removeClosed)
     snapshotRestoreRequestsRef.current = removeClosed(snapshotRestoreRequestsRef.current)
     setUserStateAvailable(removeClosed)
+    setPlayerPaused(removeClosed)
     setPlayerActionErrors(removeClosed)
     setFocusedSessionId(current => remaining.some(session => session.sessionId === current) ? current : remaining[0]?.sessionId ?? null)
     setCloseChooserOpen(false)
@@ -1872,7 +1892,7 @@ function App() {
         <header className="player-header" inert={closeChooserOpen || saveCloseRows !== null || multiProfileRows !== null ? true : undefined}>
           <div className="player-global-controls">
             <div className="fast-forward-control">
-              <Button className="fast-forward-button" htmlType="button" icon={<svg viewBox="0 0 24 24" className="player-play-pause-glyph" aria-hidden="true"><path d="M2 5v14l9-7-9-7ZM14 5h3v14h-3ZM20 5h3v14h-3Z" /></svg>} aria-label="Play/Pause" title="Play/Pause" disabled={huntRunning} onClick={() => void toggleGlobalPlayback()} />
+              <Button className="fast-forward-button" htmlType="button" icon={<PlaybackGlyph paused={playerPaused[activeSessions[0]?.sessionId]} className="player-play-pause-glyph" />} aria-label={playerPaused[activeSessions[0]?.sessionId] ? 'Reproduzir todos' : 'Pausar todos'} title={playerPaused[activeSessions[0]?.sessionId] ? 'Reproduzir todos' : 'Pausar todos'} disabled={huntRunning} onMouseEnter={() => activeSessions[0] && requestPlaybackStatus(activeSessions[0].sessionId)} onClick={() => void toggleGlobalPlayback()} />
               <Button className="player-control-button" htmlType="button" icon={<InfoCircleOutlined />} aria-label="Informações do perfil" title="Informações do perfil" disabled={huntRunning || closeChooserOpen || saveCloseRows !== null || profileInfoSessionId !== null || multiProfileRows !== null} onClick={openHeaderProfileInfo} />
               <Button className={`fast-forward-button mute-button${muted ? ' is-active' : ''}`} htmlType="button" icon={muted ? <AudioMutedOutlined /> : <SoundOutlined />} aria-label={muted ? 'Desmutar áudio' : 'Mutar áudio'} title={muted ? 'Desmutar áudio' : 'Mutar áudio'} aria-pressed={muted} onClick={toggleMute} />
               <Button className={`fast-forward-button${fastForwardEnabled ? ' is-active' : ''}`} htmlType="button" icon={<FastForwardOutlined />} aria-label="Fast Forward" title="Fast Forward" aria-pressed={fastForwardEnabled} disabled={huntRunning} onClick={toggleFastForward} />
@@ -1913,10 +1933,10 @@ function App() {
         </header>
         <div className={`player-panel player-panel-${activeSessions.length}`} inert={huntRunning || closeChooserOpen || saveCloseRows !== null || multiProfileRows !== null ? true : undefined}>
           <div className="player-grid">
-            {activeSessions.map(session => <div className={`player-cell${(huntStatus.completedSessionIds?.includes(session.sessionId) || huntStatus.foundSessionIds?.includes(session.sessionId) || huntStatus.phase === 'found' && huntStatus.foundSessionId === session.sessionId) ? ' hunt-found' : ''}`} data-session-id={session.sessionId} key={`${session.gameId}:${session.profileId}`} onPointerDown={() => setFocusedSessionId(session.sessionId)}>
+            {activeSessions.map(session => <div className={`player-cell${(huntStatus.completedSessionIds?.includes(session.sessionId) || huntStatus.foundSessionIds?.includes(session.sessionId) || huntStatus.phase === 'found' && huntStatus.foundSessionId === session.sessionId) ? ' hunt-found' : ''}`} data-session-id={session.sessionId} key={`${session.gameId}:${session.profileId}`} onPointerDown={() => setFocusedSessionId(session.sessionId)} onMouseEnter={() => requestPlaybackStatus(session.sessionId)}>
               <iframe src={playerFrameUrl(session)} title="EmulatorJS" allow="fullscreen; gamepad" inert={profileInfoSessionId === session.sessionId ? true : undefined} onLoad={event => configurePlayerFrameOnLoad(event.currentTarget, session)} />
               <div className="player-cell-controls" role="group" aria-label={`Controles de ${session.profileName ?? session.gameTitle ?? 'emulador'}`}>
-                <Button className="player-cell-playback" htmlType="button" icon={<svg className="player-cell-play-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 2v20l19-10z" /></svg>} aria-label="Play/Pause deste emulador" title="Play/Pause" disabled={huntRunning} onClick={() => void togglePlayerPlayback(session.sessionId)} />
+                <Button className="player-cell-playback" htmlType="button" icon={<PlaybackGlyph paused={playerPaused[session.sessionId]} className="player-cell-play-icon" />} aria-label={playerPaused[session.sessionId] ? 'Reproduzir este emulador' : 'Pausar este emulador'} title={playerPaused[session.sessionId] ? 'Reproduzir' : 'Pausar'} disabled={huntRunning} onClick={() => void togglePlayerPlayback(session.sessionId)} />
                 <div className="player-cell-secondary-controls">
                   <Button htmlType="button" icon={<RedoOutlined />} aria-label="Reset deste emulador" title="Reset" disabled={huntRunning} onClick={() => void dispatchReset('emulator-hub:reset', session.sessionId)} />
                   <Button htmlType="button" icon={<SaveOutlined />} aria-label="Salvar estado deste emulador" title="Save State" disabled={huntRunning || Boolean(snapshotRestoreRequests[session.sessionId])} onClick={() => sendPlayerMessage('emulator-hub:save-state', session.sessionId)} />

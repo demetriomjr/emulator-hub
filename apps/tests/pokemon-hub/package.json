@@ -1,0 +1,12 @@
+{
+  "name": "@emulator-hub/pokemon-hub-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node run.mjs",
+    "stress": "node stress-campaign.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  }
+}

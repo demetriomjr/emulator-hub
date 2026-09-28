@@ -145,7 +145,7 @@ test('recovers a durable pending flush after a backend restart', async () => {
   assert.equal(released.length, 1)
 })
 
-test('invalidates both runtime state slots before acknowledging a changed Hub save', async () => {
+test('invalidates automatic recovery but preserves a user state after a changed Hub save', async () => {
   const calls = []
   const service = createPokemonHubSaveFlushService({
     coordinator: {
@@ -164,7 +164,6 @@ test('invalidates both runtime state slots before acknowledging a changed Hub sa
   assert.deepEqual(calls, [
     ['put', 'actual-source', 'ruby', { fenceGeneration: 0, invalidateRuntimeStates: true }],
     ['delete', 'actual-source', 'ruby', 'cloud-recovery'],
-    ['delete', 'actual-source', 'ruby', 'user-state'],
     'ack',
   ])
 })

@@ -347,7 +347,7 @@ button { font: inherit; }
 .player-panel-7 .player-grid, .player-panel-8 .player-grid, .player-panel-9 .player-grid { grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); }
 .player-cell { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #000; container-type: size; }
 .player-cell-controls { --player-play-icon-size: min(96px, 14cqw, 22cqh); --player-secondary-icon-size: min(63px, 9.24cqw, 14.52cqh); position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: min(16px, 3cqh); background: rgb(16 43 48 / 60%); opacity: 0; pointer-events: none; }
-.player-cell:hover .player-cell-controls, .player-cell-controls:focus-within { opacity: 1; pointer-events: auto; }
+.player-cell:hover .player-cell-controls { opacity: 1; pointer-events: auto; }
 .player-cell-controls .ant-btn { display: grid; place-items: center; width: max(44px, calc(var(--player-secondary-icon-size) + 12px)); height: max(44px, calc(var(--player-secondary-icon-size) + 12px)); padding: 0; border: 0; color: #8cf0ba; background: transparent; box-shadow: none; }
 .player-cell-controls .ant-btn:hover:not(:disabled) { border: 0; color: #b5f7d0; background: transparent; box-shadow: none; }
 .player-cell-controls .ant-btn:disabled { border: 0; color: #8cf0ba; background: transparent; opacity: .35; }
