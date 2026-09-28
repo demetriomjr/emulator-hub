@@ -12,17 +12,19 @@ const actionSource = `async function handle(event) {\n${source.slice(begin, end)
 function harness({ save = async () => true, load = () => true } = {}) {
   const failures = []
   const telemetry = []
+  let macroStops = 0
   const handle = runInNewContext(actionSource, {
     shinyHuntPlayer: null,
     offerPolicy: { recordManualStateSave() {} },
     saveEmulatorState: save,
     loadEmulatorState: load,
+    stopMacro() { macroStops += 1 },
     userSnapshotRevision: 3,
     cloudSaveSynchronizer: { getRevision() { return 2 } },
     reportPlayerActionFailure(action) { failures.push(action) },
     snapshotTelemetry: { info: (event, details) => telemetry.push(['info', event, details]), warn: (event, details) => telemetry.push(['warn', event, details]), error: (event, details) => telemetry.push(['error', event, details]) },
   })
-  return { handle, failures, telemetry }
+  return { handle, failures, telemetry, getMacroStops: () => macroStops }
 }
 
 test('manual state actions emit one decision or failure per explicit user action', async () => {
@@ -30,6 +32,7 @@ test('manual state actions emit one decision or failure per explicit user action
   await successful.handle({ data: { type: 'emulator-hub:save-state' } })
   await successful.handle({ data: { type: 'emulator-hub:load-state' } })
   await new Promise(resolve => setImmediate(resolve))
+  assert.equal(successful.getMacroStops(), 1)
   assert.deepEqual(successful.telemetry.map(([level, event]) => [level, event]), [['info', 'user-state-saved'], ['info', 'user-state-loaded']])
 
   const failed = harness({ save: async () => { throw new Error('offline') }, load: () => false })

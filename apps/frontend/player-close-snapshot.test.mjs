@@ -8,11 +8,13 @@ const closeSource = source.slice(source.indexOf('async function closeEmulator()'
 
 function closeHarness({ ready, deleteFails = false }) {
   const actions = []
+  let macroStops = 0
   const pendingRestoreRequests = new Map([['choice', { resolve(value) { actions.push(['choice-resolved', value]) } }]])
   const context = {
     Uint8Array,
     runtimeReady: ready,
     closeRequested: false,
+    stopMacro() { macroStops += 1 },
     stopThreadStartupMonitor() {},
     stopEmulatedFpsOverlay() {},
     pendingRestoreRequests,
@@ -50,12 +52,13 @@ function closeHarness({ ready, deleteFails = false }) {
     },
   }
   if (deleteFails) context.deleteEmulatorSnapshot = async () => { actions.push('delete-cloud'); throw new Error('delete unavailable') }
-  return { close: runInNewContext(`${closeSource}\ncloseEmulator`, context), context, actions }
+  return { close: runInNewContext(`${closeSource}\ncloseEmulator`, context), context, actions, getMacroStops: () => macroStops }
 }
 
 test('closing before the restore choice preserves candidates and does not flush an unselected runtime', async () => {
-  const { close, context, actions } = closeHarness({ ready: false })
+  const { close, context, actions, getMacroStops } = closeHarness({ ready: false })
   assert.equal((await close()).preserveRecovery, true)
+  assert.equal(getMacroStops(), 1)
   assert.equal(actions[0][0], 'choice-resolved')
   assert.equal(actions[0][1].candidateId, null)
   assert.equal(actions[0][1].explicit, false)
@@ -63,8 +66,9 @@ test('closing before the restore choice preserves candidates and does not flush 
 })
 
 test('normal close flushes the game save and deletes automatic cloud recovery', async () => {
-  const { close, actions } = closeHarness({ ready: true })
+  const { close, actions, getMacroStops } = closeHarness({ ready: true })
   assert.equal((await close()).preserveRecovery, false)
+  assert.equal(getMacroStops(), 1)
   assert.ok(actions.includes('read-final-save'))
   assert.ok(actions.includes('upload-save'))
   assert.equal(actions.includes('write-cloud'), false)

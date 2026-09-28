@@ -256,6 +256,7 @@ test('completed Emerald close grants events with an IPS and logs exact changes',
   assert.deepEqual(committed.addedItemIds, [275, 376, 370, 371])
   assert.deepEqual(committed.enabledFlagIds, [0x13a, 0x13b, 0x13c, 0x8ac, 0x8b3, 0x8d5, 0x8d6, 0x8db, 0x8e0])
   assert.equal(committed.backupFileName, saved.eventGrantReceipt.backupFileName)
+  for (let attempt = 0; attempt < 40 && !logs.some(log => log.event === 'save.backend.event-delivery-result'); attempt += 1) await new Promise(resolve => setTimeout(resolve, 20))
   assert.equal(logs.find(log => log.event === 'save.backend.event-delivery-result')?.context.status, 'delivered')
 })
 

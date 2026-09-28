@@ -25,14 +25,17 @@ test('newly loaded iframe receives the current mute toggle state', () => {
   const end = hub.indexOf('  function toggleOddsManipulator(', begin)
   assert.ok(begin > 0 && end > begin)
   const messages = []
+  const lostSessions = []
   const configure = runInNewContext(`${hub.slice(begin, end)}\nconfigurePlayerFrameOnLoad`, {
     hubPerformance: null,
     huntActiveRef: { current: false }, stopShinyHunt() {},
+    macroCoordinatorRef: { current: { lost(sessionId) { lostSessions.push(sessionId); return Promise.resolve() } } }, setMacroError() {},
     fastForwardEnabled: false, fastForwardSpeed: 1.5, muted: true, oddsManipulatorEnabled: false,
     closeLockRef: { current: false }, profileInfoSessionId: null, sendPlayerInteractionLock() {},
     configurePlayerFrame(_frame, message) { messages.push({ ...message }) },
   })
   configure({ contentWindow: {} }, { sessionId: 'new' })
+  assert.deepEqual(lostSessions, ['new'])
   assert.deepEqual(messages.find(message => message.type === 'emulator-hub:mute'), { type: 'emulator-hub:mute', muted: true })
 })
 

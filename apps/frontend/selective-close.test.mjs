@@ -18,6 +18,7 @@ function harness(sessions, { preferenceFailure = false } = {}) {
     activeSessionsRef: { current: sessions },
     closeChooserOpen: false,
     stopShinyHunt() {},
+    stopMacro() { calls.push(['stop-macro']) },
     saveCloseCoordinatorRef: { current: null },
     closeBatchSessionIdsRef: { current: [] },
     setPlayerInteractionLocked: locked => calls.push(['lock', locked]),
@@ -68,6 +69,7 @@ test('one emulator closes directly; multiple emulators open with all selected', 
   const one = harness(sessions.slice(0, 1))
   one.api.closePlayer()
   assert.deepEqual(one.context.closeBatchSessionIdsRef.current, ['a'])
+  assert.deepEqual(one.calls.filter(call => call[0] === 'stop-macro'), [['stop-macro']])
   const many = harness(sessions)
   many.api.closePlayer()
   assert.equal(many.context.closeChooserOpen, true)

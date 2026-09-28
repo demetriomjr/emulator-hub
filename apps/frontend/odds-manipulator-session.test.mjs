@@ -57,9 +57,11 @@ test('a newly loaded iframe receives the already enabled wrapper odds clock', ()
   const end = hub.indexOf('  function toggleOddsManipulator(', begin)
   assert.ok(begin > 0 && end > begin)
   const actions = []
+  const lostSessions = []
   const configure = runInNewContext(`${hub.slice(begin, end)}\nconfigurePlayerFrameOnLoad`, {
     hubPerformance: null,
     huntActiveRef: { current: false }, stopShinyHunt() {},
+    macroCoordinatorRef: { current: { lost(sessionId) { lostSessions.push(sessionId); return Promise.resolve() } } }, setMacroError() {},
     fastForwardEnabled: false, fastForwardSpeed: 1.5, muted: false, oddsManipulatorEnabled: true,
     closeLockRef: { current: false }, profileInfoSessionId: null, window: { location: { origin: 'http://localhost' } },
     sendPlayerInteractionLock() {},
@@ -69,6 +71,7 @@ test('a newly loaded iframe receives the already enabled wrapper odds clock', ()
   const frame = { contentWindow: { postMessage() {} } }
   const session = { sessionId: 'session-2', oddsResetCount: 3 }
   configure(frame, session)
+  assert.deepEqual(lostSessions, ['session-2'])
   assert.deepEqual(actions, [
     ['frame', frame, { type: 'emulator-hub:fast-forward', enabled: false, speed: 1.5 }],
     ['frame', frame, { type: 'emulator-hub:mute', muted: false }],
@@ -123,9 +126,11 @@ test('controller resets advance the current session after React replaces its sta
   const frame = { contentWindow: {} }
   const applied = []
   const dirty = []
+  let macroStops = 0
   const initialSession = { sessionId: 'session-1', gameId: 'game-1', profileId: 'profile-1', oddsResetCount: 10 }
   const context = {
     huntActiveRef: { current: false },
+    stopMacro() { macroStops += 1 },
     activeSessions: [initialSession],
     activeSessionsRef: { current: [initialSession] },
     oddsManipulatorEnabled: true,
@@ -150,6 +155,7 @@ test('controller resets advance the current session after React replaces its sta
   await context.oddsResetQueueRef.current.get('session-1')
 
   assert.deepEqual(dirty, [11, 12, 13])
+  assert.equal(macroStops, 3)
   assert.deepEqual(applied.map(message => message.oddsResetCount), [11, 12, 13])
   assert.equal(context.activeSessionsRef.current[0].oddsResetCount, 13)
 })

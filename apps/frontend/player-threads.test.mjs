@@ -66,11 +66,13 @@ test('player acknowledges lock, close and local recovery clear to its own sessio
   let receive
   let locked = null
   let cleared = false
+  let macroStops = 0
   const parent = { postMessage(message) { sent.push(message) } }
   const context = {
     hubOrigin: 'https://hub.example', sessionId: 's1', id: 'game', profileId: 'p1',
     lastInteractionLockRevision: -1,
     interactionLock: { setLocked(value) { locked = value } },
+    stopMacro() { macroStops += 1 },
     closeEmulator: async () => ({ preserveRecovery: true }),
     clearLocalRecovery: async () => { cleared = true },
     window: { parent, addEventListener(_name, listener) { receive = listener } },
@@ -79,6 +81,7 @@ test('player acknowledges lock, close and local recovery clear to its own sessio
   const send = data => receive({ origin: 'https://hub.example', source: parent, data })
   send({ type: 'emulator-hub:interaction-lock', requestId: 'lock-1', sessionId: 's1', revision: 2, locked: true })
   assert.equal(locked, true)
+  assert.equal(macroStops, 1)
   assert.equal(sent.at(-1).requestId, 'lock-1')
   send({ type: 'emulator-hub:interaction-lock', requestId: 'lock-old', sessionId: 's1', revision: 1, locked: false })
   assert.equal(locked, true)
