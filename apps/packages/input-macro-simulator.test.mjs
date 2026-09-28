@@ -112,6 +112,37 @@ test('two continuous Holds remain down through another button and release on com
   assert.equal(outcome, 'completed')
 })
 
+test('terminal Hold zero stays active without Repeat until stopped', () => {
+  let macro = addItem(createMacro('Held chord'), 'button', { input: 'a', action: 'hold', holdMs: 0, delayAfterMs: 0 })
+  macro = addItem(macro, 'button', { input: 'b', action: 'hold', holdMs: 0, delayAfterMs: 0 })
+  const jobs = []
+  const events = []
+  const outcomes = []
+  const runner = createMacroRunner({ macro, setPressed: (input, down) => events.push([input, down]), schedule: fn => { jobs.push(fn); return jobs.length }, clear() {}, onEnd: outcome => outcomes.push(outcome) })
+  runner.start()
+  while (jobs.length) jobs.shift()()
+  assert.equal(runner.isActive(), true)
+  assert.deepEqual(outcomes, [])
+  assert.deepEqual(events, [['a', true], ['b', true]])
+  runner.stop()
+  assert.deepEqual(outcomes, ['stopped'])
+  assert.deepEqual(events, [['a', true], ['b', true], ['a', false], ['b', false]])
+})
+
+test('finite item after Hold zero completes and releases the held button', () => {
+  let macro = addItem(createMacro('Finite ending'), 'button', { input: 'a', action: 'hold', holdMs: 0, delayAfterMs: 0 })
+  macro = addItem(macro, 'repeat', { count: 1 })
+  const jobs = []
+  const events = []
+  const outcomes = []
+  const runner = createMacroRunner({ macro, setPressed: (input, down) => events.push([input, down]), schedule: fn => { jobs.push(fn); return jobs.length }, clear() {}, onEnd: outcome => outcomes.push(outcome) })
+  runner.start()
+  while (jobs.length) jobs.shift()()
+  assert.equal(runner.isActive(), false)
+  assert.deepEqual(outcomes, ['completed'])
+  assert.deepEqual(events, [['a', true], ['a', false]])
+})
+
 test('a finite Hold releases while a preceding continuous Hold stays down', () => {
   let macro = addItem(createMacro('Mixed Holds'), 'button', { input: 'a', action: 'hold', holdMs: 0, delayAfterMs: 0 })
   macro = addItem(macro, 'button', { input: 'b', action: 'hold', holdMs: 200, delayAfterMs: 0 })

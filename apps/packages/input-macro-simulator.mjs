@@ -183,7 +183,12 @@ export function createMacroRunner({ macro, setPressed, schedule = setTimeout, cl
   const advance = () => {
     if (!active) return
     const item = cursor.next()
-    if (!item) { finish('completed'); return }
+    if (!item) {
+      const last = macro.items.at(-1)
+      if (last.kind === 'button' && last.action === 'hold' && last.holdMs === 0 && continuous.has(last.input)) return
+      finish('completed')
+      return
+    }
     if (item.kind === 'yield') { wait(0, advance); return }
     if (item.kind === 'delay') { wait(item.durationMs, advance); return }
     if (item.action === 'hold' && item.holdMs === 0) {

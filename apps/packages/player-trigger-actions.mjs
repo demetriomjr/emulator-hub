@@ -5,6 +5,7 @@ export const playerTriggerActionOptions = Object.freeze([
   { value: 'reset', label: 'Hard Reset' },
   { value: 'save-state', label: 'Save state' },
   { value: 'load-state', label: 'Load state' },
+  { value: 'toggle-last-macro', label: 'Iniciar/parar último macro' },
 ])
 
 const triggerBindings = Object.freeze({
@@ -19,7 +20,7 @@ const actionMessages = Object.freeze({
   'load-state': 'emulator-hub:load-state',
 })
 
-export function createPlayerTriggerActions({ dispatch = () => {}, toggleFastForward = () => {} } = {}) {
+export function createPlayerTriggerActions({ dispatch = () => {}, toggleFastForward = () => {}, toggleLastMacro = () => {} } = {}) {
   let held = new Set()
   return {
     defaults: { l2: 'none', r2: 'none' },
@@ -29,6 +30,7 @@ export function createPlayerTriggerActions({ dispatch = () => {}, toggleFastForw
         const action = actions?.[trigger]
         const message = actionMessages[action]
         if (action === 'fast-forward' && active.has(binding) && !held.has(binding)) toggleFastForward(trigger)
+        if (action === 'toggle-last-macro' && active.has(binding) && !held.has(binding)) toggleLastMacro(trigger)
         if (message && active.has(binding) && !held.has(binding)) dispatch(message)
       }
       held = active

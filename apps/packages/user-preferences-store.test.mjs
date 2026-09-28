@@ -34,6 +34,12 @@ test('accepts Soft Reset as a persisted trigger action', async () => {
   assert.equal(result.preferences.triggerActions.l2, 'soft-reset')
 })
 
+test('persists Start/stop last macro for either trigger', async () => {
+  const store = createRedisUserPreferencesStore({ persistence: createMemoryRedisPersistence() })
+  await store.patch({ triggerActions: { l2: 'toggle-last-macro', r2: 'toggle-last-macro' }, muted: false })
+  assert.deepEqual((await store.get()).preferences.triggerActions, { l2: 'toggle-last-macro', r2: 'toggle-last-macro' })
+})
+
 test('persists mute without changing speed or trigger actions', async () => {
   const store = createRedisUserPreferencesStore({ persistence: createMemoryRedisPersistence() })
   await store.patch({ fastForwardSpeed: 3, triggerActions: { l2: 'soft-reset' }, initializeIfAbsent: true })

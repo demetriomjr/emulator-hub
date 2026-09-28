@@ -7,21 +7,22 @@ export function createMacroRunCoordinator({ request, onChange = () => {} }) {
     getState: () => ({ ...state }),
     async start(macro, participants) {
       if (active || !participants.length) throw new Error(active ? 'Uma macro já está ativa' : 'Nenhum player aberto')
-      const run = { runId: crypto.randomUUID(), participants: [...participants], ended: new Set() }
+      const run = { runId: crypto.randomUUID(), participants: [...participants], ended: new Set(), completed: false, stopRequested: false }
       active = run
       publish({ phase: 'preparing', runId: run.runId, macroId: macro.id, error: '' })
       try {
         const prepared = await Promise.allSettled(run.participants.map(participant => request(participant, 'prepare', run.runId, macro)))
         const failure = prepared.find(result => result.status === 'rejected')
         if (failure) throw failure.reason
-        if (active !== run) return
+        if (active !== run || run.stopRequested) return false
         publish({ phase: 'starting' })
         const started = await Promise.allSettled(run.participants.map(participant => request(participant, 'start', run.runId)))
         const startFailure = started.find(result => result.status === 'rejected')
         if (startFailure) throw startFailure.reason
-        if (active !== run) return
-        if (run.ended.size === run.participants.length) { active = null; publish({ phase: 'idle', runId: null, macroId: null }); return }
+        if (active !== run || run.stopRequested) return run.completed
+        if (run.ended.size === run.participants.length) { active = null; publish({ phase: 'idle', runId: null, macroId: null }); return true }
         publish({ phase: 'running' })
+        return true
       } catch (error) {
         const stopped = await stopParticipants(run)
         if (active === run) {
@@ -35,6 +36,7 @@ export function createMacroRunCoordinator({ request, onChange = () => {} }) {
     async stop() {
       const run = active
       if (!run) return
+      run.stopRequested = true
       publish({ phase: 'stopping' })
       const results = await stopParticipants(run)
       if (active !== run) return
@@ -63,6 +65,7 @@ export function createMacroRunCoordinator({ request, onChange = () => {} }) {
         return
       }
       if (run.ended.size === run.participants.length && state.phase !== 'stopping') {
+        run.completed = true
         active = null
         publish({ phase: 'idle', runId: null, macroId: null, error: '' })
       }

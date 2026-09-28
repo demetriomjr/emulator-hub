@@ -421,6 +421,10 @@ button { font: inherit; }
 .macro-panel .profile-select:hover:not(:disabled) { background: #1b473d; }
 .macro-panel .macro-actions-footer { padding: 4px 6px; }
 .macro-run-button span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.macro-play-button { display: grid; place-items: center; width: 40px; flex: none; border: 0; border-left: 1px solid #397c67; color: #bfe6d3; background: #0d2026; cursor: pointer; }
+.macro-play-button:hover:not(:disabled) { color: #fff; background: #216553; }
+.macro-play-button:disabled { opacity: .45; cursor: default; }
+.macro-play-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
 .macro-actions-footer { display: flex; flex-direction: column; }
 .macro-actions-footer .profile-add { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 14px; }
 .macro-name-form { display: flex; min-height: 0; flex: 1; flex-direction: column; }

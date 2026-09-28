@@ -1,5 +1,5 @@
 const speeds = Object.freeze([1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5])
-const actions = Object.freeze(['none', 'soft-reset', 'reset', 'save-state', 'load-state', 'fast-forward'])
+const actions = Object.freeze(['none', 'soft-reset', 'reset', 'save-state', 'load-state', 'fast-forward', 'toggle-last-macro'])
 export const defaultUserPreferences = Object.freeze({ version: 1, fastForwardSpeed: 1.5, fastForwardEnabled: false, muted: false, triggerActions: Object.freeze({ l2: 'none', r2: 'none' }) })
 
 export function createRedisUserPreferencesStore({ persistence }) {

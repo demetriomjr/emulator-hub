@@ -14,6 +14,7 @@ test('defaults both controller triggers to doing nothing', () => {
     { value: 'reset', label: 'Hard Reset' },
     { value: 'save-state', label: 'Save state' },
     { value: 'load-state', label: 'Load state' },
+    { value: 'toggle-last-macro', label: 'Iniciar/parar último macro' },
   ])
 })
 
@@ -64,4 +65,15 @@ test('uses the controller bindings configured for L2 and R2', () => {
   })
 
   assert.deepEqual(dispatched, ['emulator-hub:save-state', 'emulator-hub:load-state'])
+})
+
+test('toggles the last macro once per L2 or R2 press edge', () => {
+  const toggles = []
+  const triggers = createPlayerTriggerActions({ toggleLastMacro: trigger => toggles.push(trigger) })
+  const actions = { l2: 'toggle-last-macro', r2: 'toggle-last-macro' }
+  triggers.update(['LEFT_BOTTOM_SHOULDER'], actions)
+  triggers.update(['LEFT_BOTTOM_SHOULDER'], actions)
+  triggers.update([], actions)
+  triggers.update(['RIGHT_BOTTOM_SHOULDER'], actions)
+  assert.deepEqual(toggles, ['l2', 'r2'])
 })

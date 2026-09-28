@@ -1,5 +1,7 @@
 # Specifications
 
+- [Spec 079 — Evoluções por troca no Pokémon Hub](079-pokemon-hub-trade-evolutions-research.md): esboço de investigação Gen III sobre evolução nativa no jogo, gatilho de troca e simulação persistida no Hub.
+- [Spec 078 — Card de Pokémon e dados do save](078-pokemon-hub-pokemon-card-and-save-data.md): esboço da view individual, pesquisa Gen III e auditoria preliminar do que o `.sav` já preserva no Hub versus o que falta projetar.
 - [Spec 077 — Pokémon Hub duplicate save maintenance](077-pokemon-hub-duplicate-save-maintenance.md): production evidence for two Hub/save duplicates, targeted data reconciliation and snapshot integrity requirements.
 - [Spec 074 — Generation III event save research](074-gen3-event-save-research.md): investigate safe Bag, PC item and event-flag inspection and direct Key Item delivery.
 

@@ -13,7 +13,7 @@ test('starts only after every player prepares and keeps an early completion', as
     },
     onChange() {},
   })
-  await coordinator.start({ id: 'macro', items: [] }, ['first', 'second'])
+  assert.equal(await coordinator.start({ id: 'macro', items: [] }, ['first', 'second']), true)
   assert.deepEqual(calls.slice(0, 2), [['first', 'prepare'], ['second', 'prepare']])
   assert.equal(coordinator.getState().phase, 'running')
   coordinator.ended('second', coordinator.getState().runId, 'completed')
@@ -31,6 +31,39 @@ test('shows starting while waiting for player start acknowledgments', async () =
   confirmStart()
   await starting
   assert.equal(coordinator.getState().phase, 'running')
+})
+
+test('cancelled preparation does not report a confirmed start', async () => {
+  let confirmPrepare
+  const coordinator = createMacroRunCoordinator({
+    request: async (_, phase) => phase === 'prepare' ? new Promise(resolve => { confirmPrepare = resolve }) : undefined,
+  })
+  const starting = coordinator.start({ id: 'macro' }, ['first'])
+  await coordinator.stop()
+  confirmPrepare()
+  assert.equal(await starting, false)
+  assert.equal(coordinator.getState().phase, 'idle')
+})
+
+test('stop requested during preparation prevents a late start command', async () => {
+  let confirmPrepare
+  let confirmStop
+  const phases = []
+  const coordinator = createMacroRunCoordinator({
+    request: async (_, phase) => {
+      phases.push(phase)
+      if (phase === 'prepare') return new Promise(resolve => { confirmPrepare = resolve })
+      if (phase === 'stop') return new Promise(resolve => { confirmStop = resolve })
+    },
+  })
+  const starting = coordinator.start({ id: 'macro' }, ['first'])
+  const stopping = coordinator.stop()
+  confirmPrepare()
+  assert.equal(await starting, false)
+  assert.equal(phases.includes('start'), false)
+  confirmStop()
+  await stopping
+  assert.equal(coordinator.getState().phase, 'idle')
 })
 
 test('failed preparation stops all participants and does not report running', async () => {
