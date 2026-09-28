@@ -29,21 +29,30 @@ test('choosing a source type leaves save and Hub profile selection explicit', as
   assert.match(packageSource, /onClick=\{\(\) => setSelectionDraft\(\{ kind: 'hub' \}\)\}/)
 })
 
-test('serializes structural source changes before constructing another workspace snapshot', async () => {
+test('queues pane loads while blocking only the pane being loaded', async () => {
   const packageSource = await readFile(packageFile, 'utf8')
+  const stylesheet = await readFile(new URL('../frontend/src/styles.css', import.meta.url), 'utf8')
 
-  assert.match(packageSource, /const pokemonHubBusyRef = useRef\(false\)/)
-  assert.match(packageSource, /if \(pokemonHubBusyRef\.current\) return false/)
-  assert.match(packageSource, /if \(pokemonHubBusyRef\.current\) return/)
-  assert.match(packageSource, /choosePaneSource\(pokemonHubPanesRef\.current, index, source \|\| null\)/)
+  assert.match(packageSource, /pokemonHubPaneQueueRef/)
+  assert.match(packageSource, /pokemonHubPendingPanes/)
+  assert.match(packageSource, /loading=\{Boolean\(pokemonHubPendingPanes\[index\]\)\}/)
+  assert.match(packageSource, /className="pokemon-workspace-pane-stale"/)
+  assert.match(stylesheet, /\.pokemon-workspace-pane-stale\s*\{[^}]*inset:\s*0/)
 })
 
 test('loads a selected pane through the server-owned pane command', async () => {
   const packageSource = await readFile(packageFile, 'utf8')
 
   assert.match(packageSource, /loadPokemonHubSessionPane/)
-  assert.match(packageSource, /session\.requestGate\.run\(\(\) => loadPokemonHubSessionPane\(session\.profileId, session\.sessionId, pane, incomingSource\)\)/)
+  assert.match(packageSource, /session\.requestGate\.run\(\(\) => loadPokemonHubSessionPane\(session\.profileId, session\.sessionId, pane, incomingSource, signal\)\)/)
   assert.match(packageSource, /if \(incomingSource\) \{[\s\S]*loadPokemonHubSessionPane/)
+})
+
+test('fetches a Hub profile grid only when that profile is selected', async () => {
+  const packageSource = await readFile(packageFile, 'utf8')
+  assert.match(packageSource, /getPokemonHubProfile\(incomingSource\.hubProfileId, signal\)/)
+  assert.match(packageSource, /setPokemonDetailsById\(current => \(\{ \.\.\.current, \.\.\.loadedHubProfile\.pokemonDetailsById \}\)\)/)
+  assert.doesNotMatch(packageSource, /setPokemonDetailsById\(current => \(\{ \.\.\.current, \.\.\.response\.pokemonDetailsById \}\)\)/)
 })
 
 test('uses shared drag feedback for disabled sprites and blocked destination overlays', async () => {

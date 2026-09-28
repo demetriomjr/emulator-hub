@@ -48,6 +48,23 @@ test('a pending save selection exclusively activates the save source mode', asyn
   assert.equal(workspace.activePaneSourceKind({ kind: 'hub', hubProfileId: 'general' }, null), 'hub')
 })
 
+test('switching the selector mode hides the previous source controls while keeping its selection', async () => {
+  const { paneControlSources } = await import('./pokemon-hub-workspace.mjs')
+  assert.equal(typeof paneControlSources, 'function')
+  const save = { kind: 'game', gameId: 'pokemon-emerald', profileId: 'may' }
+  const hub = { kind: 'hub', hubProfileId: 'general' }
+
+  assert.deepEqual(paneControlSources(save, { kind: 'hub' }), {
+    activeSourceKind: 'hub', selectedSaveSource: null, selectedHubSource: { kind: 'hub' },
+  })
+  assert.deepEqual(paneControlSources(hub, { kind: 'game' }), {
+    activeSourceKind: 'game', selectedSaveSource: { kind: 'game' }, selectedHubSource: null,
+  })
+  assert.deepEqual(paneControlSources(save, null), {
+    activeSourceKind: 'game', selectedSaveSource: save, selectedHubSource: null,
+  })
+})
+
 test('hides occupied complete sources from other pane selectors while retaining the current value', () => {
   const hub = { kind: 'hub', hubProfileId: 'general' }
   const game = { kind: 'game', profileId: 'may', gameId: 'pokemon-emerald' }

@@ -1,5 +1,6 @@
 import genderRatios from './pokemon-gen3-gender-ratios.json' with { type: 'json' }
 import nameCatalog from './pokemon-gen3-name-catalog.json' with { type: 'json' }
+import moveTypeCatalog from './pokemon-gen3-move-types.json' with { type: 'json' }
 import { getGen3PartySpeciesData, getGen3LevelFromExperience } from './pokemon-gen3-party-data.mjs'
 import { calculateGen3BattleStats, parseGen3BoxCore } from './pokemon-gen3-party-runtime.mjs'
 import { getGen3NationalDex } from './pokemon-gen3-species.mjs'
@@ -9,6 +10,14 @@ const ballNames = Object.freeze(['', 'Master Ball', 'Ultra Ball', 'Great Ball', 
 const contestNames = Object.freeze(['Cool', 'Beauty', 'Cute', 'Smart', 'Tough'])
 const rankNames = Object.freeze(['Normal', 'Super', 'Hyper', 'Master'])
 const otherRibbonNames = Object.freeze(['Champion', 'Winning', 'Victory', 'Artist', 'Effort', 'Marine', 'Land', 'Sky', 'Country', 'National', 'Earth', 'World'])
+const hiddenPowerTypes = Object.freeze(['fighting', 'flying', 'poison', 'ground', 'rock', 'bug', 'ghost', 'steel', 'fire', 'water', 'grass', 'electric', 'psychic', 'ice', 'dragon', 'dark'])
+
+function getMoveType(moveId, ivs) {
+  if (moveId === 0) return null
+  if (moveId !== 237) return moveTypeCatalog.types[moveId] ?? null
+  const parity = ['hp', 'attack', 'defense', 'speed', 'specialAttack', 'specialDefense'].reduce((bits, stat, index) => bits | ((ivs[stat] & 1) << index), 0)
+  return hiddenPowerTypes[Math.floor(parity * 15 / 63)]
+}
 
 export function getGen3GenderRatio(nativeSpeciesId) {
   const ratio = genderRatios[nativeSpeciesId]
@@ -52,8 +61,9 @@ export function projectGen3PokemonCard({ bytes, kind, title = null, provenance =
 
   return {
     identity: { species, speciesLabel: nameCatalog.species[parsed.species] ?? null, nativeSpeciesId: parsed.species, shiny, gender, isEgg: parsed.isEgg },
-    training: { level, stats, ivs: parsed.ivs, partyRuntime: runtime ? { currentHp: runtime.currentHp, maxHp: runtime.maxHp, condition: runtime.condition } : null },
-    moves: parsed.moves.map((moveId, slot) => ({ slot, moveId, label: moveId === 0 ? null : nameCatalog.moves[moveId] ?? `Move #${moveId}`, pp: moveId === 0 ? null : parsed.pp[slot], maxPp: null })),
+    incubation: parsed.isEgg ? { eggCyclesRemaining: parsed.friendship } : null,
+    training: { level, stats, evs: parsed.evs, ivs: parsed.ivs, partyRuntime: runtime ? { currentHp: runtime.currentHp, maxHp: runtime.maxHp, condition: runtime.condition } : null },
+    moves: parsed.moves.map((moveId, slot) => ({ slot, moveId, label: moveId === 0 ? null : nameCatalog.moves[moveId] ?? `Move #${moveId}`, type: getMoveType(moveId, parsed.ivs), pp: moveId === 0 ? null : parsed.pp[slot], maxPp: null })),
     ribbons: decodeGen3Ribbons(parsed.ribbonFlags),
     origin: { trainerId, metGameId: parsed.metGame, metGameLabel: gameNames[parsed.metGame] ?? null, originSaveProfileId: sourceMatch?.[1] ?? null, originGameId: sourceMatch?.[2] ?? null },
     capture: { ballId: parsed.pokeball, ballLabel: ballNames[parsed.pokeball] ?? null },

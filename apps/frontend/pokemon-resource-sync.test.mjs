@@ -77,11 +77,11 @@ test('normalizes transparent outer space into a centered fixed-size sprite canva
 
   const normalized = await normalizePokemonSprite(source, sharp)
   assert.deepEqual(await sharp(normalized).metadata().then(({ width, height, hasAlpha }) => ({ width, height, hasAlpha })), {
-    width: 96,
-    height: 96,
+    width: 480,
+    height: 480,
     hasAlpha: true,
   })
-  assert.deepEqual(await alphaBounds(normalized), { left: 29, top: 10, width: 38, height: 76 })
+  assert.deepEqual(await alphaBounds(normalized), { left: 145, top: 50, width: 190, height: 380 })
 })
 
 test('treats a manifest from an earlier sprite normalization as incomplete', async t => {
@@ -134,9 +134,9 @@ test('replaces an incomplete catalog with every expected local resource and mani
 
   assert.deepEqual(result, { status: 'synchronized', count: 1 })
   assert.equal(downloads, 3)
-  assert.deepEqual(await sharp(join(directory, '6.png')).metadata().then(({ width, height }) => ({ width, height })), { width: 96, height: 96 })
-  assert.deepEqual(await sharp(join(directory, '6-shiny.png')).metadata().then(({ width, height }) => ({ width, height })), { width: 96, height: 96 })
-  assert.deepEqual(await sharp(join(directory, 'egg.png')).metadata().then(({ width, height }) => ({ width, height })), { width: 96, height: 96 })
+  assert.deepEqual(await sharp(join(directory, '6.png')).metadata().then(({ width, height }) => ({ width, height })), { width: 480, height: 480 })
+  assert.deepEqual(await sharp(join(directory, '6-shiny.png')).metadata().then(({ width, height }) => ({ width, height })), { width: 480, height: 480 })
+  assert.deepEqual(await sharp(join(directory, 'egg.png')).metadata().then(({ width, height }) => ({ width, height })), { width: 480, height: 480 })
   assert.deepEqual(JSON.parse(await readFile(join(directory, 'manifest.json'), 'utf8')), {
     schemaVersion: 1,
     spriteNormalizationVersion: SPRITE_NORMALIZATION_VERSION,
@@ -188,10 +188,10 @@ test('adds only the egg to an existing catalog without fetching species metadata
   })
 
   assert.deepEqual(result, { status: 'synchronized', count: 1 })
-  assert.deepEqual(downloaded, ['https://raw.githubusercontent.com/pret/pokeemerald/master/graphics/pokemon/egg/front.png'])
+  assert.deepEqual(downloaded, ['https://projectpokemon.org/images/sprites-models/homeimg/poke_capture_0000_000_uk_n_00000000_f_n.png'])
   assert.equal(await readFile(join(directory, '6.png'), 'utf8'), 'previous-normal')
   assert.equal(await readFile(join(directory, '6-shiny.png'), 'utf8'), 'previous-shiny')
-  assert.deepEqual(await sharp(join(directory, 'egg.png')).metadata().then(({ width, height }) => ({ width, height })), { width: 96, height: 96 })
+  assert.deepEqual(await sharp(join(directory, 'egg.png')).metadata().then(({ width, height }) => ({ width, height })), { width: 480, height: 480 })
   assert.deepEqual(await getPokemonResourceCatalogStatus(directory), { status: 'complete', count: 1 })
 })
 
@@ -249,4 +249,23 @@ test('refresh downloads a species again when its source identifier changes', asy
   })
 
   assert.deepEqual(downloaded, [changedRecord.images.normal, changedRecord.images.shiny])
+})
+
+test('forced synchronization downloads every sprite again and replaces the catalog only when complete', async t => {
+  const directory = await fixture(t)
+  await writeCompleteCatalog(directory, 'previous-normal', 'previous-shiny', 'previous-egg')
+  const downloaded = []
+
+  const result = await syncPokemonResources({
+    targetDirectory: directory,
+    force: true,
+    loadRecords: async () => [record],
+    download: async url => { downloaded.push(url); return opaqueSprite() },
+    imageProcessor: sharp,
+  })
+
+  assert.deepEqual(result, { status: 'synchronized', count: 1 })
+  assert.deepEqual(downloaded.sort(), [record.images.normal, record.images.shiny, 'https://projectpokemon.org/images/sprites-models/homeimg/poke_capture_0000_000_uk_n_00000000_f_n.png'].sort())
+  assert.deepEqual(await sharp(join(directory, '6.png')).metadata().then(({ width, height }) => ({ width, height })), { width: 480, height: 480 })
+  assert.deepEqual(await getPokemonResourceCatalogStatus(directory), { status: 'complete', count: 1 })
 })

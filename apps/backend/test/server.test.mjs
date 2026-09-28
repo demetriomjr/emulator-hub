@@ -1550,7 +1550,7 @@ describe('hub backend HTTP contract', () => {
   test('creates and lists Hub profiles from the Redis-backed Hub collection', async () => {
     const { baseUrl } = await startFixture([])
 
-    assert.deepEqual(await jsonResponse(await fetch(`${baseUrl}/api/pokemon-hub/profiles`)), { profiles: [], pokemonDetailsById: {} })
+    assert.deepEqual(await jsonResponse(await fetch(`${baseUrl}/api/pokemon-hub/profiles`)), { profiles: [] })
 
     const createdResponse = await fetch(`${baseUrl}/api/pokemon-hub/profiles`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Shiny collection' }),
@@ -1560,7 +1560,7 @@ describe('hub backend HTTP contract', () => {
     assert.equal(created.name, 'Shiny collection')
     assert.deepEqual(created.grid, { entries: {} })
 
-    assert.deepEqual(await jsonResponse(await fetch(`${baseUrl}/api/pokemon-hub/profiles`)), { profiles: [created], pokemonDetailsById: {} })
+    assert.deepEqual(await jsonResponse(await fetch(`${baseUrl}/api/pokemon-hub/profiles`)), { profiles: [{ hubProfileId: created.hubProfileId, name: created.name }] })
   })
 
   test('renames and deletes a Hub profile through its own collection route', async () => {
@@ -2099,8 +2099,9 @@ describe('hub backend HTTP contract', () => {
     assert.deepEqual(await jsonResponse(detail), { ...profile, leaseActive: false })
   })
 
-  test('projects occupied Hub grid entries from their owner profile snapshot when listing profiles', async () => {
+  test('lists only Hub profile names and loads the selected profile grid on demand', async () => {
     const fixture = await createFixture([])
+    let snapshotReads = 0
     const bytes = Buffer.alloc(80)
     bytes.writeUInt16LE(25, 0x20)
     bytes.writeUInt16LE(25, 0x1c)
@@ -2112,7 +2113,7 @@ describe('hub backend HTTP contract', () => {
         async list() { return [{ hubProfileId: '11111111-1111-4111-8111-111111111111', ownerProfileId: 'profile-may', name: 'Transfer box', grid: { entries: {} } }] },
       },
       pokemonHubSnapshotCoordinator: {
-        async getSnapshot() { return { ...source, pokemonDisplay: { 'pokemon-alpha': { species: 25, shiny: true } } } },
+        async getSnapshot() { snapshotReads += 1; return { ...source, pokemonDisplay: { 'pokemon-alpha': { species: 25, shiny: true } } } },
         async getDetailSource() { return { source, records: new Map([['pokemon-alpha', { profileId: 'profile-may', pokemonInstanceId: 'pokemon-alpha', revision: 1, placement: { sourceKey: source.sourceKey, location }, representations: [{ adapter: 'gen3-gba-v1', kind: 'pc-record', bytesBase64: bytes.toString('base64'), sha256: sha256(bytes) }] }]]) } },
       },
       pokemonHubSaveFlush: { async flushSource() { return { status: 'clean' } } },
@@ -2120,11 +2121,16 @@ describe('hub backend HTTP contract', () => {
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
     liveServers.add(server)
 
-    const response = await fetch(`${`http://127.0.0.1:${server.address().port}`}/api/pokemon-hub/profiles`)
-    const body = await jsonResponse(response)
+    const baseUrl = `http://127.0.0.1:${server.address().port}`
+    const list = await jsonResponse(await fetch(`${baseUrl}/api/pokemon-hub/profiles`))
+    assert.deepEqual(list, { profiles: [{ hubProfileId: location.hubProfileId, ownerProfileId: 'profile-may', name: 'Transfer box' }] })
+    assert.equal(snapshotReads, 0)
 
+    const response = await fetch(`${baseUrl}/api/pokemon-hub/profiles/${location.hubProfileId}`)
+    const body = await jsonResponse(response)
     assert.equal(response.status, 200)
-    assert.deepEqual(body.profiles[0].grid.entries, { 4: { pokemonInstanceId: 'pokemon-alpha', species: 25, shiny: true } })
+    assert.equal(snapshotReads, 1)
+    assert.deepEqual(body.profile.grid.entries, { 4: { pokemonInstanceId: 'pokemon-alpha', species: 25, shiny: true } })
     assert.equal(body.pokemonDetailsById['pokemon-alpha'].availability, 'ready')
     assert.equal(body.pokemonDetailsById['pokemon-alpha'].identity.species, 25)
     assert.equal(JSON.stringify(body).includes('bytesBase64'), false)

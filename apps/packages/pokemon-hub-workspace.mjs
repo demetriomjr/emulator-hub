@@ -30,6 +30,16 @@ export function activePaneSourceKind(source, selectionDraft) {
   return selectionDraft?.kind ?? source?.kind ?? null
 }
 
+export function paneControlSources(source, selectionDraft) {
+  const selected = selectionDraft ?? source
+  const activeSourceKind = activePaneSourceKind(source, selectionDraft)
+  return {
+    activeSourceKind,
+    selectedSaveSource: activeSourceKind === 'game' ? selected : null,
+    selectedHubSource: activeSourceKind === 'hub' ? selected : null,
+  }
+}
+
 export function addWorkspacePane(panes) {
   if (panes.length >= 3) throw new Error('Pokémon Hub supports at most three panes.')
   return [...panes, null]

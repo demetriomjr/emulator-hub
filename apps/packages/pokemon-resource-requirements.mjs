@@ -6,7 +6,7 @@ import { normalizePokemonSprite, SPRITE_NORMALIZATION_VERSION } from './pokemon-
 
 const HASH = /^[a-f0-9]{64}$/
 const FILE = /^[a-zA-Z0-9-]+\.png$/
-const EGG_SOURCE = 'https://raw.githubusercontent.com/pret/pokeemerald/master/graphics/pokemon/egg/front.png'
+const EGG_SOURCE = 'https://projectpokemon.org/images/sprites-models/homeimg/poke_capture_0000_000_uk_n_00000000_f_n.png'
 
 export function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
@@ -85,6 +85,90 @@ async function replaceDirectory(targetDirectory, stageDirectory) {
     throw error
   }
   if (backedUp) await rm(backupDirectory, { recursive: true, force: true })
+}
+
+export async function upgradePokemonRequirements({ targetDirectory, requirements, download, imageProcessor } = {}) {
+  if (typeof targetDirectory !== 'string' || !targetDirectory) throw new TypeError('Target directory is required')
+  if (requirements?.schemaVersion !== 1 || requirements?.spriteNormalizationVersion !== SPRITE_NORMALIZATION_VERSION - 1 || !Array.isArray(requirements.entries) || requirements.entries.length === 0) {
+    throw new TypeError('Legacy Pokemon sprite requirements are required')
+  }
+  if (typeof download !== 'function') throw new TypeError('Resource downloader is required')
+  const files = new Set()
+  for (const entry of requirements.entries) {
+    if (!FILE.test(entry?.file) || files.has(entry.file) || !HASH.test(entry?.sha256) || typeof entry?.source !== 'string' || !entry.source.startsWith('https://')) {
+      throw new TypeError('Invalid legacy Pokemon sprite requirement')
+    }
+    files.add(entry.file)
+  }
+  if (!files.has('egg.png')) throw new TypeError('Pokemon sprite requirements must include egg.png')
+
+  targetDirectory = resolve(targetDirectory)
+  await mkdir(dirname(targetDirectory), { recursive: true })
+  const lockPath = join(dirname(targetDirectory), `.${basename(targetDirectory)}.sync.lock`)
+  const lock = await open(lockPath, 'wx')
+  const stageDirectory = join(dirname(targetDirectory), `.${basename(targetDirectory)}.sync-${process.pid}-${Date.now()}`)
+  try {
+    await mkdir(stageDirectory)
+    let cachedHashes = new Map()
+    let cachedSources = new Map()
+    try {
+      const cachedInventory = JSON.parse(await readFile(join(targetDirectory, 'inventory.json'), 'utf8'))
+      const sources = JSON.parse(await readFile(join(targetDirectory, 'upgrade-sources.json'), 'utf8'))
+      if (cachedInventory?.schemaVersion === 1 && cachedInventory?.spriteNormalizationVersion === SPRITE_NORMALIZATION_VERSION && Array.isArray(cachedInventory.entries)) {
+        cachedHashes = new Map(cachedInventory.entries.map(({ file, sha256: hash }) => [file, hash]))
+      }
+      if (sources?.spriteNormalizationVersion === SPRITE_NORMALIZATION_VERSION && Array.isArray(sources.entries)) {
+        cachedSources = new Map(sources.entries.map(({ file, source }) => [file, source]))
+      }
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error
+    }
+    const upgradedEntries = new Array(requirements.entries.length)
+    let nextIndex = 0
+    const workers = Array.from({ length: Math.min(8, requirements.entries.length) }, async () => {
+      while (nextIndex < requirements.entries.length) {
+        const index = nextIndex++
+        const entry = requirements.entries[index]
+        const cachedHash = cachedHashes.get(entry.file)
+        if (HASH.test(cachedHash) && cachedSources.get(entry.file) === entry.source) {
+          try {
+            const bytes = await readFile(join(targetDirectory, entry.file))
+            if (sha256(bytes) === cachedHash) {
+              await writeFile(join(stageDirectory, entry.file), bytes)
+              upgradedEntries[index] = { ...entry, sha256: cachedHash }
+              continue
+            }
+          } catch (error) {
+            if (error?.code !== 'ENOENT') throw error
+          }
+        }
+        const normalized = await normalizePokemonSprite(await download(entry.source), imageProcessor)
+        await writeFile(join(stageDirectory, entry.file), normalized)
+        upgradedEntries[index] = { ...entry, sha256: sha256(normalized) }
+      }
+    })
+    const results = await Promise.allSettled(workers)
+    const failure = results.find(result => result.status === 'rejected')
+    if (failure) throw failure.reason
+
+    const upgraded = validatePokemonRequirements({ ...requirements, spriteNormalizationVersion: SPRITE_NORMALIZATION_VERSION, entries: upgradedEntries })
+    await writeFile(join(stageDirectory, 'inventory.json'), inventoryManifest(upgraded))
+    await writeFile(join(stageDirectory, 'upgrade-sources.json'), JSON.stringify({ spriteNormalizationVersion: SPRITE_NORMALIZATION_VERSION, entries: upgraded.entries.map(({ file, source }) => ({ file, source })) }, null, 2) + '\n')
+    try {
+      const manifest = JSON.parse(await readFile(join(targetDirectory, 'manifest.json'), 'utf8'))
+      if (manifest?.schemaVersion === 1 && Array.isArray(manifest.entries)) {
+        await writeFile(join(stageDirectory, 'manifest.json'), JSON.stringify({ ...manifest, spriteNormalizationVersion: SPRITE_NORMALIZATION_VERSION }, null, 2) + '\n')
+      }
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error
+    }
+    await replaceDirectory(targetDirectory, stageDirectory)
+    return upgraded
+  } finally {
+    await rm(stageDirectory, { recursive: true, force: true })
+    await lock.close()
+    await rm(lockPath, { force: true })
+  }
 }
 
 export async function syncPokemonRequirements({ targetDirectory, requirements, download, imageProcessor } = {}) {

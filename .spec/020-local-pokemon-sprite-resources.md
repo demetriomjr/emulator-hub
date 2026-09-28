@@ -24,11 +24,11 @@ This explicitly excludes Mega Evolutions, Gigantamax forms, battle-only transfor
 
 ## Local resource contract
 
-All generated files live in exactly one static directory:
+All generated Pokémon species files live in exactly one static directory:
 
 `apps/frontend/public/resources/pokemon/`
 
-The public URL for every image begins with `/resources/pokemon/`. No region-specific subdirectory, source-specific directory, or second image root is allowed.
+The public URL for every Pokémon species image begins with `/resources/pokemon/`. No region-specific subdirectory, source-specific directory, or second species image root is allowed.
 
 File names use the National Pokédex number and lowercase region label:
 
@@ -58,7 +58,7 @@ Before `npm run dev` launches Vite, a `predev` hook checks the local catalog onl
 
 The synchronizer identifies base species and regional forms from upstream metadata, not from frontend assumptions. It uses the source's National Pokédex identity to create the public filename, so a regional form never overwrites its base species.
 
-Before an image is written locally, the synchronizer must normalize its transparent canvas. It must find the non-transparent alpha bounds, crop away only transparent outer space, scale the visible artwork proportionally into a fixed 76×76 usable area, and center it in a transparent 96×96 PNG. This makes the largest visible dimension consistent while preserving each sprite's aspect ratio and a 10-pixel safe inset on every side. The generated manifest records a sprite-normalization version; a catalog produced by an earlier normalization version is incomplete and is rebuilt atomically on the next frontend start.
+Before an image is written locally, the synchronizer must normalize its transparent canvas. It must find the non-transparent alpha bounds, crop away only transparent outer space, scale the visible artwork proportionally into a fixed 380×380 usable area, and center it in a transparent 480×480 PNG. This makes the largest visible dimension consistent while preserving each sprite's aspect ratio and a 50-pixel safe inset on every side. The generated manifest records a sprite-normalization version; a catalog produced by an earlier normalization version is incomplete and is rebuilt atomically on the next frontend start.
 
 ## Frontend behavior
 
@@ -78,6 +78,20 @@ spriteUrl({ nationalDex: 128, region: 'paldea', variant: 'combat-breed', shiny: 
 The first implementation introduces the catalog and resolver only. It does not change any Hub layout, save parser, API response, selector, game catalog, or existing screen until a later approved feature renders species sprites.
 
 ## Source and storage boundary
+
+## Ampliação dos renders locais para o card (2026-09-28)
+
+Os renders Pokémon HOME da PokéAPI já são PNGs de 512×512. O catálogo atual reduz o conteúdo para 76×76 em uma tela de 96×96, causando perda irreversível de detalhe no card grande. A normalização passa a usar conteúdo de até 380×380, centralizado em uma tela transparente de 480×480, com margem de 50 pixels. O conteúdo e a tela ficam cinco vezes maiores, mantendo as mesmas fontes HOME, variantes, nomes de arquivo e URLs locais. A versão de normalização muda para invalidar os arquivos de 96×96.
+
+O comando de sincronização detecta requisitos da versão anterior e migra os PNGs a partir das URLs já registradas, com downloads limitados em paralelo. Ele calcula e grava novos hashes, atualiza o manifesto local e substitui os arquivos somente após completar a aquisição. O hook anterior ao build executa esse comando; no desenvolvimento, a atualização roda em segundo plano. Se a aquisição falhar, os recursos anteriores permanecem disponíveis e a falha de uma integração visual não bloqueia o jogo nem os saves.
+
+Critérios: os PNGs migrados têm 480×480, a versão antiga não é aceita como completa, uma segunda execução usa os arquivos válidos sem baixar novamente, e uma falha mantém os arquivos anteriores.
+
+Uma atualização local explicitamente forçada usa `npm run sync:pokemon-resources:force`. Ela consulta o catálogo atual da PokéAPI, baixa novamente cada imagem normal, shiny e o ovo mesmo quando o arquivo local já está completo, normaliza tudo para 480×480 e substitui o diretório somente após concluir todas as aquisições. Em seguida, regrava `apps/frontend/pokemon-sprite-requirements.json` com as fontes e os hashes novos. O comando normal de atualização continua reaproveitando imagens existentes.
+
+## Catálogo de ícones das Pokébolas (2026-09-28)
+
+A sincronização de recursos do card baixa todas as 38 bolas de captura presentes nas categorias `special-balls`, `standard-balls` e `apricorn-balls` do bolso `pokeballs` da PokéAPI. Para cada bola, escolhe a melhor arte disponível na revisão fixada do repositório de sprites: `sprites/items/dream-world/` primeiro (15 ícones), `sprites/items/gen5/` depois (11 ícones), e `sprites/items/` para as 12 sem nenhuma dessas alternativas. O fallback padrão mantém a cobertura total, inclusive Beast Ball e bolas de Legends: Arceus. A arte da Geração 5 tem 24×24 pixels na amostra verificada; ela não é ampliada artificialmente. O manifesto registra, para cada ícone, o slug, a fonte upstream, o tamanho original e o hash. Os 38 arquivos têm nomes `<slug>.png` em uma única pasta `resources/pokeballs/`, irmã da pasta já existente `resources/pokemon/` dos sprites de Pokémon. A fonte é metadado, nunca parte do caminho local. O card resolve os IDs nativos para `/resources/pokeballs/<slug>.png`. A antiga estrutura `resources/pokemon-card/balls/` e suas cópias por fonte são removidas. Itens com “ball” no nome que não pertencem ao bolso de Pokébolas, como Iron Ball e Smoke Ball, ficam fora da lista. O hook existente de pré-build adquire todos no próximo deploy.
 
 Generated PNGs and the generated manifest are local development resources and are excluded from Git. The repository tracks the synchronizer, its deterministic catalog rules, tests, and a small test fixture only. A fresh checkout can recreate the local resource directory by starting the frontend or running the explicit synchronization command.
 

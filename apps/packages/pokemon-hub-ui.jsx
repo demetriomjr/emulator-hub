@@ -3,7 +3,7 @@ import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from '@dnd-
 import { PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom'
 import { Button, Form, Input, Modal, Popconfirm, Select } from 'antd'
 import { CloseOutlined, CodeSandboxOutlined, DeleteOutlined, EditOutlined, FolderAddOutlined, InboxOutlined, LeftOutlined, PlusOutlined, RightOutlined, SaveOutlined, StopOutlined } from '@ant-design/icons'
-import { closePokemonHubSession, createPokemonHubProfile, deletePokemonHubProfile, getGames, getPokemonHubProfiles, getSaveProfileLayout, heartbeatPokemonHubSession, loadPokemonHubSessionPane, openPokemonHubSession, renamePokemonHubProfile, syncPokemonHubSessionSnapshot } from './hub-client.js'
+import { closePokemonHubSession, createPokemonHubProfile, deletePokemonHubProfile, getGames, getPokemonHubProfile, getPokemonHubProfiles, getSaveProfileLayout, heartbeatPokemonHubSession, loadPokemonHubSessionPane, openPokemonHubSession, renamePokemonHubProfile, syncPokemonHubSessionSnapshot } from './hub-client.js'
 import { isPokemonHubDraggable, pokemonHubDragId } from './pokemon-hub-drag-identity.mjs'
 import { getPokemonHubDragFeedback, isPokemonHubPartyDropForbidden } from './pokemon-hub-drag-feedback.mjs'
 import { getPokemonHubColumnCount, getPokemonHubGridWidth, getPokemonHubVisibleSlotCount } from './pokemon-hub-grid.mjs'
@@ -11,14 +11,13 @@ import { createPokemonHubHeartbeatMonitor } from './pokemon-hub-heartbeat-monito
 import { reconcilePokemonCardSelection } from './pokemon-hub-card-selection.mjs'
 import { createPokemonHubRequestGate } from './pokemon-hub-request-gate.mjs'
 import { createPokemonHubSnapshotFlight } from './pokemon-hub-snapshot-flight.mjs'
-import { pokemonHubLocationKey } from './pokemon-hub-location-key.mjs'
 import { getNextSaveBoxIndex, getPreviousSaveBoxIndex, getSaveBoxSlotPosition, getSavePartySlotPosition } from './pokemon-save-layout-grid.mjs'
 import { getPokemonSlotFallback, getPokemonSlotSprite, hidePokemonSlotSprite } from './pokemon-slot-sprite.mjs'
 import { PokemonDetailCard } from './pokemon-detail-card.jsx'
 import { createGameSessionSourceSnapshot, createHubSessionSourceSnapshot, extendHubSessionSourceSnapshot, reconcileCanonicalSessionSnapshot, snapshotToSaveLayout } from './pokemon-hub-session-view.mjs'
 import { deriveSaveProfileCatalog } from './save-profile-catalog.mjs'
 import { formatGameProfileLabel } from './save-profile-display.mjs'
-import { activePaneSourceKind, addWorkspacePane, choosePaneSource, createPokemonHubWorkspaceState, hasAvailableSaveProfile, isCompletePaneSource, isPaneSourceAvailable, removeWorkspacePane } from './pokemon-hub-workspace.mjs'
+import { addWorkspacePane, choosePaneSource, createPokemonHubWorkspaceState, hasAvailableSaveProfile, isCompletePaneSource, isPaneSourceAvailable, paneControlSources, removeWorkspacePane } from './pokemon-hub-workspace.mjs'
 
 export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
   const [catalogLoading, setCatalogLoading] = useState(true)
@@ -31,13 +30,12 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
   const [pokemonDetailsById, setPokemonDetailsById] = useState({})
   const [pokemonHubActiveDrag, setPokemonHubActiveDrag] = useState(null)
   const [pokemonHubBusy, setPokemonHubBusy] = useState(false)
+  const [pokemonHubPendingPanes, setPokemonHubPendingPanes] = useState({})
   const [pokemonHubPanes, setPokemonHubPanes] = useState([])
   const [pokemonHubBoxes, setPokemonHubBoxes] = useState({})
   const [pokemonHubProfiles, setPokemonHubProfiles] = useState([])
   const [pokemonHubProfilesLoading, setPokemonHubProfilesLoading] = useState(false)
   const [saveLayoutsBySource, setSaveLayoutsBySource] = useState({})
-  const [saveLayoutsLoading, setSaveLayoutsLoading] = useState({})
-  const [saveLayoutsError, setSaveLayoutsError] = useState({})
   const [pokemonHubProfileCreator, setPokemonHubProfileCreator] = useState(null)
   const [pokemonHubProfileName, setPokemonHubProfileName] = useState('')
   const [pokemonHubProfileRenaming, setPokemonHubProfileRenaming] = useState(null)
@@ -48,6 +46,10 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
   const pokemonHubSnapshotsRef = useRef({})
   const pokemonHubPanesRef = useRef([])
   const pokemonHubBusyRef = useRef(false)
+  const pokemonHubPaneQueueRef = useRef(Promise.resolve())
+  const pokemonHubPendingSourcesRef = useRef({})
+  const pokemonHubClosingRef = useRef(false)
+  const pokemonHubAbortedRef = useRef(false)
   const pokemonHubLastDragRef = useRef(-Infinity)
   const pokemonCardTriggerRefs = useRef([])
   pokemonHubPanesRef.current = pokemonHubPanes
@@ -97,37 +99,17 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
     try {
       const response = await getPokemonHubProfiles()
       setPokemonHubProfiles(response.profiles)
-      setPokemonDetailsById(current => ({ ...current, ...response.pokemonDetailsById }))
     } catch (cause) { setPokemonHubError(cause.message) } finally { setPokemonHubProfilesLoading(false) }
   }
 
-  async function loadSaveLayout(gameId, profileId) {
-    const key = saveSourceKey(gameId, profileId)
-    if (saveLayoutsBySource[key] || saveLayoutsLoading[key]) return
-    setSaveLayoutsLoading(current => ({ ...current, [key]: true }))
-    setSaveLayoutsError(current => ({ ...current, [key]: '' }))
-    try {
-      const layout = await getSaveProfileLayout(gameId, profileId)
-      const sourceSnapshot = createGameSessionSourceSnapshot({ profileId, gameId, layout })
-      commitSessionSnapshots({ ...pokemonHubSnapshotsRef.current, [key]: sourceSnapshot })
-      setSaveLayoutsBySource(current => ({ ...current, [key]: snapshotToSaveLayout(sourceSnapshot, layout) }))
-      setPokemonDetailsById(current => ({ ...current, ...layout.pokemonDetailsById }))
-      return sourceSnapshot
-    } catch (cause) {
-      if (cause.code === 'SAVE_MISSING') setSaveLayoutsBySource(current => ({ ...current, [key]: { missing: true } }))
-      else setSaveLayoutsError(current => ({ ...current, [key]: cause.message }))
-      throw cause
-    } finally { setSaveLayoutsLoading(current => ({ ...current, [key]: false })) }
-  }
-
-  async function ensurePokemonHubSession(profileId) {
+  async function ensurePokemonHubSession(profileId, signal = undefined) {
     const current = pokemonHubSessionRef.current
     if (current) return current
     const opening = pokemonHubSessionOpeningRef.current
     if (opening) {
       return opening.promise
     }
-    const promise = openPokemonHubSession(profileId).then(opened => {
+    const promise = openPokemonHubSession(profileId, signal).then(opened => {
       const receivedAt = performance.now()
       const session = { profileId, sessionId: opened.sessionId, version: opened.snapshot.revision, heartbeatSequence: 0, heartbeatInFlight: false, heartbeatMonitor: createPokemonHubHeartbeatMonitor(), requestGate: createPokemonHubRequestGate(), leaseSample: { serverNow: opened.serverNow, expiresAt: opened.expiresAt, sentAt: receivedAt, receivedAt } }
       session.snapshotFlight = createPokemonHubSnapshotFlight({
@@ -184,7 +166,7 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
     setPokemonHubError('')
     setPokemonHubSnapshotStatus('')
     try {
-      const session = await ensurePokemonHubSession(profileId)
+      await ensurePokemonHubSession(profileId)
       const sourceSnapshot = await ensureHubSessionSource(profileId, source)
       const targetSnapshot = await ensureHubSessionSource(profileId, target)
       if (!sourceSnapshot?.sourceKey || !targetSnapshot?.sourceKey) throw new Error('The workspace source is not ready for movement.')
@@ -264,10 +246,10 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
     })
   }
 
-  async function submitStructuralPokemonHubPaneChange(nextPanes, incomingSource, { retainBusy = false } = {}) {
+  async function submitStructuralPokemonHubPaneChange(nextPanes, incomingSource, { paneLoad = false, paneIndex = null, signal = undefined } = {}) {
     if (pokemonHubBusyRef.current) return false
     pokemonHubBusyRef.current = true
-    setPokemonHubBusy(true)
+    if (!paneLoad) setPokemonHubBusy(true)
     setPokemonHubError('')
     setPokemonHubSnapshotStatus('')
     try {
@@ -275,27 +257,32 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
         ? incomingSource.profileId
         : pokemonHubSessionRef.current?.profileId ?? pokemonHubProfiles.find(profile => profile.hubProfileId === incomingSource?.hubProfileId)?.ownerProfileId
       if (!profileId) throw new Error('Open a game save before selecting this Hub profile.')
-      if (!await flushPendingPokemonHubSnapshot()) throw new Error('The workspace snapshot could not be synchronized before changing a pane.')
+      if (!await waitForPokemonHubLoad(flushPendingPokemonHubSnapshot(), signal)) throw new Error('The workspace snapshot could not be synchronized before changing a pane.')
+      signal?.throwIfAborted()
 
       const nextSnapshots = { ...pokemonHubSnapshotsRef.current }
       let loadedSave = null
+      let loadedHubProfile = null
       if (incomingSource?.kind === 'game') {
-        const session = await ensurePokemonHubSession(profileId)
-        const layout = await getSaveProfileLayout(incomingSource.gameId, incomingSource.profileId, session.profileId)
+        const session = await ensurePokemonHubSession(profileId, signal)
+        const layout = await getSaveProfileLayout(incomingSource.gameId, incomingSource.profileId, session.profileId, signal)
+        signal?.throwIfAborted()
         const key = saveSourceKey(incomingSource.gameId, incomingSource.profileId)
         const sourceSnapshot = createGameSessionSourceSnapshot({ profileId: incomingSource.profileId, gameId: incomingSource.gameId, layout })
         nextSnapshots[key] = sourceSnapshot
         loadedSave = { key, layout, sourceSnapshot }
       } else if (incomingSource?.kind === 'hub') {
-        const profile = pokemonHubProfiles.find(candidate => candidate.hubProfileId === incomingSource.hubProfileId)
-        if (!profile) throw new Error('The Hub profile is not available.')
-        nextSnapshots[`hub:${incomingSource.hubProfileId}`] = createHubSessionSourceSnapshot({ profileId, profile })
+        loadedHubProfile = await getPokemonHubProfile(incomingSource.hubProfileId, signal)
+        signal?.throwIfAborted()
+        nextSnapshots[`hub:${incomingSource.hubProfileId}`] = createHubSessionSourceSnapshot({ profileId, profile: loadedHubProfile.profile })
       }
-      const session = await ensurePokemonHubSession(profileId)
+      const session = await ensurePokemonHubSession(profileId, signal)
+      signal?.throwIfAborted()
       if (incomingSource) {
         const pane = nextPanes.findIndex(source => samePokemonHubPaneSource(source, incomingSource))
         if (pane < 0) throw new Error('The workspace pane source is invalid.')
-        const loaded = await session.requestGate.run(() => loadPokemonHubSessionPane(session.profileId, session.sessionId, pane, incomingSource))
+        const loaded = await waitForPokemonHubLoad(session.requestGate.run(() => loadPokemonHubSessionPane(session.profileId, session.sessionId, pane, incomingSource, signal)), signal)
+        signal?.throwIfAborted()
         if (loaded.corrected) {
           applyCanonicalSessionSnapshot(loaded.snapshot)
           setPokemonHubError('The backend corrected the workspace snapshot.')
@@ -312,6 +299,7 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
         }
         session.version = candidate.revision + 1
       }
+      if (paneLoad) nextPanes = choosePaneSource(pokemonHubPanesRef.current, paneIndex, incomingSource).panes
       setPokemonHubSnapshotStatus('Snapshot sincronizado.')
       const previousPanes = pokemonHubPanesRef.current
       const previousTriggers = pokemonCardTriggerRefs.current
@@ -321,19 +309,21 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
       commitSessionSnapshots(nextSnapshots)
       if (loadedSave) setSaveLayoutsBySource(current => ({ ...current, [loadedSave.key]: snapshotToSaveLayout(loadedSave.sourceSnapshot, loadedSave.layout) }))
       if (loadedSave) setPokemonDetailsById(current => ({ ...current, ...loadedSave.layout.pokemonDetailsById }))
+      if (loadedHubProfile) setPokemonDetailsById(current => ({ ...current, ...loadedHubProfile.pokemonDetailsById }))
       setPokemonCardSelection(current => reconcilePokemonCardSelection(current, nextPanes, paneSnapshotKey))
       setPokemonHubSelection([])
       setPokemonHubProfileCreator(null)
       return true
     } catch (cause) {
       console.error('[Pokemon Hub] structural snapshot failed', { code: cause.code, message: cause.message })
-      setPokemonHubError(cause.message)
+      if (paneLoad && signal?.aborted && pokemonHubSessionRef.current) {
+        pokemonHubClosingRef.current = true
+        endPokemonHubSessionLocally(new Error('O carregamento do perfil excedeu cinco minutos.'))
+      } else setPokemonHubError(signal?.aborted ? 'O carregamento do perfil excedeu cinco minutos.' : cause.message)
       return false
     } finally {
-      if (!retainBusy) {
-        pokemonHubBusyRef.current = false
-        setPokemonHubBusy(false)
-      }
+      pokemonHubBusyRef.current = false
+      if (!paneLoad) setPokemonHubBusy(false)
     }
   }
 
@@ -341,6 +331,7 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
     const session = pokemonHubSessionRef.current
     if (session) session.version = snapshot.revision
     const { panes, snapshots } = reconcileCanonicalSessionSnapshot(snapshot, pokemonHubPanesRef.current.length, pokemonHubSnapshotsRef.current)
+    pokemonHubPanesRef.current = panes
     setPokemonHubPanes(panes)
     setPokemonCardSelection([])
     commitSessionSnapshots(snapshots)
@@ -385,30 +376,56 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
     }))
   }
 
-  function selectPokemonHubPane(index, source) {
-    if (pokemonHubBusyRef.current) return
-    const result = choosePaneSource(pokemonHubPanesRef.current, index, source || null)
+  function selectPokemonHubPane(index, source, { allowBusy = false } = {}) {
+    if ((!allowBusy && pokemonHubBusy) || pokemonHubClosingRef.current || Object.hasOwn(pokemonHubPendingSourcesRef.current, index)) return
+    const reservedPanes = pokemonHubPanesRef.current.map((pane, candidate) =>
+      Object.hasOwn(pokemonHubPendingSourcesRef.current, candidate) ? pokemonHubPendingSourcesRef.current[candidate] : pane)
+    const result = choosePaneSource(reservedPanes, index, source || null)
     if (result.error) { setPokemonHubError(result.error); return }
     if (source && !isCompletePaneSource(source)) return
-    void submitStructuralPokemonHubPaneChange(result.panes, source)
+    pokemonHubPendingSourcesRef.current[index] = source || null
+    setPokemonHubPendingPanes(current => ({ ...current, [index]: true }))
+    const load = async () => {
+      try {
+        if (pokemonHubClosingRef.current) return
+        const current = choosePaneSource(pokemonHubPanesRef.current, index, source || null)
+        if (current.error) { setPokemonHubError(current.error); return }
+        await submitStructuralPokemonHubPaneChange(current.panes, source, { paneLoad: true, paneIndex: index, signal: AbortSignal.timeout(300_000) })
+      } finally {
+        delete pokemonHubPendingSourcesRef.current[index]
+        setPokemonHubPendingPanes(current => {
+          const next = { ...current }
+          delete next[index]
+          return next
+        })
+      }
+    }
+    pokemonHubPaneQueueRef.current = pokemonHubPaneQueueRef.current.then(load, load)
   }
 
   function addPokemonHubPane() {
     try {
-      setPokemonHubPanes(current => addWorkspacePane(current))
+      const next = addWorkspacePane(pokemonHubPanesRef.current)
+      pokemonHubPanesRef.current = next
+      setPokemonHubPanes(next)
       setPokemonHubSelection([])
       setPokemonHubError('')
     } catch (cause) { setPokemonHubError(cause.message) }
   }
 
   async function closePokemonHubPane(index) {
+    if (Object.keys(pokemonHubPendingSourcesRef.current).length) return
     try {
       await submitStructuralPokemonHubPaneChange(removeWorkspacePane(pokemonHubPanesRef.current, index), null)
     } catch (cause) { setPokemonHubError(cause.message) }
   }
 
   async function closePokemonHub() {
+    if (pokemonHubClosingRef.current) return
+    pokemonHubClosingRef.current = true
     setPokemonHubBusy(true)
+    await pokemonHubPaneQueueRef.current
+    if (pokemonHubAbortedRef.current) return
     if (pokemonHubSnapshotTimerRef.current !== null) window.clearTimeout(pokemonHubSnapshotTimerRef.current)
     pokemonHubSnapshotTimerRef.current = null
     const session = pokemonHubSessionRef.current
@@ -428,6 +445,9 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
   }
 
   function endPokemonHubSessionLocally(cause) {
+    pokemonHubClosingRef.current = true
+    if (pokemonHubAbortedRef.current) return
+    pokemonHubAbortedRef.current = true
     if (pokemonHubSnapshotTimerRef.current !== null) window.clearTimeout(pokemonHubSnapshotTimerRef.current)
     pokemonHubSnapshotTimerRef.current = null
     pokemonHubSnapshotsRef.current = {}
@@ -451,7 +471,7 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
       const profile = await createPokemonHubProfile({ name: pokemonHubProfileName })
       setPokemonHubProfiles(current => [...current, profile])
       setPokemonHubProfileCreator(null)
-      selectPokemonHubPane(index, { kind: 'hub', hubProfileId: profile.hubProfileId })
+      selectPokemonHubPane(index, { kind: 'hub', hubProfileId: profile.hubProfileId }, { allowBusy: true })
     } catch (cause) { setPokemonHubError(cause.message) } finally { setPokemonHubBusy(false) }
   }
 
@@ -467,7 +487,7 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
     setPokemonHubError('')
     try {
       const renamed = await renamePokemonHubProfile(pokemonHubProfileRenaming.hubProfileId, pokemonHubProfileRenameName)
-      setPokemonHubProfiles(current => current.map(profile => profile.hubProfileId === renamed.hubProfileId ? renamed : profile))
+      setPokemonHubProfiles(current => current.map(profile => profile.hubProfileId === renamed.hubProfileId ? { ...profile, name: renamed.name } : profile))
       setPokemonHubProfileRenaming(null)
     } catch (cause) { setPokemonHubError(cause.message) } finally { setPokemonHubBusy(false) }
   }
@@ -487,7 +507,7 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
 
   function closePokemonCard(pane) {
     setPokemonCardSelection(current => current.map((selection, index) => index === pane ? null : selection))
-    pokemonCardTriggerRefs.current[pane]?.focus()
+    window.requestAnimationFrame(() => pokemonCardTriggerRefs.current[pane]?.focus())
   }
 
   function selectPokemonHubLocation(location, pane, pokemonInstanceId = null, trigger = null) {
@@ -513,7 +533,7 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
         <Button className="dialog-close" type="text" aria-label="Fechar Pokémon Hub" icon={<CloseOutlined />} onClick={() => void closePokemonHub()} />
       </header>
       <div className={`pokemon-workspace-body pokemon-workspace-body-${pokemonHubPanes.length}`}>
-        {pokemonHubPanes.map((source, index) => <PokemonHubPane key={index} side={index} panes={pokemonHubPanes} paneCount={pokemonHubPanes.length} source={source} activeDrag={pokemonHubActiveDrag} data={pokemonHubData} hubProfiles={pokemonHubProfiles} profilesLoading={pokemonHubProfilesLoading} saveProfileGames={saveProfileGames} saveProfileGamesLoading={catalogLoading} saveProfileGamesError={catalogError} saveProfilesByGame={saveProfilesByGame} saveLayoutsBySource={saveLayoutsBySource} saveLayoutsLoading={saveLayoutsLoading} saveLayoutsError={saveLayoutsError} selected={pokemonHubSelection} cardSelection={pokemonCardSelection[index]} pokemonDetailsById={pokemonDetailsById} onCardClose={() => closePokemonCard(index)} selectedBox={pokemonHubBoxes[saveSourceKey(source?.gameId, source?.profileId)]} busy={pokemonHubBusy} onSourceChange={nextSource => selectPokemonHubPane(index, nextSource)} onCreate={() => openPokemonHubProfileCreator(index)} onAddPane={addPokemonHubPane} onClosePane={() => closePokemonHubPane(index)} onBoxChange={(gameId, profileId, box) => setPokemonHubBoxes(current => ({ ...current, [saveSourceKey(gameId, profileId)]: box }))} onSlotSelect={selectPokemonHubLocation} onRename={openPokemonHubProfileRenamer} onDelete={deleteHubProfile} />)}
+        {pokemonHubPanes.map((source, index) => <PokemonHubPane key={index} side={index} panes={pokemonHubPanes} paneCount={pokemonHubPanes.length} source={source} activeDrag={pokemonHubActiveDrag} data={pokemonHubData} hubProfiles={pokemonHubProfiles} profilesLoading={pokemonHubProfilesLoading} saveProfileGames={saveProfileGames} saveProfileGamesLoading={catalogLoading} saveProfileGamesError={catalogError} saveProfilesByGame={saveProfilesByGame} saveLayoutsBySource={saveLayoutsBySource} selected={pokemonHubSelection} cardSelection={pokemonCardSelection[index]} pokemonDetailsById={pokemonDetailsById} onCardClose={() => closePokemonCard(index)} selectedBox={pokemonHubBoxes[saveSourceKey(source?.gameId, source?.profileId)]} busy={pokemonHubBusy} loading={Boolean(pokemonHubPendingPanes[index])} structureBusy={Object.keys(pokemonHubPendingPanes).length > 0} onSourceChange={nextSource => selectPokemonHubPane(index, nextSource)} onCreate={() => openPokemonHubProfileCreator(index)} onAddPane={addPokemonHubPane} onClosePane={() => closePokemonHubPane(index)} onBoxChange={(gameId, profileId, box) => setPokemonHubBoxes(current => ({ ...current, [saveSourceKey(gameId, profileId)]: box }))} onSlotSelect={selectPokemonHubLocation} onRename={openPokemonHubProfileRenamer} onDelete={deleteHubProfile} />)}
       </div>
       {pokemonHubBusy && <div className="pokemon-workspace-stale" role="status" aria-label="Processando alteração do workspace"><span>Processando…</span></div>}
       <footer className="pokemon-workspace-footer">{pokemonHubSnapshotStatus && <p className="pokemon-hub-snapshot-status" role="status">{pokemonHubSnapshotStatus}</p>}{pokemonHubError && <p className="profile-error" role="alert">{pokemonHubError}</p>}</footer>
@@ -561,9 +581,7 @@ function PokemonHubPaneControls({ side, panes, source, hubProfiles, profilesLoad
   const [selectionDraft, setSelectionDraft] = useState(null)
   useEffect(() => { setSelectionDraft(null) }, [source?.gameId, source?.hubProfileId, source?.kind, source?.profileId])
   const availableHubProfiles = hubProfiles.filter(profile => isPaneSourceAvailable(panes, side, { kind: 'hub', hubProfileId: profile.hubProfileId }))
-  const selectedSaveSource = selectionDraft?.kind === 'game' ? selectionDraft : (source?.kind === 'game' ? source : null)
-  const selectedHubSource = selectionDraft?.kind === 'hub' ? selectionDraft : (source?.kind === 'hub' ? source : null)
-  const activeSourceKind = activePaneSourceKind(source, selectionDraft)
+  const { activeSourceKind, selectedSaveSource, selectedHubSource } = paneControlSources(source, selectionDraft)
   const selectedGameId = selectedSaveSource?.gameId ?? null
   const saveProfiles = selectedGameId ? saveProfilesByGame[selectedGameId] ?? [] : []
   const allSaveProfiles = saveProfileGames.find(game => game.id === selectedGameId)?.profiles ?? []
@@ -640,18 +658,17 @@ function PokemonHubSlotGrid({ profile, entries, layoutVersion, side, title, sele
   </div>
 }
 
-function PokemonHubPane({ side, panes, paneCount, source, activeDrag, data, hubProfiles, profilesLoading, saveProfileGames, saveProfileGamesLoading, saveProfileGamesError, saveProfilesByGame, saveLayoutsBySource, saveLayoutsLoading, saveLayoutsError, selected, cardSelection, pokemonDetailsById, onCardClose, selectedBox, busy, onSourceChange, onCreate, onAddPane, onClosePane, onBoxChange, onSlotSelect, onRename, onDelete }) {
+function PokemonHubPane({ side, panes, paneCount, source, activeDrag, data, hubProfiles, profilesLoading, saveProfileGames, saveProfileGamesLoading, saveProfileGamesError, saveProfilesByGame, saveLayoutsBySource, selected, cardSelection, pokemonDetailsById, onCardClose, selectedBox, busy, loading, structureBusy, onSourceChange, onCreate, onAddPane, onClosePane, onBoxChange, onSlotSelect, onRename, onDelete }) {
   const games = data?.games ?? []
   const game = source?.kind === 'game' ? games.find(candidate => candidate.id === source.gameId) : null
   const hubProfile = source?.kind === 'hub' ? hubProfiles.find(candidate => candidate.hubProfileId === source.hubProfileId) : null
-  const saveProfileGame = source?.kind === 'game' ? saveProfileGames.find(candidate => candidate.id === source.gameId) : null
-  const saveProfile = source?.kind === 'game' && source.gameId ? (saveProfilesByGame[source.gameId] ?? []).find(candidate => candidate.id === source.profileId) : null
   const sourceKey = saveSourceKey(source?.gameId, source?.profileId)
   const saveLayout = saveLayoutsBySource[sourceKey]
   const currentCardId = cardSelection?.sourceKey === paneSnapshotKey(source) ? cardSelection.pokemonInstanceId : null
   const cardIsPresent = currentCardId && (hubProfile
     ? Object.values(hubProfile.grid.entries).some(entry => entry.pokemonInstanceId === currentCardId)
     : saveLayout && !saveLayout.missing && [...saveLayout.party, ...saveLayout.boxes.flatMap(box => box.slots)].some(slot => slot.pokemonInstanceId === currentCardId))
+  const cardOpen = Boolean(currentCardId && cardIsPresent)
   const cardDetail = cardIsPresent ? pokemonDetailsById[currentCardId] : null
   const dragPermission = slot => getPokemonHubDragFeedback({ panes, source, slot, saveLayoutsBySource })
   const activeSource = activeDrag ? sourceForPokemonHubLocation(panes, activeDrag.location) : null
@@ -676,23 +693,22 @@ function PokemonHubPane({ side, panes, paneCount, source, activeDrag, data, hubP
     })}
   </div>)
   return <section className="pokemon-workspace-pane" aria-label={`Painel ${side + 1} do Pokémon Hub`}>
-    <header className="pokemon-pane-header">
+    <header className="pokemon-pane-header" inert={cardOpen}>
       <PokemonHubPaneControls side={side} panes={panes} source={source} hubProfiles={hubProfiles} profilesLoading={profilesLoading} saveProfileGames={saveProfileGames} saveProfileGamesLoading={saveProfileGamesLoading} saveProfileGamesError={saveProfileGamesError} saveProfilesByGame={saveProfilesByGame} busy={busy} onSourceChange={onSourceChange} onCreate={onCreate} />
       <div className="pokemon-pane-actions">
-        {canClose && <Button className="pokemon-pane-action pokemon-pane-close" type="default" aria-label="Fechar container" title="Fechar container" icon={<CloseOutlined />} disabled={busy} onClick={onClosePane} />}
+        {canClose && <Button className="pokemon-pane-action pokemon-pane-close" type="default" aria-label="Fechar container" title="Fechar container" icon={<CloseOutlined />} disabled={busy || structureBusy} onClick={onClosePane} />}
         {canAdd && <Button className="pokemon-pane-action pokemon-pane-add" type="primary" aria-label="Abrir novo container" title="Abrir novo container" icon={<PlusOutlined />} disabled={busy} onClick={onAddPane} />}
       </div>
     </header>
-    <div className="pokemon-pane-content">
-      {saveLayoutsLoading[sourceKey] && <p className="pokemon-pane-note">Carregando Party e Boxes...</p>}
-      {saveLayoutsError[sourceKey] && <p className="pokemon-pane-note" role="alert">{saveLayoutsError[sourceKey]}</p>}
+    <div className="pokemon-pane-content" inert={cardOpen}>
       {saveLayout?.missing && <PokemonSaveLayoutMissing />}
       {saveLayout && !saveLayout.missing && <PokemonSaveLayout layout={saveLayout} gameId={source.gameId} profileId={source.profileId} selectedBox={selectedBox ?? 0} onBoxChange={onBoxChange} dragPermission={dragPermission} activeDrag={activeDrag} side={side} onSlotSelect={onSlotSelect} />}
       {slotGrid}
       {dragOverlayMessage && <div className="pokemon-hub-transfer-block-overlay" role="status">{dragOverlayMessage}</div>}
       {game && game.status !== 'ready' && <p className="pokemon-pane-note">{game.status === 'active' ? 'Feche o jogo antes de usar o Hub.' : 'Este save ainda não está disponível.'}</p>}
     </div>
-    {currentCardId && cardIsPresent && <PokemonDetailCard detail={cardDetail} onClose={onCardClose} />}
+    {cardOpen && <PokemonDetailCard key={currentCardId} detail={cardDetail} onClose={onCardClose} />}
+    {loading && <div className="pokemon-workspace-pane-stale" role="status" aria-label={`Processando painel ${side + 1}`}><span>Processando…</span></div>}
   </section>
 }
 
@@ -761,6 +777,17 @@ function sessionSlot(location, saveLayoutsBySource) {
   if (!layout || !['party', 'box'].includes(location?.area)) throw new Error('Only loaded Party and Box slots can be moved in the workspace session.')
   if (location.area === 'party') return location.slot
   return layout.party.length + location.box * 30 + location.slot
+}
+
+function waitForPokemonHubLoad(promise, signal) {
+  if (!signal) return promise
+  signal.throwIfAborted()
+  let onAbort
+  const aborted = new Promise((_resolve, reject) => {
+    onAbort = () => reject(signal.reason)
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+  return Promise.race([promise, aborted]).finally(() => signal.removeEventListener('abort', onAbort))
 }
 
 function snapshotDispatchDelay(session) {

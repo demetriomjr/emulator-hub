@@ -6,6 +6,8 @@
     "predev": "node scripts/sync-pokemon-resources.mjs --background && node scripts/sync-pokemon-card-icons.mjs",
     "dev": "node scripts/dev.mjs",
     "sync:pokemon-resources": "node scripts/sync-pokemon-resources.mjs --refresh",
+    "sync:pokemon-resources:force": "node scripts/sync-pokemon-resources.mjs --force",
+    "sync:pokemon-sprite-resolution": "node scripts/sync-pokemon-resources.mjs",
     "lint": "eslint .",
     "prebuild": "node scripts/sync-pokemon-resources.mjs --optional && node scripts/sync-pokemon-card-icons.mjs && npm run lint",
     "sync:pokemon-card-icons": "node scripts/sync-pokemon-card-icons.mjs --refresh",

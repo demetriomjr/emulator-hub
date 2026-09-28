@@ -7,8 +7,8 @@ import test from 'node:test'
 
 import sharp from 'sharp'
 
-import { createPokemonRequirements, getPokemonRequirementStatus, syncPokemonRequirements } from '../packages/pokemon-resource-requirements.mjs'
-import { normalizePokemonSprite } from '../packages/pokemon-resource-sync.mjs'
+import { createPokemonRequirements, getPokemonRequirementStatus, syncPokemonRequirements, upgradePokemonRequirements } from '../packages/pokemon-resource-requirements.mjs'
+import { normalizePokemonSprite, SPRITE_NORMALIZATION_VERSION } from '../packages/pokemon-resource-sync.mjs'
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex')
 
@@ -23,7 +23,7 @@ async function fixture(t) {
 function requirements(image) {
   return {
     schemaVersion: 1,
-    spriteNormalizationVersion: 1,
+    spriteNormalizationVersion: SPRITE_NORMALIZATION_VERSION,
     entries: [
       { file: '6.png', source: 'https://assets.example/6.png', sha256: sha256(image) },
       { file: 'egg.png', source: 'https://assets.example/egg.png', sha256: sha256(image) },
@@ -93,11 +93,61 @@ test('creates reviewable requirements with file hashes from the local catalog', 
 
   assert.deepEqual(actual, {
     schemaVersion: 1,
-    spriteNormalizationVersion: 1,
+    spriteNormalizationVersion: SPRITE_NORMALIZATION_VERSION,
     entries: [
       { file: '6.png', source: 'https://assets.example/6.png', sha256: sha256(image) },
       { file: '6-shiny.png', source: 'https://assets.example/6-shiny.png', sha256: sha256(image) },
-      { file: 'egg.png', source: 'https://raw.githubusercontent.com/pret/pokeemerald/master/graphics/pokemon/egg/front.png', sha256: sha256(image) },
+      { file: 'egg.png', source: 'https://projectpokemon.org/images/sprites-models/homeimg/poke_capture_0000_000_uk_n_00000000_f_n.png', sha256: sha256(image) },
     ],
   })
+})
+
+test('upgrades legacy sprites and their hashes from registered sources', async t => {
+  const { directory, source } = await fixture(t)
+  await writeFile(join(directory, '6.png'), 'previous-normal')
+  await writeFile(join(directory, 'egg.png'), 'previous-egg')
+  await writeFile(join(directory, 'manifest.json'), JSON.stringify({ schemaVersion: 1, spriteNormalizationVersion: 1, entries: [{ normalFile: '6.png', shinyFile: 'egg.png' }] }))
+  const legacy = { schemaVersion: 1, spriteNormalizationVersion: 1, entries: [
+    { file: '6.png', source: 'https://assets.example/6.png', sha256: sha256('previous-normal') },
+    { file: 'egg.png', source: 'https://assets.example/egg.png', sha256: sha256('previous-egg') },
+  ] }
+  const downloaded = []
+  const upgraded = await upgradePokemonRequirements({ targetDirectory: directory, requirements: legacy, imageProcessor: sharp, download: async url => {
+    downloaded.push(url)
+    return source
+  } })
+  assert.equal(upgraded.spriteNormalizationVersion, SPRITE_NORMALIZATION_VERSION)
+  assert.deepEqual(downloaded, legacy.entries.map(entry => entry.source))
+  assert.deepEqual(await sharp(join(directory, '6.png')).metadata().then(({ width, height }) => ({ width, height })), { width: 480, height: 480 })
+  assert.deepEqual(await getPokemonRequirementStatus(directory, upgraded), { status: 'complete', count: 2, missing: [] })
+  assert.equal(JSON.parse(await readFile(join(directory, 'manifest.json'), 'utf8')).spriteNormalizationVersion, SPRITE_NORMALIZATION_VERSION)
+
+  const reused = await upgradePokemonRequirements({ targetDirectory: directory, requirements: legacy, imageProcessor: sharp, download: async () => {
+    throw new Error('cached sprite should not be downloaded')
+  } })
+  assert.deepEqual(reused, upgraded)
+
+  const changedSource = { ...legacy, entries: legacy.entries.map(entry => entry.file === 'egg.png' ? { ...entry, source: 'https://assets.example/new-egg.png' } : entry) }
+  const changedDownloads = []
+  await upgradePokemonRequirements({ targetDirectory: directory, requirements: changedSource, imageProcessor: sharp, download: async url => {
+    changedDownloads.push(url)
+    return source
+  } })
+  assert.deepEqual(changedDownloads, ['https://assets.example/new-egg.png'])
+})
+
+test('preserves legacy sprites when resolution upgrade fails', async t => {
+  const { directory, source } = await fixture(t)
+  await writeFile(join(directory, '6.png'), 'previous-normal')
+  await writeFile(join(directory, 'egg.png'), 'previous-egg')
+  const legacy = { schemaVersion: 1, spriteNormalizationVersion: 1, entries: [
+    { file: '6.png', source: 'https://assets.example/6.png', sha256: sha256('previous-normal') },
+    { file: 'egg.png', source: 'https://assets.example/egg.png', sha256: sha256('previous-egg') },
+  ] }
+  await assert.rejects(() => upgradePokemonRequirements({ targetDirectory: directory, requirements: legacy, imageProcessor: sharp, download: async url => {
+    if (url.endsWith('egg.png')) throw new Error('network unavailable')
+    return source
+  } }), /network unavailable/)
+  assert.equal(await readFile(join(directory, '6.png'), 'utf8'), 'previous-normal')
+  assert.equal(await readFile(join(directory, 'egg.png'), 'utf8'), 'previous-egg')
 })

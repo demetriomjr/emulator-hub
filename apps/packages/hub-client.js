@@ -1,7 +1,7 @@
 import { parseGameCatalogResponse } from './game-catalog-contract.mjs'
 
-async function getJson(url) {
-  const response = await fetch(url, { cache: 'no-store' })
+async function getJson(url, signal = undefined) {
+  const response = await fetch(url, { cache: 'no-store', signal })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) {
     const error = new Error(body.error || `Request failed (${response.status})`)
@@ -15,9 +15,9 @@ export async function getGames() {
   return parseGameCatalogResponse(await getJson('/api/games'))
 }
 
-export async function getSaveProfileLayout(gameId, profileId, workspaceProfileId = null) {
+export async function getSaveProfileLayout(gameId, profileId, workspaceProfileId = null, signal = undefined) {
   const workspace = typeof workspaceProfileId === 'string' && workspaceProfileId ? `?workspaceProfileId=${encodeURIComponent(workspaceProfileId)}` : ''
-  const body = await getJson(`/api/pokemon-hub/save-profiles/${encodeURIComponent(gameId)}/${encodeURIComponent(profileId)}/layout${workspace}`)
+  const body = await getJson(`/api/pokemon-hub/save-profiles/${encodeURIComponent(gameId)}/${encodeURIComponent(profileId)}/layout${workspace}`, signal)
   if (!body.layout || !Array.isArray(body.party) || !Array.isArray(body.boxes) || !isPokemonDetailMap(body.pokemonDetailsById)) throw new Error('Invalid save layout response')
   return body
 }
@@ -134,18 +134,18 @@ export async function releasePlayerLease(sessionId, lease) {
   return body
 }
 
-export function openPokemonHubSession(profileId) {
-  return postPokemonHubSession(profileId, '', {})
+export function openPokemonHubSession(profileId, signal = undefined) {
+  return postPokemonHubSession(profileId, '', {}, signal)
 }
 
 export function heartbeatPokemonHubSession(profileId, sessionId, sequence) {
   return postPokemonHubSession(profileId, `/${encodeURIComponent(sessionId)}/heartbeat`, { sequence })
 }
 
-export async function loadPokemonHubSessionPane(profileId, sessionId, pane, source) {
+export async function loadPokemonHubSessionPane(profileId, sessionId, pane, source, signal = undefined) {
   if (!Number.isInteger(pane) || pane < 0 || pane > 2) throw new TypeError('Pokemon Hub pane is invalid')
   const response = await fetch(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/sessions/${encodeURIComponent(sessionId)}/panes/${pane}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source }),
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source }), signal,
   })
   const snapshot = await response.json().catch(() => ({}))
   if (response.status === 409) return { corrected: true, snapshot }
@@ -206,7 +206,13 @@ function profileCollectionUrl(gameId) {
 
 export async function getPokemonHubProfiles() {
   const body = await getJson('/api/pokemon-hub/profiles')
-  if (!Array.isArray(body.profiles) || !isPokemonDetailMap(body.pokemonDetailsById)) throw new Error('Invalid Pokémon Hub profiles response')
+  if (!Array.isArray(body.profiles)) throw new Error('Invalid Pokémon Hub profiles response')
+  return body
+}
+
+export async function getPokemonHubProfile(hubProfileId, signal = undefined) {
+  const body = await getJson(`/api/pokemon-hub/profiles/${encodeURIComponent(hubProfileId)}`, signal)
+  if (!body.profile?.grid?.entries || !isPokemonDetailMap(body.pokemonDetailsById)) throw new Error('Invalid Pokémon Hub profile response')
   return body
 }
 
@@ -242,9 +248,9 @@ export async function deletePokemonHubProfile(hubProfileId, { discardOccupied = 
   return body
 }
 
-async function postPokemonHubSession(profileId, suffix, body) {
+async function postPokemonHubSession(profileId, suffix, body, signal = undefined) {
   const response = await fetch(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/sessions${suffix}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal,
   })
   return readPokemonHubResponse(response)
 }

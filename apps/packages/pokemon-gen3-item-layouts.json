@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "scope": "Vanilla GBA Ruby, Sapphire, Emerald, FireRed and LeafGreen save item locations; layout data only, not transfer permission",
+  "reference": {
+    "pkhexCommit": "09e7f18fbb33635e35cf9ffcbfd3322403780f8e",
+    "pkhexBagFiles": {
+      "rubySapphire": "https://github.com/kwsch/PKHeX/blob/09e7f18fbb33635e35cf9ffcbfd3322403780f8e/PKHeX.Core/Items/Bags/PlayerBag3RS.cs",
+      "emerald": "https://github.com/kwsch/PKHeX/blob/09e7f18fbb33635e35cf9ffcbfd3322403780f8e/PKHeX.Core/Items/Bags/PlayerBag3E.cs",
+      "fireRedLeafGreen": "https://github.com/kwsch/PKHeX/blob/09e7f18fbb33635e35cf9ffcbfd3322403780f8e/PKHeX.Core/Items/Bags/PlayerBag3FRLG.cs"
+    },
+    "pkhexInventoryPouch": "https://github.com/kwsch/PKHeX/blob/09e7f18fbb33635e35cf9ffcbfd3322403780f8e/PKHeX.Core/Saves/Substructures/Inventory/Pouch/InventoryPouch3.cs",
+    "pkhexSave": "https://github.com/kwsch/PKHeX/blob/09e7f18fbb33635e35cf9ffcbfd3322403780f8e/PKHeX.Core/Saves/SAV3.cs",
+    "pkhexLargeBlocks": {
+      "rubySapphire": "https://github.com/kwsch/PKHeX/blob/09e7f18fbb33635e35cf9ffcbfd3322403780f8e/PKHeX.Core/Saves/Blocks/Gen3/SaveBlock3LargeRS.cs",
+      "emerald": "https://github.com/kwsch/PKHeX/blob/09e7f18fbb33635e35cf9ffcbfd3322403780f8e/PKHeX.Core/Saves/Blocks/Gen3/SaveBlock3LargeE.cs",
+      "fireRedLeafGreen": "https://github.com/kwsch/PKHeX/blob/09e7f18fbb33635e35cf9ffcbfd3322403780f8e/PKHeX.Core/Saves/Blocks/Gen3/SaveBlock3LargeFRLG.cs"
+    },
+    "pkhexSmallBlocks": {
+      "emerald": "https://github.com/kwsch/PKHeX/blob/09e7f18fbb33635e35cf9ffcbfd3322403780f8e/PKHeX.Core/Saves/Blocks/Gen3/SaveBlock3SmallE.cs",
+      "fireRedLeafGreen": "https://github.com/kwsch/PKHeX/blob/09e7f18fbb33635e35cf9ffcbfd3322403780f8e/PKHeX.Core/Saves/Blocks/Gen3/SaveBlock3SmallFRLG.cs"
+    },
+    "pretSaveBlocks": {
+      "rubySapphire": "https://github.com/pret/pokeruby/blob/master/include/global.h",
+      "emerald": "https://github.com/pret/pokeemerald/blob/master/include/global.h",
+      "fireRedLeafGreen": "https://github.com/pret/pokefirered/blob/master/include/global.h"
+    }
+  },
+  "saveContainer": {
+    "bytes": 131072,
+    "copyOffsets": [0, 57344],
+    "sectorsPerCopy": 14,
+    "sectorBytes": 4096,
+    "logicalSectorPayloadBytes": 3968,
+    "checksumDataBytesBySection": { "0": 3884, "1-12": 3968, "13": 2000 },
+    "checksumAlgorithm": "Sum little-endian uint32 words of the section's checksum data, fold high and low 16-bit halves, keep low 16 bits; use the existing save validator.",
+    "sectionIdFooterOffset": 4084,
+    "checksumFooterOffset": 4086,
+    "signatureFooterOffset": 4088,
+    "saveIndexFooterOffset": 4092,
+    "signature": 134291493,
+    "smallBlockSectionId": 0,
+    "largeBlockFirstSectionId": 1,
+    "largeBlockLastSectionId": 4,
+    "allItemAreasSectionId": 1,
+    "physicalOffsetRule": "selectedCopy.sectors[block == small ? 0 : 1 + floor(logicalOffset / 3968)].offset + (block == small ? logicalOffset : logicalOffset % 3968)",
+    "selectionRule": "Use selectUnambiguousPokemonGen3SaveCopy; never assume physical sector order or a fixed active copy."
+  },
+  "slotFormat": {
+    "bytes": 4,
+    "itemId": { "offset": 0, "encoding": "uint16-le" },
+    "quantity": { "offset": 2, "encoding": "uint16-le" },
+    "emptyWhen": "itemId == 0",
+    "emptyQuantityRule": "Ignore quantity when itemId is zero; an encoded empty Bag slot may contain nonzero raw quantity bytes."
+  },
+  "profiles": [
+    {
+      "id": "ruby-sapphire",
+      "titles": ["pokemon-ruby", "pokemon-sapphire"],
+      "inventoryBase": { "block": "large", "logicalOffset": 1176 },
+      "bagQuantityXorKey": null,
+      "areas": [
+        { "id": "pc", "block": "large", "logicalOffset": 1176, "slots": 50, "quantityEncoding": "plain" },
+        { "id": "items", "block": "large", "logicalOffset": 1376, "slots": 20, "quantityEncoding": "plain" },
+        { "id": "key-items", "block": "large", "logicalOffset": 1456, "slots": 20, "quantityEncoding": "plain" },
+        { "id": "poke-balls", "block": "large", "logicalOffset": 1536, "slots": 16, "quantityEncoding": "plain" },
+        { "id": "tm-hm", "block": "large", "logicalOffset": 1600, "slots": 64, "quantityEncoding": "plain" },
+        { "id": "berries", "block": "large", "logicalOffset": 1856, "slots": 46, "quantityEncoding": "plain" }
+      ]
+    },
+    {
+      "id": "emerald",
+      "titles": ["pokemon-emerald"],
+      "inventoryBase": { "block": "large", "logicalOffset": 1176 },
+      "bagQuantityXorKey": { "block": "small", "logicalOffset": 172, "encoding": "uint32-le", "usedBits": "low16" },
+      "areas": [
+        { "id": "pc", "block": "large", "logicalOffset": 1176, "slots": 50, "quantityEncoding": "plain" },
+        { "id": "items", "block": "large", "logicalOffset": 1376, "slots": 30, "quantityEncoding": "xor-low16-security-key" },
+        { "id": "key-items", "block": "large", "logicalOffset": 1496, "slots": 30, "quantityEncoding": "xor-low16-security-key" },
+        { "id": "poke-balls", "block": "large", "logicalOffset": 1616, "slots": 16, "quantityEncoding": "xor-low16-security-key" },
+        { "id": "tm-hm", "block": "large", "logicalOffset": 1680, "slots": 64, "quantityEncoding": "xor-low16-security-key" },
+        { "id": "berries", "block": "large", "logicalOffset": 1936, "slots": 46, "quantityEncoding": "xor-low16-security-key" }
+      ]
+    },
+    {
+      "id": "firered-leafgreen",
+      "titles": ["pokemon-firered", "pokemon-leafgreen"],
+      "inventoryBase": { "block": "large", "logicalOffset": 664 },
+      "bagQuantityXorKey": { "block": "small", "logicalOffset": 3872, "encoding": "uint32-le", "usedBits": "low16" },
+      "areas": [
+        { "id": "pc", "block": "large", "logicalOffset": 664, "slots": 30, "quantityEncoding": "plain" },
+        { "id": "items", "block": "large", "logicalOffset": 784, "slots": 42, "quantityEncoding": "xor-low16-security-key" },
+        { "id": "key-items", "block": "large", "logicalOffset": 952, "slots": 30, "quantityEncoding": "xor-low16-security-key" },
+        { "id": "poke-balls", "block": "large", "logicalOffset": 1072, "slots": 13, "quantityEncoding": "xor-low16-security-key" },
+        { "id": "tm-hm", "block": "large", "logicalOffset": 1124, "slots": 58, "quantityEncoding": "xor-low16-security-key" },
+        { "id": "berries", "block": "large", "logicalOffset": 1356, "slots": 43, "quantityEncoding": "xor-low16-security-key" }
+      ]
+    }
+  ]
+}

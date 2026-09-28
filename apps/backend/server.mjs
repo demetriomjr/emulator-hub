@@ -84,7 +84,6 @@ const unavailableReasons = Object.freeze({
 })
 
 export function createHubServer(options = {}) {
-  const romRegistryPath = options.romRegistryPath ?? (options.catalogPath ? join(dirname(options.catalogPath), 'data', 'rom-registry.json') : defaultRomRegistryPath)
   const persistence = options.persistence ?? createRedisPersistence(redisConfiguration(options))
   const gameSaveLeases = options.gameSaveLeases ?? createGameSaveLeaseCoordinator({ persistence })
   const config = {
@@ -93,7 +92,6 @@ export function createHubServer(options = {}) {
     romsDirectory: options.romsDirectory ?? options.romsDir ?? defaultRomsDirectory,
     patchesDirectory: options.patchesDirectory ?? options.patchesDir ?? defaultPatchesDirectory,
     ipsPatchRegistry: options.ipsPatchRegistry ?? createIpsPatchRegistry({ patchesDirectory: options.patchesDirectory ?? options.patchesDir ?? defaultPatchesDirectory }),
-    persistence,
     romRegistry: options.romRegistry ?? createRedisRomRegistry({ persistence }),
     romDiscovery: options.romDiscovery ?? createRomDiscovery({ lookupBatch: options.romLookupBatch ?? lookupRomBatch, refreshLegacyMetadata: options.refreshLegacyMetadata ?? !options.catalogPath }),
     metadataLoader: options.metadataLoader ?? loadGameMetadata,
@@ -308,7 +306,7 @@ async function handleRequest(request, response, config) {
     || (isClientDiagnosticsRoute && request.method === 'POST')
     || ((isBackupRoute || isEventBatchRoute) && request.method === 'POST')
   if (!supportedMethod) {
-    response.setHeader('Allow', isBackupRoute || isEventBatchRoute ? 'POST' : isClientDiagnosticsRoute ? 'GET, POST' : isUserPreferencesRoute ? 'GET, PATCH' : macroRoute ? 'DELETE' : isMacrosRoute ? 'GET, POST' : pokemonHubSessionRoute ? pokemonHubSessionRoute.kind === 'detach' || pokemonHubSessionRoute.kind === 'close' ? 'DELETE' : 'POST' : pokemonHubRoute ? ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute.kind) ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'PATCH, DELETE' : pokemonHubProfilesRoute || gameProfilesRoute ? 'GET, POST' : snapshotRoute ? 'GET, PUT, DELETE' : saveRoute || isControlProfileRoute ? 'GET, PUT' : gameProfileRoute ? 'GET, PATCH, DELETE' : patchRoute ? 'GET' : isRomRoute ? 'GET, HEAD' : 'GET')
+    response.setHeader('Allow', isBackupRoute || isEventBatchRoute ? 'POST' : isClientDiagnosticsRoute ? 'GET, POST' : isUserPreferencesRoute ? 'GET, PATCH' : macroRoute ? 'DELETE' : isMacrosRoute ? 'GET, POST' : pokemonHubSessionRoute ? pokemonHubSessionRoute.kind === 'detach' || pokemonHubSessionRoute.kind === 'close' ? 'DELETE' : 'POST' : pokemonHubRoute ? ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute.kind) ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'GET, PATCH, DELETE' : pokemonHubProfilesRoute || gameProfilesRoute ? 'GET, POST' : snapshotRoute ? 'GET, PUT, DELETE' : saveRoute || isControlProfileRoute ? 'GET, PUT' : gameProfileRoute ? 'GET, PATCH, DELETE' : patchRoute ? 'GET' : isRomRoute ? 'GET, HEAD' : 'GET')
     json(response, 405, { error: 'Method is not supported for this route.' })
     return
   }
@@ -1213,7 +1211,8 @@ function parsePokemonHubProfileRoute(pathname) {
 
 async function handlePokemonHubProfiles(request, response, config) {
   if (request.method === 'GET') {
-    json(response, 200, await readProjectedPokemonHubProfiles(config))
+    const profiles = await config.pokemonHubProfileStore.list()
+    json(response, 200, { profiles: profiles.map(profile => ({ hubProfileId: profile.hubProfileId, name: profile.name, ...(profile.ownerProfileId ? { ownerProfileId: profile.ownerProfileId } : {}) })) })
     return
   }
   let body
@@ -1234,6 +1233,11 @@ async function handlePokemonHubProfiles(request, response, config) {
 }
 
 async function handlePokemonHubProfile(request, response, config, route, searchParams) {
+  if (request.method === 'GET') {
+    const profile = (await config.pokemonHubProfileStore.list()).find(candidate => candidate.hubProfileId === route.hubProfileId)
+    if (!profile) return json(response, 404, { error: 'Pokémon Hub profile was not found.' })
+    return json(response, 200, await readProjectedPokemonHubProfile(config, profile))
+  }
   if (request.method === 'DELETE') {
     try {
       json(response, 200, await config.pokemonHubProfileStore.delete(route.hubProfileId, { discardOccupied: searchParams.get('discardOccupied') === 'true' }))
@@ -1949,25 +1953,20 @@ function empty(response, status) {
   response.end()
 }
 
-async function readProjectedPokemonHubProfiles(config) {
-  const profiles = await config.pokemonHubProfileStore.list()
-  if (typeof config.pokemonHubSnapshotCoordinator.getSnapshot !== 'function') return { profiles, pokemonDetailsById: {} }
-  const projected = await Promise.all(profiles.map(async profile => {
-    if (!profile.ownerProfileId) return { profile, details: {} }
-    try {
-      const snapshot = await config.pokemonHubSnapshotCoordinator.getSnapshot({ profileId: profile.ownerProfileId, sourceKey: `hub:${profile.hubProfileId}` })
-      const details = await readPokemonHubCardDetails(config, { profileId: profile.ownerProfileId, sourceKey: `hub:${profile.hubProfileId}`, snapshot })
-      const entries = Object.fromEntries(snapshot.placements.flatMap(placement => {
-        if (!placement.pokemonInstanceId) return []
-        return [[String(placement.location.slot), { pokemonInstanceId: placement.pokemonInstanceId, ...(snapshot.pokemonDisplay?.[placement.pokemonInstanceId] ?? {}) }]]
-      }))
-      return { profile: { ...profile, grid: { entries } }, details }
-    } catch (error) {
-      if (error.code === 'SOURCE_NOT_ADOPTED') return { profile, details: {} }
-      throw error
-    }
-  }))
-  return { profiles: projected.map(entry => entry.profile), pokemonDetailsById: Object.assign({}, ...projected.map(entry => entry.details)) }
+async function readProjectedPokemonHubProfile(config, profile) {
+  if (!profile.ownerProfileId || typeof config.pokemonHubSnapshotCoordinator.getSnapshot !== 'function') return { profile, pokemonDetailsById: {} }
+  try {
+    const snapshot = await config.pokemonHubSnapshotCoordinator.getSnapshot({ profileId: profile.ownerProfileId, sourceKey: `hub:${profile.hubProfileId}` })
+    const pokemonDetailsById = await readPokemonHubCardDetails(config, { profileId: profile.ownerProfileId, sourceKey: `hub:${profile.hubProfileId}`, snapshot })
+    const entries = Object.fromEntries(snapshot.placements.flatMap(placement => {
+      if (!placement.pokemonInstanceId) return []
+      return [[String(placement.location.slot), { pokemonInstanceId: placement.pokemonInstanceId, ...(snapshot.pokemonDisplay?.[placement.pokemonInstanceId] ?? {}) }]]
+    }))
+    return { profile: { ...profile, grid: { entries } }, pokemonDetailsById }
+  } catch (error) {
+    if (error.code === 'SOURCE_NOT_ADOPTED') return { profile, pokemonDetailsById: {} }
+    throw error
+  }
 }
 
 async function readPokemonHubCardDetails(config, { profileId, sourceKey, snapshot, title = null, adapter = null, layout = null, save = null }) {
@@ -1998,7 +1997,7 @@ async function adoptSaveIfSupported(config, profileId, entry, saved) {
   return true
 }
 
-async function resolvePokemonHubSaveSource(config, { profileId, sourceKey }) {
+async function resolvePokemonHubSaveSource(config, { sourceKey }) {
   const match = /^save:([^:]+):([^:]+)$/.exec(sourceKey ?? '')
   if (!match) return null
   const [, sourceProfileId, gameId] = match
@@ -2179,11 +2178,7 @@ export async function bootstrapHubServer({
     await migrateLegacy({ persistence, ...legacyMigrationOptions })
     const server = makeServer()
     if (startupBackup && server.backendStateBackup && typeof server.backendStateBackup.create === 'function') {
-      try {
-        await server.backendStateBackup.create('startup')
-      } catch (error) {
-        throw error
-      }
+      await server.backendStateBackup.create('startup')
     }
     server.once('error', error => { void onListenError(error) })
     server.listen(port, host, onListening)

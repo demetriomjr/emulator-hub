@@ -4,11 +4,11 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { selectPokemonResources } from './pokemon-resource-catalog.mjs'
 
 const SCHEMA_VERSION = 1
-export const SPRITE_NORMALIZATION_VERSION = 1
-const SPRITE_CANVAS_SIZE = 96
-const SPRITE_CONTENT_SIZE = 76
+export const SPRITE_NORMALIZATION_VERSION = 2
+const SPRITE_CANVAS_SIZE = 480
+const SPRITE_CONTENT_SIZE = 380
 const EGG_SPRITE_FILE = 'egg.png'
-const EGG_SPRITE_URL = 'https://raw.githubusercontent.com/pret/pokeemerald/master/graphics/pokemon/egg/front.png'
+const EGG_SPRITE_URL = 'https://projectpokemon.org/images/sprites-models/homeimg/poke_capture_0000_000_uk_n_00000000_f_n.png'
 
 function normalizeTargetDirectory(targetDirectory) {
   if (typeof targetDirectory !== 'string' || targetDirectory.length === 0) throw new TypeError('Target directory is required')
@@ -178,23 +178,23 @@ async function copyOrDownloadSprite(targetDirectory, stageDirectory, filename, u
   }
 }
 
-export async function syncPokemonResources({ targetDirectory, loadRecords, download, imageProcessor, refresh = false } = {}) {
+export async function syncPokemonResources({ targetDirectory, loadRecords, download, imageProcessor, refresh = false, force = false } = {}) {
   targetDirectory = normalizeTargetDirectory(targetDirectory)
   if (typeof loadRecords !== 'function') throw new TypeError('Record loader is required')
   if (typeof download !== 'function') throw new TypeError('Resource downloader is required')
 
   const count = await completeCatalog(targetDirectory)
-  if (!refresh && count != null) return { status: 'complete', count }
+  if (!refresh && !force && count != null) return { status: 'complete', count }
 
   const lock = await acquireSyncLock(targetDirectory)
   if (!lock) return { status: 'running', count: 0 }
 
   try {
     const latestCount = await completeCatalog(targetDirectory)
-    if (!refresh && latestCount != null) return { status: 'complete', count: latestCount }
+    if (!refresh && !force && latestCount != null) return { status: 'complete', count: latestCount }
 
     const previousManifest = await reusableManifest(targetDirectory)
-    if (!refresh && previousManifest && await speciesFilesComplete(targetDirectory, previousManifest) && !await exists(join(targetDirectory, EGG_SPRITE_FILE))) {
+    if (!refresh && !force && previousManifest && await speciesFilesComplete(targetDirectory, previousManifest) && !await exists(join(targetDirectory, EGG_SPRITE_FILE))) {
       await addMissingEgg(targetDirectory, download, imageProcessor)
       return { status: 'synchronized', count: previousManifest.entries.length }
     }
@@ -208,11 +208,18 @@ export async function syncPokemonResources({ targetDirectory, loadRecords, downl
 
     try {
       const reusableFiles = new Map(previousManifest?.entries.flatMap(entry => [[entry.normalFile, entry.sourceId], [entry.shinyFile, entry.sourceId]]) ?? [])
-      for (const resource of resources) {
-        await copyOrDownloadSprite(targetDirectory, stageDirectory, resource.normalFile, resource.images.normal, reusableFiles.get(resource.normalFile) === resource.sourceId, download, imageProcessor)
-        await copyOrDownloadSprite(targetDirectory, stageDirectory, resource.shinyFile, resource.images.shiny, reusableFiles.get(resource.shinyFile) === resource.sourceId, download, imageProcessor)
-      }
-      await copyOrDownloadSprite(targetDirectory, stageDirectory, EGG_SPRITE_FILE, EGG_SPRITE_URL, previousManifest !== null, download, imageProcessor)
+      let nextIndex = 0
+      const workers = Array.from({ length: force ? Math.min(8, resources.length) : 1 }, async () => {
+        while (nextIndex < resources.length) {
+          const resource = resources[nextIndex++]
+          await copyOrDownloadSprite(targetDirectory, stageDirectory, resource.normalFile, resource.images.normal, !force && reusableFiles.get(resource.normalFile) === resource.sourceId, download, imageProcessor)
+          await copyOrDownloadSprite(targetDirectory, stageDirectory, resource.shinyFile, resource.images.shiny, !force && reusableFiles.get(resource.shinyFile) === resource.sourceId, download, imageProcessor)
+        }
+      })
+      const results = await Promise.allSettled(workers)
+      const failure = results.find(result => result.status === 'rejected')
+      if (failure) throw failure.reason
+      await copyOrDownloadSprite(targetDirectory, stageDirectory, EGG_SPRITE_FILE, EGG_SPRITE_URL, !force && previousManifest !== null, download, imageProcessor)
 
       await writeFile(join(stageDirectory, 'manifest.json'), JSON.stringify({
         schemaVersion: SCHEMA_VERSION,
