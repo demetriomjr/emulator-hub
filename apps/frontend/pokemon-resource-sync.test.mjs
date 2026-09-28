@@ -233,3 +233,20 @@ test('refresh reuses existing sprites and downloads only newly listed species', 
   assert.equal(await readFile(join(directory, 'egg.png'), 'utf8'), 'egg')
   assert.deepEqual(await getPokemonResourceCatalogStatus(directory), { status: 'complete', count: 2 })
 })
+
+test('refresh downloads a species again when its source identifier changes', async t => {
+  const directory = await fixture(t)
+  await writeCompleteCatalog(directory, 'previous-normal', 'previous-shiny')
+  const changedRecord = { ...record, sourceId: 1006, images: { normal: 'https://assets.example/new-6.png', shiny: 'https://assets.example/new-6-shiny.png' } }
+  const downloaded = []
+
+  await syncPokemonResources({
+    targetDirectory: directory,
+    refresh: true,
+    loadRecords: async () => [changedRecord],
+    download: async url => { downloaded.push(url); return opaqueSprite() },
+    imageProcessor: sharp,
+  })
+
+  assert.deepEqual(downloaded, [changedRecord.images.normal, changedRecord.images.shiny])
+})

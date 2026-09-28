@@ -19,10 +19,12 @@ test('production Compose isolates the backend and waits for its healthcheck', as
   assert.doesNotMatch(compose, /"0\.0\.0\.0:8080:8080"/)
 })
 
-test('production frontend image caches Pokemon sprites across builds', async () => {
+test('production frontend seeds its persistent sprite cache from the existing catalog', async () => {
   const dockerfile = await readFile(frontendDockerfile, 'utf8')
 
-  assert.match(dockerfile, /RUN --mount=type=cache,id=emulator-hub-pokemon-sprites,target=\/app\/apps\/frontend\/public\/resources\/pokemon,sharing=locked npm run build/)
+  assert.match(dockerfile, /COPY apps\/frontend \.\/[\s\S]*cp -a \/app\/apps\/frontend\/public\/resources\/pokemon\/\. \/tmp\/pokemon-seed\//)
+  assert.match(dockerfile, /--mount=type=cache,id=emulator-hub-pokemon-sprites,target=\/app\/apps\/frontend\/public\/resources\/pokemon,sharing=locked/)
+  assert.match(dockerfile, /cp -an \/tmp\/pokemon-seed\/\. \/app\/apps\/frontend\/public\/resources\/pokemon\/ && npm run build/)
   assert.match(dockerfile, /ENV VITE_PLAYER_PORTS=\$PLAYER_ORIGIN_PORTS/)
 })
 

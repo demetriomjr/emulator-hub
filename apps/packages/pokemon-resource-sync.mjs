@@ -207,10 +207,10 @@ export async function syncPokemonResources({ targetDirectory, loadRecords, downl
     await mkdir(stageDirectory)
 
     try {
-      const reusableFiles = new Set(previousManifest?.entries.flatMap(entry => [entry.normalFile, entry.shinyFile]) ?? [])
+      const reusableFiles = new Map(previousManifest?.entries.flatMap(entry => [[entry.normalFile, entry.sourceId], [entry.shinyFile, entry.sourceId]]) ?? [])
       for (const resource of resources) {
-        await copyOrDownloadSprite(targetDirectory, stageDirectory, resource.normalFile, resource.images.normal, reusableFiles.has(resource.normalFile), download, imageProcessor)
-        await copyOrDownloadSprite(targetDirectory, stageDirectory, resource.shinyFile, resource.images.shiny, reusableFiles.has(resource.shinyFile), download, imageProcessor)
+        await copyOrDownloadSprite(targetDirectory, stageDirectory, resource.normalFile, resource.images.normal, reusableFiles.get(resource.normalFile) === resource.sourceId, download, imageProcessor)
+        await copyOrDownloadSprite(targetDirectory, stageDirectory, resource.shinyFile, resource.images.shiny, reusableFiles.get(resource.shinyFile) === resource.sourceId, download, imageProcessor)
       }
       await copyOrDownloadSprite(targetDirectory, stageDirectory, EGG_SPRITE_FILE, EGG_SPRITE_URL, previousManifest !== null, download, imageProcessor)
 

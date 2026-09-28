@@ -1,11 +1,15 @@
 import { spawn } from 'node:child_process'
+import { readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import sharp from 'sharp'
 
-import { getPokemonResourceCatalogStatus, syncPokemonResources } from '../../packages/pokemon-resource-sync.mjs'
+import { createPokemonRequirements, getPokemonRequirementStatus, syncPokemonRequirements } from '../../packages/pokemon-resource-requirements.mjs'
+import { syncPokemonResources } from '../../packages/pokemon-resource-sync.mjs'
+import { selectPokemonResources } from '../../packages/pokemon-resource-catalog.mjs'
 
 const SOURCE_INDEX_URL = 'https://pokeapi.co/api/v2/pokemon?limit=2000'
 const targetDirectory = fileURLToPath(new URL('../public/resources/pokemon/', import.meta.url))
+const requirementsPath = fileURLToPath(new URL('../pokemon-sprite-requirements.json', import.meta.url))
 const refresh = process.argv.includes('--refresh')
 const background = process.argv.includes('--background')
 const optional = process.argv.includes('--optional')
@@ -53,8 +57,27 @@ async function download(url) {
   return new Uint8Array(await response.arrayBuffer())
 }
 
+async function loadRequirements() {
+  return JSON.parse(await readFile(requirementsPath, 'utf8'))
+}
+
+async function refreshRequirements() {
+  const records = await loadRecords()
+  const result = await syncPokemonResources({ targetDirectory, loadRecords: async () => records, download, imageProcessor: sharp, refresh: true })
+  if (result.status === 'running') return result
+  const requirements = await createPokemonRequirements(targetDirectory, selectPokemonResources(records))
+  const temporaryPath = `${requirementsPath}.${process.pid}.tmp`
+  try {
+    await writeFile(temporaryPath, JSON.stringify(requirements, null, 2) + '\n')
+    await rename(temporaryPath, requirementsPath)
+  } finally {
+    await rm(temporaryPath, { force: true })
+  }
+  return result
+}
+
 if (background) {
-  const status = await getPokemonResourceCatalogStatus(targetDirectory)
+  const status = await getPokemonRequirementStatus(targetDirectory, await loadRequirements())
   if (status.status === 'complete') {
     console.log(`Pokemon resources: complete (${status.count} entries)`)
   } else if (status.status === 'running') {
@@ -66,7 +89,9 @@ if (background) {
   }
 } else {
   try {
-    const result = await syncPokemonResources({ targetDirectory, loadRecords, download, imageProcessor: sharp, refresh })
+    const result = refresh
+      ? await refreshRequirements()
+      : await syncPokemonRequirements({ targetDirectory, requirements: await loadRequirements(), download, imageProcessor: sharp })
     console.log(`Pokemon resources: ${result.status} (${result.count} entries)`)
   } catch (error) {
     console.error(error instanceof Error ? error.message : error)
