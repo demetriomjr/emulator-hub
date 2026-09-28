@@ -1,4 +1,4 @@
-import { access, mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { access, copyFile, mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 
 import { selectPokemonResources } from './pokemon-resource-catalog.mjs'
@@ -7,6 +7,8 @@ const SCHEMA_VERSION = 1
 export const SPRITE_NORMALIZATION_VERSION = 1
 const SPRITE_CANVAS_SIZE = 96
 const SPRITE_CONTENT_SIZE = 76
+const EGG_SPRITE_FILE = 'egg.png'
+const EGG_SPRITE_URL = 'https://raw.githubusercontent.com/pret/pokeemerald/master/graphics/pokemon/egg/front.png'
 
 function normalizeTargetDirectory(targetDirectory) {
   if (typeof targetDirectory !== 'string' || targetDirectory.length === 0) throw new TypeError('Target directory is required')
@@ -26,7 +28,7 @@ async function exists(path) {
   }
 }
 
-async function completeCatalog(targetDirectory) {
+async function reusableManifest(targetDirectory) {
   const manifestPath = join(targetDirectory, 'manifest.json')
   try {
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
@@ -35,15 +37,25 @@ async function completeCatalog(targetDirectory) {
       || manifest?.spriteNormalizationVersion !== SPRITE_NORMALIZATION_VERSION
       || !Array.isArray(manifest.entries)
       || manifest.entries.length === 0
+      || manifest.entries.some(entry => !/^[a-zA-Z0-9-]+\.png$/.test(entry?.normalFile) || !/^[a-zA-Z0-9-]+\.png$/.test(entry?.shinyFile))
     ) return null
-    for (const entry of manifest.entries) {
-      if (typeof entry?.normalFile !== 'string' || typeof entry?.shinyFile !== 'string') return null
-      if (!await exists(join(targetDirectory, entry.normalFile)) || !await exists(join(targetDirectory, entry.shinyFile))) return null
-    }
-    return manifest.entries.length
+    return manifest
   } catch {
     return null
   }
+}
+
+async function speciesFilesComplete(targetDirectory, manifest) {
+  for (const entry of manifest.entries) {
+    if (!await exists(join(targetDirectory, entry.normalFile)) || !await exists(join(targetDirectory, entry.shinyFile))) return false
+  }
+  return true
+}
+
+async function completeCatalog(targetDirectory) {
+  const manifest = await reusableManifest(targetDirectory)
+  if (!manifest || !await speciesFilesComplete(targetDirectory, manifest) || !await exists(join(targetDirectory, EGG_SPRITE_FILE))) return null
+  return manifest.entries.length
 }
 
 function lockPath(targetDirectory) {
@@ -140,6 +152,32 @@ async function replaceDirectory(targetDirectory, stageDirectory) {
   }
 }
 
+async function downloadNormalizedSprite(url, download, imageProcessor) {
+  const image = await download(url)
+  assertImage(image, url)
+  return normalizePokemonSprite(image, imageProcessor)
+}
+
+async function addMissingEgg(targetDirectory, download, imageProcessor) {
+  const temporaryFile = join(targetDirectory, `.egg-${process.pid}-${Date.now()}.tmp`)
+  try {
+    await writeFile(temporaryFile, await downloadNormalizedSprite(EGG_SPRITE_URL, download, imageProcessor))
+    await rename(temporaryFile, join(targetDirectory, EGG_SPRITE_FILE))
+  } finally {
+    await rm(temporaryFile, { force: true })
+  }
+}
+
+async function copyOrDownloadSprite(targetDirectory, stageDirectory, filename, url, reusable, download, imageProcessor) {
+  const currentFile = join(targetDirectory, filename)
+  const stagedFile = join(stageDirectory, filename)
+  if (reusable && await exists(currentFile)) {
+    await copyFile(currentFile, stagedFile)
+  } else {
+    await writeFile(stagedFile, await downloadNormalizedSprite(url, download, imageProcessor))
+  }
+}
+
 export async function syncPokemonResources({ targetDirectory, loadRecords, download, imageProcessor, refresh = false } = {}) {
   targetDirectory = normalizeTargetDirectory(targetDirectory)
   if (typeof loadRecords !== 'function') throw new TypeError('Record loader is required')
@@ -155,6 +193,12 @@ export async function syncPokemonResources({ targetDirectory, loadRecords, downl
     const latestCount = await completeCatalog(targetDirectory)
     if (!refresh && latestCount != null) return { status: 'complete', count: latestCount }
 
+    const previousManifest = await reusableManifest(targetDirectory)
+    if (!refresh && previousManifest && await speciesFilesComplete(targetDirectory, previousManifest) && !await exists(join(targetDirectory, EGG_SPRITE_FILE))) {
+      await addMissingEgg(targetDirectory, download, imageProcessor)
+      return { status: 'synchronized', count: previousManifest.entries.length }
+    }
+
     const resources = selectPokemonResources(await loadRecords())
     if (resources.length === 0) throw new Error('Pokemon resource catalog is empty')
 
@@ -163,15 +207,12 @@ export async function syncPokemonResources({ targetDirectory, loadRecords, downl
     await mkdir(stageDirectory)
 
     try {
+      const reusableFiles = new Set(previousManifest?.entries.flatMap(entry => [entry.normalFile, entry.shinyFile]) ?? [])
       for (const resource of resources) {
-        const normal = await download(resource.images.normal)
-        assertImage(normal, resource.images.normal)
-        await writeFile(join(stageDirectory, resource.normalFile), await normalizePokemonSprite(normal, imageProcessor))
-
-        const shiny = await download(resource.images.shiny)
-        assertImage(shiny, resource.images.shiny)
-        await writeFile(join(stageDirectory, resource.shinyFile), await normalizePokemonSprite(shiny, imageProcessor))
+        await copyOrDownloadSprite(targetDirectory, stageDirectory, resource.normalFile, resource.images.normal, reusableFiles.has(resource.normalFile), download, imageProcessor)
+        await copyOrDownloadSprite(targetDirectory, stageDirectory, resource.shinyFile, resource.images.shiny, reusableFiles.has(resource.shinyFile), download, imageProcessor)
       }
+      await copyOrDownloadSprite(targetDirectory, stageDirectory, EGG_SPRITE_FILE, EGG_SPRITE_URL, previousManifest !== null, download, imageProcessor)
 
       await writeFile(join(stageDirectory, 'manifest.json'), JSON.stringify({
         schemaVersion: SCHEMA_VERSION,

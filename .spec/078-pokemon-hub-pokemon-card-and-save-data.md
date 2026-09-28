@@ -272,14 +272,23 @@ O card mostra no máximo quatro moves e só as ribbons presentes; texto longo e 
 4. **Frontend:** Hub/Party/Box abrem card sem rede; três panes podem ter três cards; clique e teclado funcionam sem iniciar drag; drag não abre card; trocar/remover pane reconcilia card; correção 409/flush/reload invalida detalhe antigo; sprite/imagem faltante e dezenas de ribbons preservam leitura, foco e limites de pane.
 5. **Regressão:** snapshots/heartbeat continuam compactos; transferência e Party guards das Specs 063/071 continuam com as mesmas regras; nenhuma gravação nativa decorre da abertura/fechamento do card; a aquisição e lançamento de jogo não passam a depender do catálogo visual de ícones.
 
-### Sequência recomendada quando a implementação for autorizada
+### Sequência de implementação
 
 1. Fechar fixtures e tabelas Gen III; extrair parser compartilhado com checksum, projeção pura e testes do mapa de campos.
 2. Adicionar leitura coerente de source+records e projetor em lote no pacote; integrar os dois GETs e seus testes de contrato/erro/revisão.
 3. Hidratar o mapa local no fluxo React **ativo**, reconciliar revisões e seleção independente por pane; implementar card e interação acessível de slots.
 4. Produzir catálogo local de ícones validado e sua sincronização separada; conferir os três layouts e os casos de ausência de asset.
 
-Essa ordem é um guia de dependências, não autorização para implementar nesta revisão do spec. Antes de codificar, comparar novamente o código com este dossiê e com as Specs 024, 029, 040, 063, 071 e 075, pois algumas já documentam limitações de integridade que o card não deve mascarar.
+Essa ordem foi usada na implementação iniciada por solicitação explícita do usuário. As Specs 024, 029, 040, 063, 071 e 075 continuam definindo os limites de integridade que o card não deve mascarar.
+
+### Estado da implementação iniciada em 27/09/2026
+
+- `pokemon-gen3-card-data.mjs` projeta core nativo validado por checksum: sexo via tabela das 386 espécies Gen III, shiny, espécie, nível, seis stats, seis IVs, moves/PP, ribbons, OT público, jogo, Pokébola e item. `pokemon-gen3-name-catalog.json` guarda nomes nativos de espécies, moves e itens derivados das tabelas de `pret/pokeemerald`. Forma de Deoxys no Hub sem título atual fica com stats indisponíveis.
+- `pokemon-hub-card-hydration.mjs` verifica placement, namespace, Base64, SHA-256 e checksum antes de projetar cada ID. HP atual da Party só vem do slot físico quando core, localização e save revision coincidem e o source está limpo. Falhas isoladas viram `availability: unavailable`.
+- O coordinator expõe `getDetailSource` somente para leitura e confere fonte e records após carregá-los. `GET /api/pokemon-hub/profiles` e `GET .../layout` agora devolvem `pokemonDetailsById` no mesmo payload, sem bytes nativos. `GET .../layout` usa `workspaceProfileId` como owner efetivo. O frontend não chama API ao clicar em um slot.
+- `pokemon-hub-ui.jsx` mantém mapa de detalhes e seleção independente para até três panes. Party, Box e Hub usam botões acionáveis por teclado; o card abre dentro da pane e fecha por botão ou Escape. Mudança de fonte ou snapshot corrige a seleção, e movimento local descarta HP atual em cache.
+- `sync-pokemon-card-icons.mjs` baixa o atlas e cinco paletas originais de ribbons do decomp de Emerald e gera 32 ícones locais com manifest separado do catálogo PokéAPI. A obtenção é opcional: texto da ribbon continua visível sem imagem. Gênero e shiny usam pequenos glifos locais sobre o sprite.
+- A validação automatizada cobre projeção, degradação por ID, Party dirty/revision, duas rotas HTTP, seleção após remoção de pane, catálogo de assets e lint. Ainda falta conferir visualmente o card com saves reais ocupados dos cinco títulos e validar o comportamento em viewport estreita com dados de produção; fixtures sintéticas não provam esses casos.
 
 ## Questões para a próxima revisão
 

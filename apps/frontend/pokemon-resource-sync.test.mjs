@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -15,6 +15,13 @@ const record = {
   isDefault: true,
   images: { normal: 'https://assets.example/6.png', shiny: 'https://assets.example/6-shiny.png' },
 }
+const secondRecord = {
+  sourceId: 25,
+  speciesId: 25,
+  name: 'pikachu',
+  isDefault: true,
+  images: { normal: 'https://assets.example/25.png', shiny: 'https://assets.example/25-shiny.png' },
+}
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'pokemon-resource-sync-'))
@@ -22,9 +29,10 @@ async function fixture(t) {
   return directory
 }
 
-async function writeCompleteCatalog(directory, normal = 'normal', shiny = 'shiny') {
+async function writeCompleteCatalog(directory, normal = 'normal', shiny = 'shiny', egg = 'egg') {
   await writeFile(join(directory, '6.png'), normal)
   await writeFile(join(directory, '6-shiny.png'), shiny)
+  await writeFile(join(directory, 'egg.png'), egg)
   await writeFile(join(directory, 'manifest.json'), JSON.stringify({
     schemaVersion: 1,
     spriteNormalizationVersion: SPRITE_NORMALIZATION_VERSION,
@@ -125,9 +133,10 @@ test('replaces an incomplete catalog with every expected local resource and mani
   })
 
   assert.deepEqual(result, { status: 'synchronized', count: 1 })
-  assert.equal(downloads, 2)
+  assert.equal(downloads, 3)
   assert.deepEqual(await sharp(join(directory, '6.png')).metadata().then(({ width, height }) => ({ width, height })), { width: 96, height: 96 })
   assert.deepEqual(await sharp(join(directory, '6-shiny.png')).metadata().then(({ width, height }) => ({ width, height })), { width: 96, height: 96 })
+  assert.deepEqual(await sharp(join(directory, 'egg.png')).metadata().then(({ width, height }) => ({ width, height })), { width: 96, height: 96 })
   assert.deepEqual(JSON.parse(await readFile(join(directory, 'manifest.json'), 'utf8')), {
     schemaVersion: 1,
     spriteNormalizationVersion: SPRITE_NORMALIZATION_VERSION,
@@ -156,10 +165,71 @@ test('preserves a complete catalog when explicit refresh cannot download a new c
   await assert.rejects(() => syncPokemonResources({
     targetDirectory: directory,
     refresh: true,
-    loadRecords: async () => [record],
+    loadRecords: async () => [record, secondRecord],
     download: async () => { throw new Error('network unavailable') },
   }), /network unavailable/)
 
   assert.equal(await readFile(join(directory, '6.png'), 'utf8'), 'previous-normal')
   assert.equal(await readFile(join(directory, '6-shiny.png'), 'utf8'), 'previous-shiny')
+})
+
+test('adds only the egg to an existing catalog without fetching species metadata', async t => {
+  const directory = await fixture(t)
+  await writeCompleteCatalog(directory, 'previous-normal', 'previous-shiny')
+  await unlink(join(directory, 'egg.png'))
+  assert.deepEqual(await getPokemonResourceCatalogStatus(directory), { status: 'incomplete', count: 0 })
+
+  const downloaded = []
+  const result = await syncPokemonResources({
+    targetDirectory: directory,
+    loadRecords: async () => { throw new Error('species metadata should not be loaded') },
+    download: async url => { downloaded.push(url); return opaqueSprite() },
+    imageProcessor: sharp,
+  })
+
+  assert.deepEqual(result, { status: 'synchronized', count: 1 })
+  assert.deepEqual(downloaded, ['https://raw.githubusercontent.com/pret/pokeemerald/master/graphics/pokemon/egg/front.png'])
+  assert.equal(await readFile(join(directory, '6.png'), 'utf8'), 'previous-normal')
+  assert.equal(await readFile(join(directory, '6-shiny.png'), 'utf8'), 'previous-shiny')
+  assert.deepEqual(await sharp(join(directory, 'egg.png')).metadata().then(({ width, height }) => ({ width, height })), { width: 96, height: 96 })
+  assert.deepEqual(await getPokemonResourceCatalogStatus(directory), { status: 'complete', count: 1 })
+})
+
+test('downloads only a missing species sprite from an existing catalog', async t => {
+  const directory = await fixture(t)
+  await writeCompleteCatalog(directory, 'previous-normal')
+  await unlink(join(directory, '6-shiny.png'))
+  const downloaded = []
+
+  await syncPokemonResources({
+    targetDirectory: directory,
+    loadRecords: async () => [record],
+    download: async url => { downloaded.push(url); return opaqueSprite() },
+    imageProcessor: sharp,
+  })
+
+  assert.deepEqual(downloaded, [record.images.shiny])
+  assert.equal(await readFile(join(directory, '6.png'), 'utf8'), 'previous-normal')
+  assert.equal(await readFile(join(directory, 'egg.png'), 'utf8'), 'egg')
+})
+
+test('refresh reuses existing sprites and downloads only newly listed species', async t => {
+  const directory = await fixture(t)
+  await writeCompleteCatalog(directory, 'previous-normal', 'previous-shiny')
+  const downloaded = []
+
+  const result = await syncPokemonResources({
+    targetDirectory: directory,
+    refresh: true,
+    loadRecords: async () => [record, secondRecord],
+    download: async url => { downloaded.push(url); return opaqueSprite() },
+    imageProcessor: sharp,
+  })
+
+  assert.deepEqual(result, { status: 'synchronized', count: 2 })
+  assert.deepEqual(downloaded, [secondRecord.images.normal, secondRecord.images.shiny])
+  assert.equal(await readFile(join(directory, '6.png'), 'utf8'), 'previous-normal')
+  assert.equal(await readFile(join(directory, '6-shiny.png'), 'utf8'), 'previous-shiny')
+  assert.equal(await readFile(join(directory, 'egg.png'), 'utf8'), 'egg')
+  assert.deepEqual(await getPokemonResourceCatalogStatus(directory), { status: 'complete', count: 2 })
 })

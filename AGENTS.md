@@ -8,6 +8,7 @@
 - All functionality below the presentation layer, whether used by frontend or backend, belongs in `apps/packages/`. The application projects compile and consume these packages.
 - The application projects live in `apps/frontend`, `apps/backend`, and `apps/electron`, alongside `apps/packages/`.
 - Keep application boundaries and package contracts explicit in `.spec/` before implementation. Follow spec-driven development for new features and architectural changes.
+- Work on only one canonical spec per chat. Expand that same file as research and decisions evolve; do not create a second spec in the same chat.
 
 ## Core behavior and optional integrations
 
@@ -19,6 +20,7 @@
 
 ## Working rules
 
+- Use only the original repository checkout. Never create, restore, use, or hand off to Codex or Git worktrees. Archive existing worktrees only when the user requests their removal.
 - Run a project build only when the user explicitly requests a build in the current prompt for the current task. A build request from an earlier prompt never authorizes a later build.
 - Create a Git commit only when the user explicitly requests a commit in the current prompt for the current task. A commit request from an earlier prompt never authorizes a later commit.
 - Keep the project literally minimal. Implement only behavior and UI elements the user explicitly directs. Do not add decorative sections, extra pages, controls, or features on your own.

@@ -43,6 +43,28 @@ test('parses the encrypted Box core and exposes the inputs needed for Party runt
   assert.deepEqual(parsed.ivs, { hp: 31, attack: 20, defense: 10, speed: 5, specialAttack: 15, specialDefense: 25 })
 })
 
+test('parses moves, met data and ribbon bits from permuted encrypted substructures', () => {
+  const boxCore = buildBoxCore({
+    personality: 7,
+    originalTrainerId: 0x1234_4567,
+    species: 25,
+    experience: 8_000,
+    heldItem: 13,
+    moves: [85, 98, 0, 237],
+    pp: [15, 30, 0, 15],
+    metGame: 3,
+    pokeball: 4,
+    ribbonFlags: (2 | (1 << 15) | (1 << 16)) >>> 0,
+  })
+  const parsed = parseGen3BoxCore(boxCore)
+  assert.equal(parsed.heldItem, 13)
+  assert.deepEqual(parsed.moves, [85, 98, 0, 237])
+  assert.deepEqual(parsed.pp, [15, 30, 0, 15])
+  assert.equal(parsed.metGame, 3)
+  assert.equal(parsed.pokeball, 4)
+  assert.equal(parsed.ribbonFlags, (2 | (1 << 15) | (1 << 16)) >>> 0)
+})
+
 test('materializes a complete 100-byte Party record with calculated runtime data', () => {
   const boxCore = buildBoxCore({
     personality: 0,
@@ -137,12 +159,19 @@ test('keeps Shedinja at one HP during PC to Party conversion', () => {
   assert.equal(record.readUInt16LE(88), 1)
 })
 
-function buildBoxCore({ personality, originalTrainerId, species, experience, evs = {}, ivs = {} }) {
+function buildBoxCore({ personality, originalTrainerId, species, experience, heldItem = 0, moves = [], pp = [], metGame = 0, pokeball = 0, ribbonFlags = 0, evs = {}, ivs = {} }) {
   const order = substructureOrders[personality % 24]
   const plain = Buffer.alloc(48)
   const growth = substructure(plain, order, 'G')
   growth.writeUInt16LE(species, 0)
+  growth.writeUInt16LE(heldItem, 2)
   growth.writeUInt32LE(experience, 4)
+
+  const attacks = substructure(plain, order, 'A')
+  for (let index = 0; index < 4; index += 1) {
+    attacks.writeUInt16LE(moves[index] ?? 0, index * 2)
+    attacks[8 + index] = pp[index] ?? 0
+  }
 
   const effort = substructure(plain, order, 'E')
   effort[0] = evs.hp ?? 0
@@ -153,6 +182,8 @@ function buildBoxCore({ personality, originalTrainerId, species, experience, evs
   effort[5] = evs.specialDefense ?? 0
 
   const misc = substructure(plain, order, 'M')
+  misc.writeUInt16LE((metGame << 7) | (pokeball << 11), 2)
+  misc.writeUInt32LE(ribbonFlags >>> 0, 8)
   misc.writeUInt32LE(
     ((ivs.hp ?? 0)
       | ((ivs.attack ?? 0) << 5)

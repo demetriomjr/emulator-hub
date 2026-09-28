@@ -61,6 +61,22 @@ export function createPokemonHubSnapshotCoordinator({ persistence, eventStore, l
       return publicSnapshot(source)
     },
 
+    async getDetailSource({ profileId, sourceKey }) {
+      assertString(profileId, 'Profile ID'); assertString(sourceKey, 'Source key')
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const source = await readSource(profileId, sourceKey)
+        if (!source) throw coordinatorError('SOURCE_NOT_ADOPTED', 'Pokemon Hub source has not been adopted.')
+        const ids = [...new Set(source.placements.flatMap(placement => placement.pokemonInstanceId ? [placement.pokemonInstanceId] : []))]
+        const records = new Map(await Promise.all(ids.map(async id => [id, await readRecord(profileId, id)])))
+        const after = await readSource(profileId, sourceKey)
+        if (!after || JSON.stringify(source) !== JSON.stringify(after)) continue
+        const confirmedRecords = await Promise.all(ids.map(id => readRecord(profileId, id)))
+        if (ids.some((id, index) => JSON.stringify(records.get(id)) !== JSON.stringify(confirmedRecords[index]))) continue
+        return { source: structuredClone(source), records: new Map([...records].map(([id, record]) => [id, record ? structuredClone(record) : null])) }
+      }
+      throw coordinatorError('SOURCE_DETAIL_STALE', 'Pokemon Hub source changed during detail hydration.')
+    },
+
     async refreshTransferCapability({ profileId, sourceKey, transferCapability }) {
       assertString(profileId, 'Profile ID'); assertString(sourceKey, 'Source key')
       if (!transferCapability || typeof transferCapability !== 'object' || Array.isArray(transferCapability)) throw new TypeError('Pokemon Hub transfer capability is invalid')

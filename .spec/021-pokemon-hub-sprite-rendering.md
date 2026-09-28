@@ -68,14 +68,14 @@ Excluded:
 - new dependencies;
 - record/schema/API/backend changes;
 - National Pokédex conversion and regional-form identity;
-- asset downloads or changes to the resource synchronizer; and
+- asset downloads or changes to the resource synchronizer in the original increment (the egg hotfix below extends this); and
 - layout redesign, new controls, overlays, or global sprite layers.
 
 ## Acceptance criteria
 
-1. Every occupied rendered slot requests exactly one local normal or shiny image path; empty slots request none.
+1. Every occupied non-egg slot requests exactly one local normal or shiny image path; eggs use the local egg image and empty slots request none.
 2. A successfully loaded image visually covers the existing centered number without intercepting click, focus, selection, or future drag input.
-3. If an image is unavailable, the existing number remains visible and the slot remains usable.
+3. If an image is unavailable, the number or “Ovo” fallback remains visible and the slot remains usable.
 4. Resizing the viewport, changing responsive columns, scrolling the workspace, and switching Box views keep each sprite centered over its own slot without JavaScript measurement or coordinate copying.
 5. Party, Box, standard Hub grid, and profile Hub grid use the same sprite-plane behavior.
 6. No drag-and-drop package, global drag preview, save mutation, route, or data-contract change is introduced.
@@ -88,3 +88,11 @@ Excluded:
 - 2026-09-17: `node --test` ran the Hub layout, sprite-rendering, slot-sprite, and local-resource suites: 16 passing tests, 0 failures.
 - 2026-09-17: `git diff --check` completed with no whitespace errors.
 - 2026-09-17: The already-running frontend was inspected without altering its data. It currently exposes no Hub profiles or occupied slots, so end-to-end visual resizing remains for a session containing normal and shiny slot fixtures.
+
+## Hotfix: visualização de ovos
+
+Um slot ocupado com `isEgg: true` usa o sprite local `/resources/pokemon/egg.png` antes de consultar espécie ou shiny. O PNG vem de `graphics/pokemon/egg/front.png` do projeto [pokeemerald](https://github.com/pret/pokeemerald/blob/master/graphics/pokemon/egg/front.png) e é adquirido pela mesma sincronização de recursos do frontend. O número da espécie não aparece como fallback nem no rótulo acessível do slot: ambos identificam apenas “Ovo”. Os slots sem `isEgg` continuam usando os caminhos de espécie e shiny existentes. Isso vale para Hub, Party, Box e prévia de arraste, sem alterar o registro nativo ou a movimentação.
+
+O catálogo só é completo quando `egg.png` e todos os sprites declarados no manifesto estão presentes. Ao sincronizar, arquivos já presentes e com a versão de normalização vigente são copiados para a pasta temporária; a função baixa e normaliza somente os ausentes. Se faltar apenas o ovo em um catálogo anterior, a atualização não precisa consultar novamente a lista de Pokémon. `--refresh` atualiza os metadados do catálogo e baixa somente arquivos novos ou ausentes. A substituição atômica e a preservação da pasta anterior em caso de falha continuam obrigatórias.
+
+Na produção, o frontend é uma imagem Nginx com arquivos estáticos. O `prebuild` executa a sincronização antes de o Vite copiar os recursos para `dist`, e o Docker mantém o diretório de sprites em cache entre builds no mesmo builder. Isso evita baixar novamente os PNGs presentes no cache. Falha da fonte de sprites é registrada e não impede gerar o frontend: slots sem imagem continuam com fallback visível. Na primeira construção em um builder sem cache, os recursos precisam ser adquiridos.

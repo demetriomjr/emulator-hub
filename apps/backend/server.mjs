@@ -28,6 +28,7 @@ import { createPokemonHubEventStore } from '../packages/pokemon-hub-event-store.
 import { createPokemonHubSnapshotCoordinator } from '../packages/pokemon-hub-snapshot-coordinator.mjs'
 import { createPokemonHubSessionService } from '../packages/pokemon-hub-session-service.mjs'
 import { adoptPokemonHubSave } from '../packages/pokemon-hub-save-adoption.mjs'
+import { projectPokemonHubDetailSource } from '../packages/pokemon-hub-card-hydration.mjs'
 import { createPokemonHubSaveFlushService } from '../packages/pokemon-hub-save-flush.mjs'
 import { createPokemonSaveAdapterRegistry } from '../packages/pokemon-save-adapter-registry.mjs'
 import { pokemonGen3Adapter } from '../packages/pokemon-gen3-adapter.mjs'
@@ -964,11 +965,16 @@ async function getSaveLayout(response, config, { gameId, profileId, workspacePro
     const withPokemonId = (slot, location) => slot.occupied && pokemonInstanceIds.get(pokemonHubLocationKey(location))
       ? { ...slot, pokemonInstanceId: pokemonInstanceIds.get(pokemonHubLocationKey(location)) }
       : slot
+    const pokemonDetailsById = await readPokemonHubCardDetails(config, {
+      profileId: workspaceProfileId, sourceKey: `save:${profileId}:${gameId}`, snapshot,
+      title: layout.pokemonSaveTitle, adapter, layout, save,
+    })
     json(response, 200, {
       layout: { id: layout.id, party: { slots: layout.party.slots }, boxes: layout.boxes },
       ...(inspection.transferCapabilities ? { transferCapabilities: inspection.transferCapabilities } : {}),
       party: inspection.party.map((slot, index) => withPokemonId(slot, { kind: 'game', area: 'party', slot: index })),
       boxes: inspection.boxes.map((box, boxIndex) => ({ ...box, slots: box.slots.map((slot, index) => withPokemonId(slot, { kind: 'game', area: 'box', box: boxIndex, slot: index })) })),
+      pokemonDetailsById,
     })
   } catch (error) {
     console.error('[Pokemon Hub] save layout inspection failed', { gameId, profileId, code: error.code ?? 'SAVE_LAYOUT_READ_FAILED', message: error.message })
@@ -1207,7 +1213,7 @@ function parsePokemonHubProfileRoute(pathname) {
 
 async function handlePokemonHubProfiles(request, response, config) {
   if (request.method === 'GET') {
-    json(response, 200, { profiles: await readProjectedPokemonHubProfiles(config) })
+    json(response, 200, await readProjectedPokemonHubProfiles(config))
     return
   }
   let body
@@ -1945,21 +1951,43 @@ function empty(response, status) {
 
 async function readProjectedPokemonHubProfiles(config) {
   const profiles = await config.pokemonHubProfileStore.list()
-  if (typeof config.pokemonHubSnapshotCoordinator.getSnapshot !== 'function') return profiles
-  return Promise.all(profiles.map(async profile => {
-    if (!profile.ownerProfileId) return profile
+  if (typeof config.pokemonHubSnapshotCoordinator.getSnapshot !== 'function') return { profiles, pokemonDetailsById: {} }
+  const projected = await Promise.all(profiles.map(async profile => {
+    if (!profile.ownerProfileId) return { profile, details: {} }
     try {
       const snapshot = await config.pokemonHubSnapshotCoordinator.getSnapshot({ profileId: profile.ownerProfileId, sourceKey: `hub:${profile.hubProfileId}` })
+      const details = await readPokemonHubCardDetails(config, { profileId: profile.ownerProfileId, sourceKey: `hub:${profile.hubProfileId}`, snapshot })
       const entries = Object.fromEntries(snapshot.placements.flatMap(placement => {
         if (!placement.pokemonInstanceId) return []
         return [[String(placement.location.slot), { pokemonInstanceId: placement.pokemonInstanceId, ...(snapshot.pokemonDisplay?.[placement.pokemonInstanceId] ?? {}) }]]
       }))
-      return { ...profile, grid: { entries } }
+      return { profile: { ...profile, grid: { entries } }, details }
     } catch (error) {
-      if (error.code === 'SOURCE_NOT_ADOPTED') return profile
+      if (error.code === 'SOURCE_NOT_ADOPTED') return { profile, details: {} }
       throw error
     }
   }))
+  return { profiles: projected.map(entry => entry.profile), pokemonDetailsById: Object.assign({}, ...projected.map(entry => entry.details)) }
+}
+
+async function readPokemonHubCardDetails(config, { profileId, sourceKey, snapshot, title = null, adapter = null, layout = null, save = null }) {
+  if (!snapshot?.placements?.some(placement => placement.pokemonInstanceId)) return {}
+  const unavailable = code => Object.fromEntries((snapshot?.placements ?? []).flatMap(placement => placement.pokemonInstanceId ? [[placement.pokemonInstanceId, {
+    pokemonInstanceId: placement.pokemonInstanceId, availability: 'unavailable', sourceRevision: snapshot.sourceRevision ?? null, recordRevision: null, errorCode: code,
+  }]] : []))
+  if (typeof config.pokemonHubSnapshotCoordinator.getDetailSource !== 'function') return unavailable('POKEMON_DETAIL_READER_UNAVAILABLE')
+  try {
+    const { source, records } = await config.pokemonHubSnapshotCoordinator.getDetailSource({ profileId, sourceKey })
+    if (snapshot?.sourceRevision !== undefined && snapshot.sourceRevision !== source.sourceRevision) return unavailable('POKEMON_DETAIL_SOURCE_STALE')
+    let physicalSlots = null
+    if (save && typeof adapter?.readAllSlots === 'function') {
+      try { physicalSlots = new Map(adapter.readAllSlots(save.bytes, layout).map(slot => [pokemonHubLocationKey(slot.location), slot])) } catch { physicalSlots = null }
+    }
+    return projectPokemonHubDetailSource({ source, records, title, physicalSlots, physicalSaveRevision: save?.revision ?? null })
+  } catch (error) {
+    config.pokemonHubLogger?.error?.('card.detail-hydration-failed', { sourceKey, code: error.code ?? 'POKEMON_DETAIL_UNAVAILABLE' })
+    return unavailable(error.code ?? 'POKEMON_DETAIL_UNAVAILABLE')
+  }
 }
 
 async function adoptSaveIfSupported(config, profileId, entry, saved) {

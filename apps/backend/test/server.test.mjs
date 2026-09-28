@@ -1511,10 +1511,45 @@ describe('hub backend HTTP contract', () => {
     assert.deepEqual(refreshed, [{ profileId: 'profile-may', sourceKey: 'save:profile-may:pokemon-emerald', transferCapability: capability }])
   })
 
+  test('hydrates occupied save slots in the layout GET using the workspace owner namespace', async () => {
+    const fixture = await createFixture([{
+      id: 'pokemon-emerald', title: 'Pokémon Emerald', system: 'gba', core: 'mgba', file: 'pokemon-emerald.gba', sha256: 'a'.repeat(64),
+      pokemonSave: { supported: true, adapter: 'gen3-gba-v1', layoutProfile: 'pokemon-emerald-gba', title: 'pokemon-emerald' },
+    }])
+    const bytes = Buffer.alloc(80)
+    bytes.writeUInt16LE(25, 0x20)
+    bytes.writeUInt16LE(25, 0x1c)
+    const location = { kind: 'game', area: 'box', box: 0, slot: 0 }
+    const source = { profileId: 'workspace-a', sourceKey: 'save:profile-may:pokemon-emerald', sourceRevision: 1, saveRevision: 4, needsSaveFlush: false, placements: [{ location, pokemonInstanceId: 'pokemon-one' }] }
+    const calls = []
+    const server = createHubServer({
+      ...fixture,
+      romDiscovery: { async scan() { return { accepted: [{ id: 'pokemon-emerald', title: 'Pokémon Emerald', system: 'gba', core: 'mgba', file: 'pokemon-emerald.gba', sha256: 'a'.repeat(64) }] } } },
+      romRegistry: { async load() { return [] }, async replace(entries) { return entries } },
+      profileStore: { async get() { return { id: 'profile-may' } } },
+      saveStore: { async get() { return { bytes: Buffer.alloc(0x20000), revision: 4 } } },
+      pokemonSaveAdapters: { get() { return { inspect() { return { party: [], boxes: [{ slots: [{ occupied: true, species: 25 }] }] } }, readAllSlots() { return [] } } } },
+      pokemonHubSnapshotCoordinator: {
+        async getSnapshot(request) { calls.push(request); return source },
+        async getDetailSource(request) { calls.push(request); return { source, records: new Map([['pokemon-one', { profileId: 'workspace-a', pokemonInstanceId: 'pokemon-one', revision: 2, placement: { sourceKey: source.sourceKey, location }, representations: [{ adapter: 'gen3-gba-v1', kind: 'pc-record', bytesBase64: bytes.toString('base64'), sha256: sha256(bytes) }] }]]) } },
+      },
+      pokemonHubSaveFlush: { async flushSource() { return { status: 'clean' } } },
+    })
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+    liveServers.add(server)
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/pokemon-hub/save-profiles/pokemon-emerald/profile-may/layout?workspaceProfileId=workspace-a`)
+    const body = await jsonResponse(response)
+    assert.equal(response.status, 200)
+    assert.equal(body.boxes[0].slots[0].pokemonInstanceId, 'pokemon-one')
+    assert.equal(body.pokemonDetailsById['pokemon-one'].identity.species, 25)
+    assert.deepEqual(calls, [{ profileId: 'workspace-a', sourceKey: source.sourceKey }, { profileId: 'workspace-a', sourceKey: source.sourceKey }])
+    assert.equal(JSON.stringify(body).includes('bytesBase64'), false)
+  })
+
   test('creates and lists Hub profiles from the Redis-backed Hub collection', async () => {
     const { baseUrl } = await startFixture([])
 
-    assert.deepEqual(await jsonResponse(await fetch(`${baseUrl}/api/pokemon-hub/profiles`)), { profiles: [] })
+    assert.deepEqual(await jsonResponse(await fetch(`${baseUrl}/api/pokemon-hub/profiles`)), { profiles: [], pokemonDetailsById: {} })
 
     const createdResponse = await fetch(`${baseUrl}/api/pokemon-hub/profiles`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Shiny collection' }),
@@ -1524,7 +1559,7 @@ describe('hub backend HTTP contract', () => {
     assert.equal(created.name, 'Shiny collection')
     assert.deepEqual(created.grid, { entries: {} })
 
-    assert.deepEqual(await jsonResponse(await fetch(`${baseUrl}/api/pokemon-hub/profiles`)), { profiles: [created] })
+    assert.deepEqual(await jsonResponse(await fetch(`${baseUrl}/api/pokemon-hub/profiles`)), { profiles: [created], pokemonDetailsById: {} })
   })
 
   test('renames and deletes a Hub profile through its own collection route', async () => {
@@ -2065,13 +2100,19 @@ describe('hub backend HTTP contract', () => {
 
   test('projects occupied Hub grid entries from their owner profile snapshot when listing profiles', async () => {
     const fixture = await createFixture([])
+    const bytes = Buffer.alloc(80)
+    bytes.writeUInt16LE(25, 0x20)
+    bytes.writeUInt16LE(25, 0x1c)
+    const location = { kind: 'hub', hubProfileId: '11111111-1111-4111-8111-111111111111', slot: 4 }
+    const source = { profileId: 'profile-may', sourceKey: `hub:${location.hubProfileId}`, sourceRevision: 1, placements: [{ location, pokemonInstanceId: 'pokemon-alpha' }] }
     const server = createHubServer({
       ...fixture,
       pokemonHubProfileStore: {
         async list() { return [{ hubProfileId: '11111111-1111-4111-8111-111111111111', ownerProfileId: 'profile-may', name: 'Transfer box', grid: { entries: {} } }] },
       },
       pokemonHubSnapshotCoordinator: {
-        async getSnapshot() { return { placements: [{ location: { kind: 'hub', hubProfileId: '11111111-1111-4111-8111-111111111111', slot: 4 }, pokemonInstanceId: 'pokemon-alpha' }], pokemonDisplay: { 'pokemon-alpha': { species: 25, shiny: true } } } },
+        async getSnapshot() { return { ...source, pokemonDisplay: { 'pokemon-alpha': { species: 25, shiny: true } } } },
+        async getDetailSource() { return { source, records: new Map([['pokemon-alpha', { profileId: 'profile-may', pokemonInstanceId: 'pokemon-alpha', revision: 1, placement: { sourceKey: source.sourceKey, location }, representations: [{ adapter: 'gen3-gba-v1', kind: 'pc-record', bytesBase64: bytes.toString('base64'), sha256: sha256(bytes) }] }]]) } },
       },
       pokemonHubSaveFlush: { async flushSource() { return { status: 'clean' } } },
     })
@@ -2083,6 +2124,9 @@ describe('hub backend HTTP contract', () => {
 
     assert.equal(response.status, 200)
     assert.deepEqual(body.profiles[0].grid.entries, { 4: { pokemonInstanceId: 'pokemon-alpha', species: 25, shiny: true } })
+    assert.equal(body.pokemonDetailsById['pokemon-alpha'].availability, 'ready')
+    assert.equal(body.pokemonDetailsById['pokemon-alpha'].identity.species, 25)
+    assert.equal(JSON.stringify(body).includes('bytesBase64'), false)
   })
 
   test('includes each ready ROM profile list in the shared catalog response', async () => {

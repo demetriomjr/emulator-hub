@@ -67,6 +67,20 @@ test('adopts native records once and acquires a safe snapshot without bytes', as
   assert.equal((await events.listForPokemon(profileId, adopted.placements[0].pokemonInstanceId))[0].type, 'pokemon.observed')
 })
 
+test('reads every occupied source record for detail hydration without changing the source', async () => {
+  const { coordinator } = await fixture()
+  const adopted = await coordinator.adopt({ profileId, sourceKey: 'save:profile-may:emerald', sourceRevision: 4, adapter: 'gen3-gba-v1', slots: [
+    { location: party(0), record: record(7, { species: 25, shiny: false }) },
+    { location: party(1), record: null },
+    { location: party(2), record: record(8, { species: 26, shiny: true }) },
+  ] })
+  const details = await coordinator.getDetailSource({ profileId, sourceKey: adopted.sourceKey })
+  assert.equal(details.source.sourceRevision, adopted.sourceRevision)
+  assert.equal(details.records.size, 2)
+  assert.equal(details.records.get(adopted.placements[0].pokemonInstanceId).representations[0].kind, 'pc-record')
+  assert.deepEqual(await coordinator.getSnapshot({ profileId, sourceKey: adopted.sourceKey }), adopted)
+})
+
 test('creates and expands a Hub grid source without assigning native bytes to empty grid slots', async () => {
   const { coordinator } = await fixture()
 

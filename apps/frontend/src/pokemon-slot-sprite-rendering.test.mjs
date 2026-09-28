@@ -8,7 +8,7 @@ const stylesheet = new URL('./styles.css', import.meta.url)
 test('renders every occupied slot through one pointer-transparent local sprite component', async () => {
   const source = await readFile(sourceFile, 'utf8')
 
-  assert.match(source, /import \{ getPokemonSlotSprite, hidePokemonSlotSprite \} from '\.\/pokemon-slot-sprite\.mjs'/)
+  assert.match(source, /import \{ getPokemonSlotFallback, getPokemonSlotSprite, hidePokemonSlotSprite \} from '\.\/pokemon-slot-sprite\.mjs'/)
   assert.match(source, /function PokemonSlotSprite\(\{ slot \}\)/)
   assert.match(source, /src=\{sprite\}/)
   assert.match(source, /draggable=\{false\}/)

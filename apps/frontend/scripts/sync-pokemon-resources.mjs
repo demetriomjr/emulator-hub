@@ -8,6 +8,7 @@ const SOURCE_INDEX_URL = 'https://pokeapi.co/api/v2/pokemon?limit=2000'
 const targetDirectory = fileURLToPath(new URL('../public/resources/pokemon/', import.meta.url))
 const refresh = process.argv.includes('--refresh')
 const background = process.argv.includes('--background')
+const optional = process.argv.includes('--optional')
 const scriptPath = fileURLToPath(import.meta.url)
 
 async function getJson(url) {
@@ -69,6 +70,6 @@ if (background) {
     console.log(`Pokemon resources: ${result.status} (${result.count} entries)`)
   } catch (error) {
     console.error(error instanceof Error ? error.message : error)
-    process.exitCode = 1
+    if (!optional) process.exitCode = 1
   }
 }

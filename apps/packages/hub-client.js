@@ -18,7 +18,7 @@ export async function getGames() {
 export async function getSaveProfileLayout(gameId, profileId, workspaceProfileId = null) {
   const workspace = typeof workspaceProfileId === 'string' && workspaceProfileId ? `?workspaceProfileId=${encodeURIComponent(workspaceProfileId)}` : ''
   const body = await getJson(`/api/pokemon-hub/save-profiles/${encodeURIComponent(gameId)}/${encodeURIComponent(profileId)}/layout${workspace}`)
-  if (!body.layout || !Array.isArray(body.party) || !Array.isArray(body.boxes)) throw new Error('Invalid save layout response')
+  if (!body.layout || !Array.isArray(body.party) || !Array.isArray(body.boxes) || !isPokemonDetailMap(body.pokemonDetailsById)) throw new Error('Invalid save layout response')
   return body
 }
 
@@ -204,9 +204,13 @@ function profileCollectionUrl(gameId) {
   return `/api/games/${encodeURIComponent(gameId)}/profiles`
 }
 
-export function getPokemonHubProfiles() {
-  return getJson('/api/pokemon-hub/profiles')
+export async function getPokemonHubProfiles() {
+  const body = await getJson('/api/pokemon-hub/profiles')
+  if (!Array.isArray(body.profiles) || !isPokemonDetailMap(body.pokemonDetailsById)) throw new Error('Invalid Pokémon Hub profiles response')
+  return body
 }
+
+function isPokemonDetailMap(value) { return value !== null && typeof value === 'object' && !Array.isArray(value) }
 
 export async function createPokemonHubProfile(profile) {
   const response = await fetch('/api/pokemon-hub/profiles', {

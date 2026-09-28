@@ -1,7 +1,24 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { acquirePlayerLease, closePokemonHubSession, getCloudSave, putCloudSave, releasePlayerLease, syncPokemonHubSessionSnapshot } from './hub-client.js'
+import { acquirePlayerLease, closePokemonHubSession, getCloudSave, getPokemonHubProfiles, getSaveProfileLayout, putCloudSave, releasePlayerLease, syncPokemonHubSessionSnapshot } from './hub-client.js'
+
+test('keeps the complete card map in aggregated Hub and save responses', async () => {
+  const originalFetch = globalThis.fetch
+  const calls = []
+  const detail = { pokemonInstanceId: 'one', availability: 'ready' }
+  globalThis.fetch = async url => {
+    calls.push(url)
+    return { ok: true, json: async () => url === '/api/pokemon-hub/profiles'
+      ? { profiles: [], pokemonDetailsById: { one: detail } }
+      : { layout: {}, party: [], boxes: [], pokemonDetailsById: { one: detail } } }
+  }
+  try {
+    assert.deepEqual((await getPokemonHubProfiles()).pokemonDetailsById.one, detail)
+    assert.deepEqual((await getSaveProfileLayout('emerald', 'may')).pokemonDetailsById.one, detail)
+  } finally { globalThis.fetch = originalFetch }
+  assert.deepEqual(calls, ['/api/pokemon-hub/profiles', '/api/pokemon-hub/save-profiles/emerald/may/layout'])
+})
 
 test('sends player lease identity for acquire, save, and release', async () => {
   const originalFetch = globalThis.fetch

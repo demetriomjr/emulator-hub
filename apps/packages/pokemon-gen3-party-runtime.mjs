@@ -46,9 +46,11 @@ export function parseGen3BoxCore(boxCore, { validateChecksum = true } = {}) {
   const order = substructureOrders[personality % substructureOrders.length]
   const structures = Object.fromEntries([...order].map((name, index) => [name, decrypted.subarray(index * 12, index * 12 + 12)]))
   const growth = structures.G
+  const attacks = structures.A
   const effort = structures.E
   const misc = structures.M
   const ivEggAbility = misc.readUInt32LE(4)
+  const metData = misc.readUInt16LE(2)
 
   return Object.freeze({
     bytes,
@@ -59,8 +61,16 @@ export function parseGen3BoxCore(boxCore, { validateChecksum = true } = {}) {
     species: growth.readUInt16LE(0),
     heldItem: growth.readUInt16LE(2),
     experience: growth.readUInt32LE(4),
+    moves: Object.freeze(Array.from({ length: 4 }, (_, index) => attacks.readUInt16LE(index * 2))),
+    pp: Object.freeze(Array.from(attacks.subarray(8, 12))),
     ppBonuses: growth[8],
     friendship: growth[9],
+    metLevel: metData & 0x7f,
+    metGame: (metData >>> 7) & 0x0f,
+    pokeball: (metData >>> 11) & 0x0f,
+    otGender: (metData >>> 15) & 1,
+    isEgg: (ivEggAbility & 0x4000_0000) !== 0,
+    ribbonFlags: misc.readUInt32LE(8),
     evs: Object.freeze({
       hp: effort[0],
       attack: effort[1],
@@ -100,18 +110,8 @@ export function parseGen3BoxCore(boxCore, { validateChecksum = true } = {}) {
 export function materializeGen3PartyRecord({ boxCore, speciesData, growthData, runtime = {} } = {}) {
   const parsed = parseGen3BoxCore(boxCore)
   const species = resolveSpeciesData(speciesData, parsed.species)
-  const baseStats = normalizeBaseStats(species, parsed.species)
   const level = resolveLevel(growthData, parsed.experience)
-  const nature = parsed.nature
-
-  const maxHp = species.fixedHp === 1 ? 1 : calculateHp(baseStats.hp, parsed.ivs.hp, parsed.evs.hp, level)
-  const stats = {
-    attack: calculateBattleStat(baseStats.attack, parsed.ivs.attack, parsed.evs.attack, level, nature, 'attack'),
-    defense: calculateBattleStat(baseStats.defense, parsed.ivs.defense, parsed.evs.defense, level, nature, 'defense'),
-    speed: calculateBattleStat(baseStats.speed, parsed.ivs.speed, parsed.evs.speed, level, nature, 'speed'),
-    specialAttack: calculateBattleStat(baseStats.specialAttack, parsed.ivs.specialAttack, parsed.evs.specialAttack, level, nature, 'specialAttack'),
-    specialDefense: calculateBattleStat(baseStats.specialDefense, parsed.ivs.specialDefense, parsed.evs.specialDefense, level, nature, 'specialDefense'),
-  }
+  const { hp: maxHp, ...stats } = calculateGen3BattleStats({ parsed, speciesData: species, level })
 
   const status = uint32(runtime.status ?? 0, 'Party status')
   const mail = uint8(runtime.mail ?? 0xff, 'Party mail')
@@ -131,6 +131,21 @@ export function materializeGen3PartyRecord({ boxCore, speciesData, growthData, r
   record.writeUInt16LE(stats.specialAttack, 96)
   record.writeUInt16LE(stats.specialDefense, 98)
   return record
+}
+
+export function calculateGen3BattleStats({ parsed, speciesData, level }) {
+  const species = resolveSpeciesData(speciesData, parsed.species)
+  const baseStats = normalizeBaseStats(species, parsed.species)
+  if (!Number.isInteger(level) || level < 1 || level > MAX_LEVEL) throw runtimeError('GEN3_PARTY_RUNTIME_INVALID', 'Gen III level is invalid.')
+  const nature = parsed.nature
+  return {
+    hp: species.fixedHp === 1 ? 1 : calculateHp(baseStats.hp, parsed.ivs.hp, parsed.evs.hp, level),
+    attack: calculateBattleStat(baseStats.attack, parsed.ivs.attack, parsed.evs.attack, level, nature, 'attack'),
+    defense: calculateBattleStat(baseStats.defense, parsed.ivs.defense, parsed.evs.defense, level, nature, 'defense'),
+    speed: calculateBattleStat(baseStats.speed, parsed.ivs.speed, parsed.evs.speed, level, nature, 'speed'),
+    specialAttack: calculateBattleStat(baseStats.specialAttack, parsed.ivs.specialAttack, parsed.evs.specialAttack, level, nature, 'specialAttack'),
+    specialDefense: calculateBattleStat(baseStats.specialDefense, parsed.ivs.specialDefense, parsed.evs.specialDefense, level, nature, 'specialDefense'),
+  }
 }
 
 function normalizeBoxCore(input) {

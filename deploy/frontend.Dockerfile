@@ -8,7 +8,7 @@ COPY apps/frontend ./
 COPY apps/packages ../packages
 ARG PLAYER_ORIGIN_PORTS=""
 ENV VITE_PLAYER_PORTS=$PLAYER_ORIGIN_PORTS
-RUN npm run build
+RUN --mount=type=cache,id=emulator-hub-pokemon-sprites,target=/app/apps/frontend/public/resources/pokemon,sharing=locked npm run build
 
 FROM nginx:1.29-alpine
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
