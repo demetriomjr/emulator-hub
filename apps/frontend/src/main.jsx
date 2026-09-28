@@ -1,7 +1,8 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { createRoot } from 'react-dom/client'
-import { ConfigProvider, Select } from 'antd'
+import { Button, ConfigProvider, Input, Select } from 'antd'
+import { AudioMutedOutlined, CloseOutlined, FastForwardOutlined, FullscreenExitOutlined, FullscreenOutlined, InfoCircleOutlined, NumberOutlined, PlusOutlined, PoweroffOutlined, RedoOutlined, SaveOutlined, SearchOutlined, SoundOutlined, ThunderboltOutlined, UploadOutlined } from '@ant-design/icons'
 import { acquirePlayerLease, createProfile, deleteProfile as deleteProfileRequest, getControlProfile, getGames, getProfiles, getUserPreferences, listMacros, releasePlayerLease, saveMacro as saveMacroRequest, syncOddsResetCount, updateControlProfile, updateProfile, updateUserPreferences } from '../../packages/hub-client.js'
 import { createMacro, migrateMacro, normalizeKeyboardKey, validateMacro } from '../../packages/input-macro-simulator.mjs'
 import { createMacroRunCoordinator } from '../../packages/macro-run-coordinator.mjs'
@@ -24,6 +25,8 @@ import { canReconcileLateSnapshotDelete, createSnapshotDeleteWatchdog, restorePr
 import { createPlayerTriggerActions, playerTriggerActionOptions } from '../../packages/player-trigger-actions.mjs'
 import { requestPlayerFrame } from '../../packages/player-frame-request.mjs'
 import { createShinyHuntController } from '../../packages/shiny-hunt-controller.mjs'
+import { createGlobalPlaybackToggle, createPlayerPlaybackToggle, requestPlayerPlaybackState, selectPlayingSessions } from '../../packages/player-playback.mjs'
+import { saveRunningProfileNames } from '../../packages/running-profile-editor.mjs'
 import { findReachablePlayerOriginSlot, findTrustedPlayerFrame, frameOrigin, parsePlayerOriginPorts, playerOriginForSlot } from '../../packages/player-origin-topology.mjs'
 import { respondToPlayerStorageRequest } from '../../packages/player-origin-storage-bridge.mjs'
 import { getInstallationIdentity } from '../../packages/restore-candidate.mjs'
@@ -109,6 +112,23 @@ function configurePlayerFrame(frame, message) {
   if (frame) frame.contentWindow?.postMessage(message, frameOrigin(frame, window.location.origin))
 }
 
+function playerFrameForSession(sessionId) {
+  return [...document.querySelectorAll('.player-cell iframe')].find(frame => frame.closest('.player-cell')?.dataset.sessionId === sessionId)
+}
+
+const toggleGlobalPlayback = createGlobalPlaybackToggle({
+  getFrames: () => [...document.querySelectorAll('.player-grid iframe')],
+  send: configurePlayerFrame,
+  getOrigin: frame => frameOrigin(frame, window.location.origin),
+  hostWindow: window,
+})
+
+const togglePlayerPlayback = createPlayerPlaybackToggle({
+  getFrame: playerFrameForSession,
+  getState: (sessionId, frame) => requestPlayerPlaybackState({ frame, browser: window, sessionId }),
+  send: configurePlayerFrame,
+})
+
 function playerSelectPopupContainer(trigger) {
   return trigger.closest('.player-shell') ?? document.body
 }
@@ -169,15 +189,15 @@ function SnapshotRestorePrompt({ request, onRestore, onContinue }) {
       <h2 id={`snapshot-restore-title-${request.sessionId}`}>Estados disponíveis</h2>
       <p>Selecione um snapshot para carregar ou continue sem carregar.</p>
       <div className="snapshot-restore-list" role="group" aria-label="Snapshots disponíveis">
-        {candidates.map(candidate => { const view = describeRestoreCandidate(candidate); return <button type="button" className={`snapshot-restore-candidate${selectedCandidateId === candidate.candidateId ? ' is-selected' : ''}`} key={candidate.candidateId} aria-pressed={selectedCandidateId === candidate.candidateId} disabled={!ready || request.resolving} onClick={() => setSelectedCandidateId(candidate.candidateId)}>
+        {candidates.map(candidate => { const view = describeRestoreCandidate(candidate); return <Button htmlType="button" className={`snapshot-restore-candidate${selectedCandidateId === candidate.candidateId ? ' is-selected' : ''}`} key={candidate.candidateId} aria-pressed={selectedCandidateId === candidate.candidateId} disabled={!ready || request.resolving} onClick={() => setSelectedCandidateId(candidate.candidateId)}>
           <span className="snapshot-restore-candidate-title">{candidate.kind === 'local-recovery' ? 'Local' : 'Remoto'}</span>
           <span>{view.capture}</span>
-        </button> })}
+        </Button> })}
       </div>
       {request.choiceError && <p className="snapshot-restore-error" role="alert">{request.choiceError}</p>}
       <div className="snapshot-restore-actions">
-        <button type="button" className="snapshot-restore-primary" disabled={!ready || !selectedCandidateAvailable || request.resolving} onClick={() => onRestore(selectedCandidateId)}>Carregar snapshot</button>
-        <button type="button" className="snapshot-restore-secondary" disabled={!ready || request.resolving} onClick={onContinue}>Continuar sem carregar</button>
+        <Button htmlType="button" className="snapshot-restore-primary" disabled={!ready || !selectedCandidateAvailable || request.resolving} onClick={() => onRestore(selectedCandidateId)}>Carregar snapshot</Button>
+        <Button htmlType="button" className="snapshot-restore-secondary" disabled={!ready || request.resolving} onClick={onContinue}>Continuar sem carregar</Button>
       </div>
     </div>
   </div>
@@ -231,10 +251,22 @@ function App() {
   activeSessionsRef.current = activeSessions
   const [focusedSessionId, setFocusedSessionId] = useState(null)
   const selectedPlayerSessionId = activeSessions.some(session => session.sessionId === focusedSessionId) ? focusedSessionId : activeSessions[0]?.sessionId
+
+  function getPlayerPlaybackState(sessionId) {
+    const frame = playerFrameForSession(sessionId)
+    return requestPlayerPlaybackState({ frame, browser: window, sessionId })
+  }
+
+  function getPlayingSessions() {
+    return selectPlayingSessions(activeSessionsRef.current.map(session => ({ ...session })), session => getPlayerPlaybackState(session.sessionId))
+  }
   const [profileInfoSessionId, setProfileInfoSessionId] = useState(null)
   const [profileInfoName, setProfileInfoName] = useState('')
   const [profileInfoError, setProfileInfoError] = useState('')
   const [profileInfoBusy, setProfileInfoBusy] = useState(false)
+  const [multiProfileRows, setMultiProfileRows] = useState(null)
+  const [multiProfileBusy, setMultiProfileBusy] = useState(false)
+  const [multiProfileError, setMultiProfileError] = useState('')
   const [userStateAvailable, setUserStateAvailable] = useState({})
   const [playerActionErrors, setPlayerActionErrors] = useState({})
   const [instancePicker, setInstancePicker] = useState(false)
@@ -352,7 +384,8 @@ function App() {
     const live = new Set(activeSessions.map(session => session.sessionId))
     for (const sessionId of profileInfoGamepadGatesRef.current.keys()) if (!live.has(sessionId)) profileInfoGamepadGatesRef.current.delete(sessionId)
     if (profileInfoSessionId && !activeSessions.some(session => session.sessionId === profileInfoSessionId)) setProfileInfoSessionId(null)
-  }, [activeSessions, profileInfoSessionId])
+    if (multiProfileRows && multiProfileRows.some(row => !live.has(row.sessionId))) setMultiProfileRows(null)
+  }, [activeSessions, profileInfoSessionId, multiProfileRows])
 
   useEffect(() => {
     if (huntActiveRef.current && activeSessions.map(session => session.sessionId).join('|') !== huntParticipantsRef.current) huntControllerRef.current?.stop()
@@ -385,8 +418,8 @@ function App() {
   }
 
   useLayoutEffect(() => {
-    setPlayerInteractionLocked(closeChooserOpen || saveCloseRows !== null)
-  }, [closeChooserOpen, saveCloseRows !== null, activeSessions.length, profileInfoSessionId])
+    setPlayerInteractionLocked(closeChooserOpen || saveCloseRows !== null || multiProfileRows !== null)
+  }, [closeChooserOpen, saveCloseRows !== null, activeSessions.length, profileInfoSessionId, multiProfileRows !== null])
 
   useEffect(() => {
     if (!closeChooserOpen) return
@@ -710,10 +743,19 @@ function App() {
 
   useEffect(() => {
     if (!activeSessions.length) return
+    let current = true
+    const whenSelectedPlaying = action => {
+      if (!selectedPlayerSessionId) return
+      void getPlayerPlaybackState(selectedPlayerSessionId).then(reply => {
+        if (current && reply.paused === false && activeSessionsRef.current.some(session => session.sessionId === selectedPlayerSessionId)) action()
+      }).catch(() => {})
+    }
     const triggerActions = createPlayerTriggerActions({ dispatch: message => {
-      if (message === 'emulator-hub:reset' || message === 'emulator-hub:soft-reset') dispatchReset(message)
-      else broadcastPlayerMessage(message)
-    }, toggleFastForward: () => { void toggleFastForwardFromFirstFrame() }, toggleLastMacro: () => { void lastMacroActionRef.current.toggle().catch(cause => setMacroError(cause.message)) } })
+      whenSelectedPlaying(() => {
+        if (message === 'emulator-hub:reset' || message === 'emulator-hub:soft-reset') dispatchReset(message)
+        else broadcastPlayerMessage(message)
+      })
+    }, toggleFastForward: () => whenSelectedPlaying(() => { void toggleFastForwardFromFirstFrame() }), toggleLastMacro: () => whenSelectedPlaying(() => { void lastMacroActionRef.current.toggle().catch(cause => setMacroError(cause.message)) }) })
     const broadcast = bindings => {
       for (const frame of document.querySelectorAll('.player-grid iframe')) {
         const sessionId = frame.closest('.player-cell')?.dataset.sessionId
@@ -739,6 +781,7 @@ function App() {
     const interval = window.setInterval(poll, 16)
     document.addEventListener('visibilitychange', poll)
     return () => {
+      current = false
       window.clearInterval(interval)
       document.removeEventListener('visibilitychange', poll)
       for (const frame of document.querySelectorAll('.player-grid iframe')) configurePlayerFrame(frame, { type: 'emulator-hub:gamepad', bindings: [] })
@@ -823,12 +866,15 @@ function App() {
     }
   }
 
-  function dispatchReset(type) {
+  async function dispatchReset(type, targetSessionId = null) {
     if (huntActiveRef.current) return
-    void stopMacro()
+    const candidates = activeSessionsRef.current.filter(session => targetSessionId === null || session.sessionId === targetSessionId)
+    const sessions = await selectPlayingSessions(candidates, session => getPlayerPlaybackState(session.sessionId))
+    if (huntActiveRef.current || !sessions.length) return
+    if (targetSessionId === null) void stopMacro()
     const frames = [...document.querySelectorAll('.player-grid iframe')]
-    activeSessionsRef.current.forEach((session, index) => {
-      const frame = frames[index]
+    sessions.forEach(session => {
+      const frame = frames.find(candidate => candidate.closest('.player-cell')?.dataset.sessionId === session.sessionId)
       if (!frame) return
       if (!oddsManipulatorEnabled) {
         configurePlayerFrame(frame, { type })
@@ -882,8 +928,9 @@ function App() {
   async function startShinyHunt() {
     if (huntActiveRef.current || activeSessionsRef.current.length === 0) return
     if (!await stopMacro()) return
-    const sessions = activeSessionsRef.current.map(session => ({ ...session }))
-    const participantKey = sessions.map(session => session.sessionId).join('|')
+    const participantKey = activeSessionsRef.current.map(session => session.sessionId).join('|')
+    const sessions = await getPlayingSessions()
+    if (!sessions.length || activeSessionsRef.current.map(session => session.sessionId).join('|') !== participantKey) return
     const huntId = crypto.randomUUID()
     huntParticipantsRef.current = participantKey
     huntActiveRef.current = true
@@ -1316,8 +1363,8 @@ function App() {
       : session))
   }
 
-  function openProfileInfo() {
-    const session = activeSessions.find(candidate => candidate.sessionId === focusedSessionId) ?? activeSessions[0]
+  function openProfileInfo(sessionId = null) {
+    const session = activeSessions.find(candidate => candidate.sessionId === (sessionId ?? focusedSessionId)) ?? (sessionId === null ? activeSessions[0] : null)
     if (!session) return
     if (profileInfoSessionId && profileInfoSessionId !== session.sessionId) {
       profileInfoGamepadGatesRef.current.get(profileInfoSessionId)?.unlock(activeGamepadBindings(readGamepadSnapshot()))
@@ -1358,6 +1405,44 @@ function App() {
       setProfileInfoError(cause.message)
     } finally {
       setProfileInfoBusy(false)
+    }
+  }
+
+  function openHeaderProfileInfo() {
+    if (activeSessions.length < 2) { openProfileInfo(); return }
+    setMultiProfileRows(activeSessions.map(session => {
+      const game = games.find(candidate => candidate.id === session.gameId)
+      return {
+        sessionId: session.sessionId,
+        gameId: session.gameId,
+        profileId: session.profileId,
+        gameTitle: session.gameTitle ?? game?.title ?? session.gameId,
+        number: getGameProfileNumber({ id: session.profileId }, game?.profiles ?? []),
+        name: session.profileName ?? '',
+      }
+    }))
+    setMultiProfileError('')
+  }
+
+  function closeMultiProfileInfo() {
+    if (multiProfileBusy) return
+    setMultiProfileRows(null)
+    setMultiProfileError('')
+  }
+
+  async function submitMultiProfileInfo(event) {
+    event.preventDefault()
+    if (multiProfileBusy || !multiProfileRows) return
+    setMultiProfileBusy(true)
+    setMultiProfileError('')
+    try {
+      const { saved, failed } = await saveRunningProfileNames(multiProfileRows, updateProfile)
+      for (const { row, updated } of saved) handleGlobalProfileSaved(row.gameId, updated)
+      if (failed.length) {
+        setMultiProfileError(`Não foi possível salvar: ${failed.map(({ row }) => `${row.gameTitle} #${row.number ?? '?'}`).join(', ')}.`)
+      } else setMultiProfileRows(null)
+    } finally {
+      setMultiProfileBusy(false)
     }
   }
 
@@ -1420,13 +1505,17 @@ function App() {
     }
   }
 
+  function sendPlayerMessage(type, sessionId, stopGlobalMacro = false) {
+    if (!activeSessions.some(session => session.sessionId === sessionId)) return
+    if (type === 'emulator-hub:load-state' && stopGlobalMacro) void stopMacro()
+    setPlayerActionErrors(current => { const next = { ...current }; delete next[sessionId]; return next })
+    configurePlayerFrame(playerFrameForSession(sessionId), { type, sessionId })
+  }
+
   function sendSelectedPlayerMessage(type) {
     const sessionId = activeSessions.some(session => session.sessionId === focusedSessionId) ? focusedSessionId : activeSessions[0]?.sessionId
     if (!sessionId) return
-    if (type === 'emulator-hub:load-state') void stopMacro()
-    setPlayerActionErrors(current => { const next = { ...current }; delete next[sessionId]; return next })
-    const frame = [...document.querySelectorAll('.player-cell')].find(cell => cell.dataset.sessionId === sessionId)?.querySelector('iframe')
-    configurePlayerFrame(frame, { type, sessionId })
+    sendPlayerMessage(type, sessionId, true)
   }
 
   async function refreshMacros() {
@@ -1468,12 +1557,12 @@ function App() {
 
   async function runMacro() {
     if (huntActiveRef.current || macroOperationPendingRef.current || !macroDraft) return
-    const participants = activeSessionsRef.current.map(session => session.sessionId)
-    if (!participants.length) { setMacroError('Nenhum player aberto'); return }
     setMacroError('')
     macroOperationPendingRef.current = true
     setMacroSaving(true)
     try {
+      const participants = (await getPlayingSessions()).map(session => session.sessionId)
+      if (!participants.length) { setMacroError('Nenhum player em execução'); return }
       const saved = await persistMacro(macroDraft)
       const started = await macroCoordinatorRef.current.start(structuredClone(saved), participants)
       if (started) {
@@ -1487,8 +1576,6 @@ function App() {
 
   async function runSavedMacro(macro) {
     if (huntActiveRef.current || macroOperationPendingRef.current || macroCoordinatorRef.current.getState().runId) return
-    const participants = activeSessionsRef.current.map(session => session.sessionId)
-    if (!participants.length) { setMacroError('Nenhum player aberto'); return }
     if (macro.schemaVersion !== 2) { setMacroError('Abra esta macro no editor, revise e salve antes de executar.'); return }
     const validation = validateMacro(macro)
     if (!validation.valid) { setMacroError(validation.errors[0]); return }
@@ -1496,6 +1583,8 @@ function App() {
     macroOperationPendingRef.current = true
     setMacroSaving(true)
     try {
+      const participants = (await getPlayingSessions()).map(session => session.sessionId)
+      if (!participants.length) { setMacroError('Nenhum player em execução'); return }
       const started = await macroCoordinatorRef.current.start(structuredClone(macro), participants)
       if (started) {
         lastMacroActionRef.current.remember(macro.id)
@@ -1780,92 +1869,70 @@ function App() {
     </div>)}
     {activeSessions.length > 0 && <div className="player-overlay" role="dialog" aria-modal="true" aria-label="Emulator">
       <div className={`player-shell player-shell-${activeSessions.length}`} ref={playerShellRef}>
-        <header className="player-header" inert={closeChooserOpen || saveCloseRows !== null ? true : undefined}>
+        <header className="player-header" inert={closeChooserOpen || saveCloseRows !== null || multiProfileRows !== null ? true : undefined}>
           <div className="player-global-controls">
             <div className="fast-forward-control">
-              <button className={`fast-forward-button mute-button${muted ? ' is-active' : ''}`} type="button" aria-label={muted ? 'Desmutar áudio' : 'Mutar áudio'} title={muted ? 'Desmutar áudio' : 'Mutar áudio'} aria-pressed={muted} onClick={toggleMute}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4Z" /><path d={muted ? 'M17 9l5 6m0-6-5 6' : 'M16 9a4 4 0 0 1 0 6m2-9a8 8 0 0 1 0 12'} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
-              </button>
-              <button className={`fast-forward-button${fastForwardEnabled ? ' is-active' : ''}`} type="button" aria-label="Fast Forward" title="Fast Forward" aria-pressed={fastForwardEnabled} disabled={huntRunning} onClick={toggleFastForward}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5v14l7-7-7-7Zm8 0v14l7-7-7-7Z" /></svg>
-              </button>
-              <Select className="player-header-select player-speed-select" aria-label="Velocidade do Fast Forward" title="Velocidade do Fast Forward" value={fastForwardSpeed} disabled={huntRunning} options={fastForwardSpeeds.map(speed => ({ value: speed, label: `${speed}×` }))} getPopupContainer={playerSelectPopupContainer} popupMatchSelectWidth={false} onChange={speed => { setFastForwardSpeed(speed); void saveUserPreferences({ fastForwardSpeed: speed }) }} />
+              <Button className="fast-forward-button" htmlType="button" icon={<svg viewBox="0 0 24 24" className="player-play-pause-glyph" aria-hidden="true"><path d="M2 5v14l9-7-9-7ZM14 5h3v14h-3ZM20 5h3v14h-3Z" /></svg>} aria-label="Play/Pause" title="Play/Pause" disabled={huntRunning} onClick={() => void toggleGlobalPlayback()} />
+              <Button className="player-control-button" htmlType="button" icon={<InfoCircleOutlined />} aria-label="Informações do perfil" title="Informações do perfil" disabled={huntRunning || closeChooserOpen || saveCloseRows !== null || profileInfoSessionId !== null || multiProfileRows !== null} onClick={openHeaderProfileInfo} />
+              <Button className={`fast-forward-button mute-button${muted ? ' is-active' : ''}`} htmlType="button" icon={muted ? <AudioMutedOutlined /> : <SoundOutlined />} aria-label={muted ? 'Desmutar áudio' : 'Mutar áudio'} title={muted ? 'Desmutar áudio' : 'Mutar áudio'} aria-pressed={muted} onClick={toggleMute} />
+              <Button className={`fast-forward-button${fastForwardEnabled ? ' is-active' : ''}`} htmlType="button" icon={<FastForwardOutlined />} aria-label="Fast Forward" title="Fast Forward" aria-pressed={fastForwardEnabled} disabled={huntRunning} onClick={toggleFastForward} />
+              <Select className="player-header-select player-speed-select" aria-label="Velocidade do Fast Forward" title="Velocidade do Fast Forward" value={fastForwardSpeed} suffixIcon={null} disabled={huntRunning} options={fastForwardSpeeds.map(speed => ({ value: speed, label: `${speed}×` }))} getPopupContainer={playerSelectPopupContainer} popupMatchSelectWidth={false} onChange={speed => { setFastForwardSpeed(speed); void saveUserPreferences({ fastForwardSpeed: speed }) }} />
             </div>
             <span className="player-header-separator" aria-hidden="true" />
             <div className="player-header-group">
-              <button className="player-control-button" type="button" aria-label="Salvar estado" title="Salvar estado" disabled={huntRunning || Boolean(snapshotRestoreRequests[selectedPlayerSessionId])} onClick={() => sendSelectedPlayerMessage('emulator-hub:save-state')}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5zM8 4v6h8V4M8 20v-6h8v6" /></svg>
-              </button>
-              <button className="player-control-button" type="button" aria-label="Carregar estado" title="Carregar estado" disabled={huntRunning || !userStateAvailable[selectedPlayerSessionId] || Boolean(snapshotRestoreRequests[selectedPlayerSessionId])} onClick={() => sendSelectedPlayerMessage('emulator-hub:load-state')}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7 9m5-5 5 5M5 14v5h14v-5" /></svg>
-              </button>
-            </div>
-            <span className="player-header-separator" aria-hidden="true" />
-            <div className="player-header-group">
-              <button className="player-control-button" type="button" aria-label="Soft Reset" title="Soft Reset" disabled={huntRunning} onClick={() => dispatchReset('emulator-hub:soft-reset')}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 1-2.3-5.7M20 4v7h-7" /></svg>
-              </button>
-              <button className="player-control-button global-reset-button" type="button" aria-label="Hard Reset" title="Hard Reset" disabled={huntRunning} onClick={() => dispatchReset('emulator-hub:reset')}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v8M6.4 6.4a8 8 0 1 0 11.2 0" /></svg>
-              </button>
+              <Button className="player-control-button" htmlType="button" icon={<SaveOutlined />} aria-label="Salvar estado" title="Salvar estado" disabled={huntRunning || Boolean(snapshotRestoreRequests[selectedPlayerSessionId])} onClick={() => sendSelectedPlayerMessage('emulator-hub:save-state')} />
+              <Button className="player-control-button" htmlType="button" icon={<UploadOutlined />} aria-label="Carregar estado" title="Carregar estado" disabled={huntRunning || !userStateAvailable[selectedPlayerSessionId] || Boolean(snapshotRestoreRequests[selectedPlayerSessionId])} onClick={() => sendSelectedPlayerMessage('emulator-hub:load-state')} />
+              <Button className="player-control-button" htmlType="button" icon={<RedoOutlined />} aria-label="Soft Reset" title="Soft Reset" disabled={huntRunning} onClick={() => dispatchReset('emulator-hub:soft-reset')} />
+              <Button className="player-control-button global-reset-button" htmlType="button" icon={<PoweroffOutlined />} aria-label="Hard Reset" title="Hard Reset" disabled={huntRunning} onClick={() => dispatchReset('emulator-hub:reset')} />
             </div>
             <span className="player-header-separator" aria-hidden="true" />
             <div className="player-header-group">
               <label className="trigger-action-control">L2
-                <Select className="player-header-select player-trigger-select" aria-label="Ação do L2" title="Ação do L2" value={l2TriggerAction} disabled={huntRunning} options={playerTriggerActionOptions} getPopupContainer={playerSelectPopupContainer} popupMatchSelectWidth={false} onChange={action => { setL2TriggerAction(action); void saveUserPreferences({ triggerActions: { l2: action } }) }} />
+                <Select className="player-header-select player-trigger-select" aria-label="Ação do L2" title="Ação do L2" value={l2TriggerAction} suffixIcon={null} disabled={huntRunning} options={playerTriggerActionOptions} getPopupContainer={playerSelectPopupContainer} popupMatchSelectWidth={false} onChange={action => { setL2TriggerAction(action); void saveUserPreferences({ triggerActions: { l2: action } }) }} />
               </label>
               <label className="trigger-action-control">R2
-                <Select className="player-header-select player-trigger-select" aria-label="Ação do R2" title="Ação do R2" value={r2TriggerAction} disabled={huntRunning} options={playerTriggerActionOptions} getPopupContainer={playerSelectPopupContainer} popupMatchSelectWidth={false} onChange={action => { setR2TriggerAction(action); void saveUserPreferences({ triggerActions: { r2: action } }) }} />
+                <Select className="player-header-select player-trigger-select" aria-label="Ação do R2" title="Ação do R2" value={r2TriggerAction} suffixIcon={null} disabled={huntRunning} options={playerTriggerActionOptions} getPopupContainer={playerSelectPopupContainer} popupMatchSelectWidth={false} onChange={action => { setR2TriggerAction(action); void saveUserPreferences({ triggerActions: { r2: action } }) }} />
               </label>
             </div>
             <span className="player-header-separator" aria-hidden="true" />
-            <button className="player-control-button" type="button" aria-label="Configurar controles" title="Configurar controles" disabled={huntRunning} onClick={openControlPanel}>
-              <svg viewBox="0 0 24 24" className="control-configuration-icon" aria-hidden="true">
-                <path d="M7.1 8.5h9.8c1.5 0 2.8 1 3.2 2.45l1.08 4.15a2.35 2.35 0 0 1-4.08 2.1l-1.55-1.7H8.4l-1.55 1.7a2.35 2.35 0 0 1-4.08-2.1l1.08-4.15A3.3 3.3 0 0 1 7.1 8.5Z" />
-                <path d="M7.3 11.15v3.1M5.75 12.7h3.1M16.35 11.8h.01M18.25 13.65h.01" />
-              </svg>
-            </button>
-            <button className={`player-control-button${oddsManipulatorEnabled ? ' is-active' : ''}`} type="button" aria-label="Manipulador de odds" title="Manipulador de odds" aria-pressed={oddsManipulatorEnabled} disabled={huntRunning} onClick={toggleOddsManipulator}>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M5 8.5h14M5 15.5h14M8 5.5v14M16 5.5v14" /></svg>
-            </button>
-            <button className={`player-control-button hunt-button${huntRunning ? ' is-active' : ''}`} type="button" aria-label={`Configurar caça shiny, ${huntCount} tentativas${huntRunning ? ', em andamento' : ''}`} title={huntStatus.phase === 'error' ? `Caça interrompida: ${huntErrorMessages[huntStatus.error] ?? huntStatus.error}` : huntStatus.phase === 'found' ? huntStatus.foundSessionId ? `Shiny em ${huntFoundSession?.profileName ?? huntStatus.foundSessionId}` : 'Todos os shinies encontrados' : 'Configurar caça shiny'} aria-haspopup="dialog" aria-expanded={huntModalOpen} onClick={() => setHuntModalOpen(true)}>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 1-2.3-5.7M20 4v7h-7" /></svg>
-              <span>{huntCount}</span>
-            </button>
-            <button className="player-control-button" type="button" aria-label="Informações do perfil" title="Informações do perfil" disabled={huntRunning || closeChooserOpen || saveCloseRows !== null || profileInfoSessionId !== null} onClick={openProfileInfo}>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 10.5v6M12 7.5h.01" /></svg>
-            </button>
-            <button className={`player-control-button${macroRunState.runId ? ' is-active' : ''}`} type="button" aria-label={macroRunState.runId ? 'Parar macro em execução' : 'Macros'} title={macroRunState.phase === 'stopping' ? 'Parando macro' : macroRunState.runId ? 'Parar macro em execução' : 'Macros'} aria-expanded={macroModalOpen} onClick={handleMacroButtonClick}>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5l7 7-7 7V5zm9 0h7v3h-7V5zm0 5h7v3h-7v-3zm0 5h7v3h-7v-3z" /></svg>
-            </button>
+            <Button className="player-control-button" htmlType="button" icon={<svg viewBox="0 0 24 24" className="control-configuration-icon" aria-hidden="true">
+              <path d="M7.1 8.5h9.8c1.5 0 2.8 1 3.2 2.45l1.08 4.15a2.35 2.35 0 0 1-4.08 2.1l-1.55-1.7H8.4l-1.55 1.7a2.35 2.35 0 0 1-4.08-2.1l1.08-4.15A3.3 3.3 0 0 1 7.1 8.5Z" />
+              <path d="M7.3 11.15v3.1M5.75 12.7h3.1M16.35 11.8h.01M18.25 13.65h.01" />
+            </svg>} aria-label="Configurar controles" title="Configurar controles" disabled={huntRunning} onClick={openControlPanel} />
+            <Button className={`player-control-button${oddsManipulatorEnabled ? ' is-active' : ''}`} htmlType="button" icon={<NumberOutlined />} aria-label="Manipulador de odds" title="Manipulador de odds" aria-pressed={oddsManipulatorEnabled} disabled={huntRunning} onClick={toggleOddsManipulator} />
+            <Button className={`player-control-button hunt-button${huntRunning ? ' is-active' : ''}`} htmlType="button" icon={<SearchOutlined />} aria-label={`Configurar caça shiny, ${huntCount} tentativas${huntRunning ? ', em andamento' : ''}`} title={huntStatus.phase === 'error' ? `Caça interrompida: ${huntErrorMessages[huntStatus.error] ?? huntStatus.error}` : huntStatus.phase === 'found' ? huntStatus.foundSessionId ? `Shiny em ${huntFoundSession?.profileName ?? huntStatus.foundSessionId}` : 'Todos os shinies encontrados' : 'Configurar caça shiny'} aria-haspopup="dialog" aria-expanded={huntModalOpen} onClick={() => setHuntModalOpen(true)}>{huntCount}</Button>
+            <Button className={`player-control-button${macroRunState.runId ? ' is-active' : ''}`} htmlType="button" icon={<ThunderboltOutlined />} aria-label={macroRunState.runId ? 'Parar macro em execução' : 'Macros'} title={macroRunState.phase === 'stopping' ? 'Parando macro' : macroRunState.runId ? 'Parar macro em execução' : 'Macros'} aria-expanded={macroModalOpen} onClick={handleMacroButtonClick} />
           </div>
           <div className="player-actions">
             {!isMobileLandscape && <>
-              <button type="button" aria-label="Adicionar instância" title="Adicionar instância" disabled={huntRunning || activeSessions.length >= MAX_PLAYER_INSTANCES} onClick={openInstancePicker}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-              </button>
-              <button type="button" aria-label={fullscreen ? 'Sair da tela cheia' : 'Tela cheia'} title={fullscreen ? 'Sair da tela cheia' : 'Tela cheia'} onClick={toggleFullscreen}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d={fullscreen ? 'M4 9h5V4M20 9h-5V4M4 15h5v5M20 15h-5v5' : 'M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5'} /></svg>
-              </button>
+              <Button className="player-add-button" htmlType="button" icon={<PlusOutlined />} aria-label="Adicionar instância" title="Adicionar instância" disabled={huntRunning || activeSessions.length >= MAX_PLAYER_INSTANCES} onClick={openInstancePicker} />
+              <Button htmlType="button" icon={fullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />} aria-label={fullscreen ? 'Sair da tela cheia' : 'Tela cheia'} title={fullscreen ? 'Sair da tela cheia' : 'Tela cheia'} onClick={toggleFullscreen} />
             </>}
-            <button type="button" aria-label="Fechar emulador" title="Fechar emulador" onClick={closePlayer}>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19" /></svg>
-            </button>
+            <Button className="player-close-button" htmlType="button" icon={<CloseOutlined />} aria-label="Fechar emulador" title="Fechar emulador" onClick={closePlayer} />
           </div>
         </header>
-        <div className={`player-panel player-panel-${activeSessions.length}`} inert={huntRunning || closeChooserOpen || saveCloseRows !== null ? true : undefined}>
+        <div className={`player-panel player-panel-${activeSessions.length}`} inert={huntRunning || closeChooserOpen || saveCloseRows !== null || multiProfileRows !== null ? true : undefined}>
           <div className="player-grid">
             {activeSessions.map(session => <div className={`player-cell${(huntStatus.completedSessionIds?.includes(session.sessionId) || huntStatus.foundSessionIds?.includes(session.sessionId) || huntStatus.phase === 'found' && huntStatus.foundSessionId === session.sessionId) ? ' hunt-found' : ''}`} data-session-id={session.sessionId} key={`${session.gameId}:${session.profileId}`} onPointerDown={() => setFocusedSessionId(session.sessionId)}>
               <iframe src={playerFrameUrl(session)} title="EmulatorJS" allow="fullscreen; gamepad" inert={profileInfoSessionId === session.sessionId ? true : undefined} onLoad={event => configurePlayerFrameOnLoad(event.currentTarget, session)} />
+              <div className="player-cell-controls" role="group" aria-label={`Controles de ${session.profileName ?? session.gameTitle ?? 'emulador'}`}>
+                <Button className="player-cell-playback" htmlType="button" icon={<svg className="player-cell-play-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 2v20l19-10z" /></svg>} aria-label="Play/Pause deste emulador" title="Play/Pause" disabled={huntRunning} onClick={() => void togglePlayerPlayback(session.sessionId)} />
+                <div className="player-cell-secondary-controls">
+                  <Button htmlType="button" icon={<RedoOutlined />} aria-label="Reset deste emulador" title="Reset" disabled={huntRunning} onClick={() => void dispatchReset('emulator-hub:reset', session.sessionId)} />
+                  <Button htmlType="button" icon={<SaveOutlined />} aria-label="Salvar estado deste emulador" title="Save State" disabled={huntRunning || Boolean(snapshotRestoreRequests[session.sessionId])} onClick={() => sendPlayerMessage('emulator-hub:save-state', session.sessionId)} />
+                  <Button htmlType="button" icon={<UploadOutlined />} aria-label="Carregar estado deste emulador" title="Load State" disabled={huntRunning || !userStateAvailable[session.sessionId] || Boolean(snapshotRestoreRequests[session.sessionId])} onClick={() => sendPlayerMessage('emulator-hub:load-state', session.sessionId)} />
+                  <Button htmlType="button" icon={<InfoCircleOutlined />} aria-label="Informações deste perfil" title="Informações do perfil" disabled={huntRunning || profileInfoSessionId !== null} onClick={() => openProfileInfo(session.sessionId)} />
+                </div>
+              </div>
               {profileInfoSessionId === session.sessionId && <div className="profile-info-overlay" role="dialog" aria-modal="true" aria-labelledby={`profile-info-title-${session.sessionId}`}>
                 <form className="profile-info-card" onSubmit={submitProfileInfo}>
                   <h2 id={`profile-info-title-${session.sessionId}`}>Informações do perfil</h2>
                   <label htmlFor={`profile-info-name-${session.sessionId}`}>Nome</label>
-                  <input id={`profile-info-name-${session.sessionId}`} value={profileInfoName} onChange={event => setProfileInfoName(event.target.value)} maxLength="32" required disabled={profileInfoBusy} autoFocus />
+                  <Input id={`profile-info-name-${session.sessionId}`} value={profileInfoName} onChange={event => setProfileInfoName(event.target.value)} maxLength={32} required disabled={profileInfoBusy} autoFocus />
                   {profileInfoError && <p role="alert">{profileInfoError}</p>}
                   <div className="profile-info-actions">
-                    <button type="button" onClick={closeProfileInfo} disabled={profileInfoBusy}>Fechar</button>
-                    <button type="submit" disabled={profileInfoBusy}>{profileInfoBusy ? 'Salvando...' : 'Salvar'}</button>
+                    <Button htmlType="button" onClick={closeProfileInfo} disabled={profileInfoBusy}>Fechar</Button>
+                    <Button htmlType="submit" disabled={profileInfoBusy}>{profileInfoBusy ? 'Salvando...' : 'Salvar'}</Button>
                   </div>
                 </form>
               </div>}
@@ -1874,6 +1941,26 @@ function App() {
             </div>)}
           </div>
         </div>
+        {multiProfileRows && <div className="profile-info-multi-overlay" role="dialog" aria-modal="true" aria-labelledby="profile-info-multi-title">
+          <form className="profile-info-multi-card" onSubmit={submitMultiProfileInfo}>
+            <h2 id="profile-info-multi-title">Informações dos perfis</h2>
+            <div className="profile-info-multi-list">
+              {multiProfileRows.map((row, index) => <div className="profile-info-multi-row" key={row.sessionId}>
+                <span className="profile-info-multi-game">{row.gameTitle}</span>
+                <div className="profile-info-multi-save">
+                  <span className="profile-info-multi-number">#{row.number ?? '?'}</span>
+                  <span className="profile-info-multi-separator" aria-hidden="true">-</span>
+                  <Input aria-label={`Nome do save ${row.gameTitle} #${row.number ?? '?'}`} value={row.name} onChange={event => setMultiProfileRows(current => current.map(candidate => candidate.sessionId === row.sessionId ? { ...candidate, name: event.target.value } : candidate))} maxLength={32} required disabled={multiProfileBusy} autoFocus={index === 0} />
+                </div>
+              </div>)}
+            </div>
+            {multiProfileError && <p className="profile-info-multi-error" role="alert">{multiProfileError}</p>}
+            <div className="profile-info-actions">
+              <Button htmlType="button" onClick={closeMultiProfileInfo} disabled={multiProfileBusy}>Fechar</Button>
+              <Button htmlType="submit" disabled={multiProfileBusy}>{multiProfileBusy ? 'Salvando...' : 'Salvar'}</Button>
+            </div>
+          </form>
+        </div>}
       </div>
     </div>}
     {closeChooserOpen && !saveCloseRows && renderLayer(<div className="close-chooser-overlay" role="dialog" aria-modal="true" aria-labelledby="close-chooser-title">
@@ -1883,10 +1970,14 @@ function App() {
           {selectedCloseSessionIds.size === activeSessions.length ? 'Desselecionar tudo' : 'Selecionar tudo'}
         </button>
         <ul className="close-chooser-list">
-          {activeSessions.map(session => <li key={session.sessionId}><label>
-            <input type="checkbox" checked={selectedCloseSessionIds.has(session.sessionId)} onChange={() => setSelectedCloseSessionIds(current => { const next = new Set(current); if (next.has(session.sessionId)) next.delete(session.sessionId); else next.add(session.sessionId); return next })} />
-            <span>{session.gameTitle ?? session.gameId} | {session.profileName ?? session.profileId}</span>
-          </label></li>)}
+          {activeSessions.map(session => {
+            const game = games.find(candidate => candidate.id === session.gameId)
+            const profileLabel = formatGameProfileLabel({ id: session.profileId, name: session.profileName ?? session.profileId }, game?.profiles ?? [])
+            return <li key={session.sessionId}><label>
+              <input type="checkbox" checked={selectedCloseSessionIds.has(session.sessionId)} onChange={() => setSelectedCloseSessionIds(current => { const next = new Set(current); if (next.has(session.sessionId)) next.delete(session.sessionId); else next.add(session.sessionId); return next })} />
+              <span>{session.gameTitle ?? session.gameId} | {profileLabel}</span>
+            </label></li>
+          })}
         </ul>
         <div className="close-chooser-actions">
           <button type="button" onClick={cancelCloseChooser}>Cancelar</button>

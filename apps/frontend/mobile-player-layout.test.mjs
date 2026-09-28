@@ -12,7 +12,7 @@ test('uses a full-screen mobile player viewport with side controls', async () =>
   assert.match(mobileRules, /\.player-global-controls, \.player-actions, \.fast-forward-control\s*\{[^}]*flex-direction:\s*column;/)
   assert.match(mobileRules, /\.player-header\s*\{[^}]*border-right:\s*0;[^}]*background:\s*transparent;[^}]*overflow:\s*hidden;/)
   assert.match(mobileRules, /\.player-shell\s*\{[^}]*--mobile-player-control-height:\s*min\(42px,\s*calc\(\(100dvh\s*-\s*72px\)\s*\/\s*9\)\);/)
-  assert.match(mobileRules, /\.player-control-button, \.player-actions button, \.fast-forward-button, \.global-reset-button\s*\{[^}]*width:\s*64px;[^}]*height:\s*var\(--mobile-player-control-height\);/)
+  assert.match(mobileRules, /\.player-header \.ant-btn\.player-control-button, \.player-actions \.ant-btn, \.player-header \.ant-btn\.fast-forward-button\s*\{[^}]*width:\s*64px;[^}]*height:\s*var\(--mobile-player-control-height\);/)
   assert.match(mobileRules, /\.player-header-select\.ant-select-single\s*\{[^}]*width:\s*64px;[^}]*height:\s*var\(--mobile-player-control-height\);/)
   assert.match(mobileRules, /\.hub-sidebar \.hub-sidebar-action\[aria-label='Configurar controles'\], \.player-header \.player-control-button\[aria-label='Configurar controles'\]\s*\{[^}]*display:\s*none;/)
 })

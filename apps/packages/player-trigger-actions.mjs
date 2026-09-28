@@ -5,7 +5,7 @@ export const playerTriggerActionOptions = Object.freeze([
   { value: 'reset', label: 'Hard Reset' },
   { value: 'save-state', label: 'Save state' },
   { value: 'load-state', label: 'Load state' },
-  { value: 'toggle-last-macro', label: 'Iniciar/parar último macro' },
+  { value: 'toggle-last-macro', label: 'Último macro' },
 ])
 
 const triggerBindings = Object.freeze({

@@ -9,7 +9,7 @@
     "sync:pokemon-resources:force": "node scripts/sync-pokemon-resources.mjs --force",
     "sync:pokemon-sprite-resolution": "node scripts/sync-pokemon-resources.mjs",
     "lint": "eslint .",
-    "prebuild": "node scripts/sync-pokemon-resources.mjs --optional && node scripts/sync-pokemon-card-icons.mjs && npm run lint",
+    "prebuild": "node scripts/sync-pokemon-resources.mjs && node scripts/sync-pokemon-card-icons.mjs --required && npm run lint",
     "sync:pokemon-card-icons": "node scripts/sync-pokemon-card-icons.mjs --refresh",
     "build": "vite build"
   },

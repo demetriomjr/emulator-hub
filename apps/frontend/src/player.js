@@ -17,6 +17,7 @@ import { createSnapshotOfferPolicy } from '../../packages/snapshot-offer-policy.
 import { createSnapshotTelemetry } from '../../packages/snapshot-telemetry.mjs'
 import { getInstallationIdentity, localCandidateSummary, remoteCandidateSummary, snapshotMatchesLaunch, snapshotUrlForKind, sortRestoreCandidates } from '../../packages/restore-candidate.mjs'
 import { softResetEmulator } from '../../packages/player-reset.mjs'
+import { applyPlayerPlayback, isEmulatorPlaying } from '../../packages/player-playback.mjs'
 import { createOddsManipulatorClock } from '../../packages/odds-manipulator-clock.mjs'
 import { createEmulatorAudioMute } from '../../packages/emulator-audio-mute.mjs'
 import { configureEmulatorNotifications } from '../../packages/emulator-notifications.mjs'
@@ -98,7 +99,7 @@ let gamepadBindings = []
 let shinyHuntPlayer = null
 function getShinyHuntPlayer() {
   if (!shinyHuntPlayer) shinyHuntPlayer = createShinyHuntPlayer({
-    getLayout: () => launchDescriptor && runtimeReady && !leaseLost && !closeRequested
+    getLayout: () => launchDescriptor && isEmulatorPlaying(window.EJS_emulator, runtimeReady) && !leaseLost && !closeRequested
       ? findGen3EncounterLayout(launchDescriptor)
       : null,
     getState: () => window.EJS_emulator?.gameManager?.getState?.(),
@@ -169,7 +170,7 @@ const settledRestoreRequests = new Map()
 const oddsClock = createOddsManipulatorClock()
 oddsClock.install()
 const macroController = createPlayerMacroController({
-  canRun: macro => runtimeReady && Boolean(gamepadInput && window.EJS_emulator?.gameManager) && !leaseLost && !closeRequested && !interactionLock.isLocked() && !shinyHuntPlayer?.isActive() && ![...heldKeyboardKeys].some(key => macroUsesKeyboardKey(macro, key, macroKeyboardBindings)),
+  canRun: macro => isEmulatorPlaying(window.EJS_emulator, runtimeReady) && Boolean(gamepadInput) && !leaseLost && !closeRequested && !interactionLock.isLocked() && !shinyHuntPlayer?.isActive() && ![...heldKeyboardKeys].some(key => macroUsesKeyboardKey(macro, key, macroKeyboardBindings)),
   setPressed: (input, down) => gamepadInput.setSyntheticPressed(INPUT_CORE_IDS[input], down, 'macro'),
   release: () => gamepadInput?.releaseSource('macro'),
   schedule: (fn, ms) => window.setTimeout(fn, ms),
@@ -363,16 +364,6 @@ async function clearLocalRecovery() {
 
 window.emulatorHubClearLocalRecovery = clearLocalRecovery
 
-function hideContextMenuButton() {
-  for (const button of game.querySelectorAll('button')) {
-    if (button.textContent.trim() === 'Context Menu') button.style.display = 'none'
-  }
-}
-
-function normalizeEmulatorChrome() {
-  hideContextMenuButton()
-}
-
 function stopThreadStartupMonitor() {
   if (threadStartupMonitor) window.clearInterval(threadStartupMonitor)
   if (threadStartupTimeout) window.clearTimeout(threadStartupTimeout)
@@ -501,9 +492,6 @@ function applyMobileGamepadLayout() {
     }
   }
 }
-
-const contextMenuObserver = new MutationObserver(normalizeEmulatorChrome)
-contextMenuObserver.observe(game, { childList: true, characterData: true, subtree: true })
 
 function applyFastForward() {
   const emulator = window.EJS_emulator
@@ -763,6 +751,10 @@ window.addEventListener('message', event => {
   }[event.data?.type]
   if (huntAction) {
     if (event.data.sessionId !== sessionId || typeof event.data.huntId !== 'string') return
+    if (huntAction !== 'cancel' && huntAction !== 'release-input' && !isEmulatorPlaying(window.EJS_emulator, runtimeReady)) {
+      event.source?.postMessage({ type: 'emulator-hub:hunt-response', requestId: event.data.requestId, sessionId, huntId: event.data.huntId, cycleId: event.data.cycleId, ok: false, error: 'Emulador pausado ou indisponível' }, event.origin)
+      return
+    }
     void (async () => {
       if (huntAction === 'prepare') {
         stopMacro()
@@ -843,7 +835,7 @@ window.addEventListener('message', event => {
     return
   }
   if (event.data?.type === 'emulator-hub:reset') {
-    if (shinyHuntPlayer?.isActive()) return
+    if (shinyHuntPlayer?.isActive() || !isEmulatorPlaying(window.EJS_emulator, runtimeReady)) return
     stopMacro()
     if (event.data.oddsResetCount !== undefined || event.data.virtualTimestamp !== undefined) {
       const accepted = oddsClock.configure({ enabled: true, oddsResetCount: event.data.oddsResetCount, virtualTimestamp: event.data.virtualTimestamp })
@@ -853,7 +845,7 @@ window.addEventListener('message', event => {
     return
   }
   if (event.data?.type === 'emulator-hub:soft-reset') {
-    if (shinyHuntPlayer?.isActive()) return
+    if (shinyHuntPlayer?.isActive() || !isEmulatorPlaying(window.EJS_emulator, runtimeReady)) return
     stopMacro()
     if (event.data.oddsResetCount !== undefined || event.data.virtualTimestamp !== undefined) {
       const accepted = oddsClock.configure({ enabled: true, oddsResetCount: event.data.oddsResetCount, virtualTimestamp: event.data.virtualTimestamp })
@@ -881,7 +873,7 @@ window.addEventListener('message', event => {
     return
   }
   if (event.data?.type === 'emulator-hub:save-state') {
-    if (shinyHuntPlayer?.isActive()) return
+    if (shinyHuntPlayer?.isActive() || !isEmulatorPlaying(window.EJS_emulator, runtimeReady)) return
     offerPolicy?.recordManualStateSave()
     void saveEmulatorState({ kind: 'user-state', reasonCode: 'user-request' }).then(
       saved => {
@@ -893,7 +885,7 @@ window.addEventListener('message', event => {
     return
   }
   if (event.data?.type === 'emulator-hub:load-state') {
-    if (shinyHuntPlayer?.isActive()) return
+    if (shinyHuntPlayer?.isActive() || !isEmulatorPlaying(window.EJS_emulator, runtimeReady)) return
     stopMacro()
     if (loadEmulatorState()) snapshotTelemetry.info('user-state-loaded', { snapshotKind: 'user-state', revision: userSnapshotRevision })
     else { snapshotTelemetry.warn('user-state-load-unavailable', { snapshotKind: 'user-state', revision: userSnapshotRevision }); reportPlayerActionFailure('manual-load') }
@@ -914,6 +906,18 @@ window.addEventListener('message', event => {
   if (event.data?.type === 'emulator-hub:get-fast-forward-state') {
     if (typeof event.data.requestId !== 'string') return
     window.parent.postMessage({ type: 'emulator-hub:fast-forward-state', requestId: event.data.requestId, enabled: fastForwardRequest.enabled }, hubOrigin)
+    return
+  }
+  if (event.data?.type === 'emulator-hub:get-playback-state') {
+    if (typeof event.data.requestId !== 'string') return
+    const ready = runtimeReady && typeof window.EJS_emulator?.paused === 'boolean'
+    window.parent.postMessage({ type: 'emulator-hub:playback-state', requestId: event.data.requestId, sessionId, ok: ready, ...(ready ? { paused: window.EJS_emulator.paused } : { error: 'Player indisponível' }) }, hubOrigin)
+    return
+  }
+  if (event.data?.type === 'emulator-hub:set-playback') {
+    if (shinyHuntPlayer?.isActive()) return
+    if (event.data.action === 'pause') stopMacro()
+    applyPlayerPlayback(window.EJS_emulator, event.data.action, { ready: runtimeReady, locked: interactionLock.isLocked() })
     return
   }
   if (event.data?.type === 'emulator-hub:close-player') {
@@ -1036,17 +1040,24 @@ async function start() {
   window.EJS_pathtodata = dataUrl
   window.EJS_startOnLoaded = true
   window.EJS_Buttons = {
+    playPause: false,
+    restart: false,
+    mute: false,
+    settings: false,
     fullscreen: false,
     saveState: false,
     loadState: false,
+    screenRecord: false,
     gamepad: false,
     cheat: false,
+    volume: false,
     saveSavFiles: false,
     loadSavFiles: false,
     quickSave: false,
     quickLoad: false,
+    screenshot: false,
     cacheManager: false,
-    contextMenu: false,
+    exitEmulation: false,
   }
   window.EJS_ready = () => {
     configureEmulatorNotifications(window.EJS_emulator)
@@ -1065,7 +1076,6 @@ async function start() {
         report: clientDiagnostics.capture,
       })
     }
-    normalizeEmulatorChrome()
     applyFastForward()
   }
   window.EJS_onGameStart = async () => {

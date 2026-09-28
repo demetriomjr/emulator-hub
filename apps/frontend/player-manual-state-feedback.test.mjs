@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import { runInNewContext } from 'node:vm'
+import { isEmulatorPlaying } from '../packages/player-playback.mjs'
 
 const source = await readFile(new URL('./src/player.js', import.meta.url), 'utf8')
 const begin = source.indexOf("  if (event.data?.type === 'emulator-hub:save-state')")
@@ -9,12 +10,15 @@ const end = source.indexOf("  if (event.data?.type === 'emulator-hub:fast-forwar
 assert.ok(begin >= 0 && end > begin)
 const actionSource = `async function handle(event) {\n${source.slice(begin, end)}\n}\nhandle`
 
-function harness({ save = async () => true, load = () => true } = {}) {
+function harness({ save = async () => true, load = () => true, paused = false } = {}) {
   const failures = []
   const telemetry = []
   let macroStops = 0
   const handle = runInNewContext(actionSource, {
     shinyHuntPlayer: null,
+    isEmulatorPlaying,
+    runtimeReady: true,
+    window: { EJS_emulator: { gameManager: {}, paused } },
     offerPolicy: { recordManualStateSave() {} },
     saveEmulatorState: save,
     loadEmulatorState: load,
@@ -26,6 +30,16 @@ function harness({ save = async () => true, load = () => true } = {}) {
   })
   return { handle, failures, telemetry, getMacroStops: () => macroStops }
 }
+
+test('manual Save and Load state do nothing while the emulator is paused', async () => {
+  let actions = 0
+  const player = harness({ paused: true, save: async () => { actions += 1 }, load: () => { actions += 1 } })
+  await player.handle({ data: { type: 'emulator-hub:save-state' } })
+  await player.handle({ data: { type: 'emulator-hub:load-state' } })
+  assert.equal(actions, 0)
+  assert.equal(player.getMacroStops(), 0)
+  assert.deepEqual(player.telemetry, [])
+})
 
 test('manual state actions emit one decision or failure per explicit user action', async () => {
   const successful = harness()

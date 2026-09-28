@@ -120,10 +120,10 @@ test('add-player picker stays open after a successful launch until the ninth ins
 })
 
 test('controller resets advance the current session after React replaces its state object', async () => {
-  const begin = hub.indexOf('  function dispatchReset(')
+  const begin = hub.indexOf('  async function dispatchReset(') >= 0 ? hub.indexOf('  async function dispatchReset(') : hub.indexOf('  function dispatchReset(')
   const end = hub.indexOf('  function configureOddsClock(', begin)
   assert.ok(begin > 0 && end > begin)
-  const frame = { contentWindow: {} }
+  const frame = { contentWindow: {}, closest: () => ({ dataset: { sessionId: 'session-1' } }) }
   const applied = []
   const dirty = []
   let macroStops = 0
@@ -133,6 +133,8 @@ test('controller resets advance the current session after React replaces its sta
     stopMacro() { macroStops += 1 },
     activeSessions: [initialSession],
     activeSessionsRef: { current: [initialSession] },
+    selectPlayingSessions: async sessions => sessions,
+    getPlayerPlaybackState: async () => ({ paused: false }),
     oddsManipulatorEnabled: true,
     document: { querySelectorAll: () => [frame] },
     oddsResetQueueRef: { current: new Map() },
@@ -145,17 +147,69 @@ test('controller resets advance the current session after React replaces its sta
   }
   const dispatchReset = runInNewContext(`${hub.slice(begin, end)}\ndispatchReset`, context)
 
-  dispatchReset('emulator-hub:soft-reset')
+  await dispatchReset('emulator-hub:soft-reset')
   await context.oddsResetQueueRef.current.get('session-1')
-  dispatchReset('emulator-hub:soft-reset')
+  await dispatchReset('emulator-hub:soft-reset')
   await context.oddsResetQueueRef.current.get('session-1')
   context.activeSessions = context.activeSessionsRef.current
   const reboundDispatchReset = runInNewContext(`${hub.slice(begin, end)}\ndispatchReset`, context)
-  reboundDispatchReset('emulator-hub:soft-reset')
+  await reboundDispatchReset('emulator-hub:soft-reset')
   await context.oddsResetQueueRef.current.get('session-1')
 
   assert.deepEqual(dirty, [11, 12, 13])
   assert.equal(macroStops, 3)
   assert.deepEqual(applied.map(message => message.oddsResetCount), [11, 12, 13])
   assert.equal(context.activeSessionsRef.current[0].oddsResetCount, 13)
+})
+
+test('global reset does not change the odds clock or core of a paused player', async () => {
+  const begin = hub.indexOf('  async function dispatchReset(') >= 0 ? hub.indexOf('  async function dispatchReset(') : hub.indexOf('  function dispatchReset(')
+  const end = hub.indexOf('  function configureOddsClock(', begin)
+  const sessions = [
+    { sessionId: 'paused', oddsResetCount: 4 },
+    { sessionId: 'running', oddsResetCount: 7 },
+  ]
+  const sent = []
+  const frames = sessions.map(session => ({ closest: () => ({ dataset: { sessionId: session.sessionId } }) }))
+  const context = {
+    huntActiveRef: { current: false }, stopMacro() {},
+    activeSessionsRef: { current: sessions },
+    selectPlayingSessions: async (candidates, getState) => (await Promise.all(candidates.map(getState))).map((state, index) => state.paused ? null : candidates[index]).filter(Boolean),
+    getPlayerPlaybackState: async sessionId => ({ paused: sessionId === 'paused' }),
+    oddsManipulatorEnabled: true, document: { querySelectorAll: () => frames },
+    oddsResetQueueRef: { current: new Map() }, oddsSyncRef: { current: new Map() },
+    configureOddsClock: async () => true,
+    configurePlayerFrame: (frame, message) => sent.push([frame, message]),
+    setActiveSessions() {},
+    clientDiagnostics: null, console,
+  }
+  const dispatchReset = runInNewContext(`${hub.slice(begin, end)}\ndispatchReset`, context)
+  await dispatchReset('emulator-hub:reset')
+  await Promise.all(context.oddsResetQueueRef.current.values())
+  assert.deepEqual(sessions.map(session => session.oddsResetCount), [4, 8])
+  assert.deepEqual(sent.map(([frame]) => frame), [frames[1]])
+})
+
+test('overlay reset targets only its emulator without stopping other macros', async () => {
+  const begin = hub.indexOf('  async function dispatchReset(')
+  const end = hub.indexOf('  function configureOddsClock(', begin)
+  const sessions = [{ sessionId: 'first' }, { sessionId: 'second' }]
+  const frames = sessions.map(session => ({ closest: () => ({ dataset: { sessionId: session.sessionId } }) }))
+  const sent = []
+  let macroStops = 0
+  const context = {
+    huntActiveRef: { current: false }, stopMacro() { macroStops += 1 },
+    activeSessionsRef: { current: sessions },
+    selectPlayingSessions: async candidates => candidates,
+    getPlayerPlaybackState: async () => ({ paused: false }),
+    oddsManipulatorEnabled: false, document: { querySelectorAll: () => frames },
+    configurePlayerFrame: (frame, message) => sent.push([frame, message]),
+    setActiveSessions() {},
+  }
+  const dispatchReset = runInNewContext(`${hub.slice(begin, end)}\ndispatchReset`, context)
+  await dispatchReset('emulator-hub:reset', 'second')
+  assert.equal(sent.length, 1)
+  assert.equal(sent[0][0], frames[1])
+  assert.equal(sent[0][1].type, 'emulator-hub:reset')
+  assert.equal(macroStops, 0)
 })

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { copyFile, mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 
 import { normalizePokemonSprite, SPRITE_NORMALIZATION_VERSION } from './pokemon-resource-sync.mjs'
@@ -193,7 +193,12 @@ export async function syncPokemonRequirements({ targetDirectory, requirements, d
     try { currentInventory = await readFile(join(targetDirectory, 'inventory.json'), 'utf8') } catch (error) {
       if (error?.code !== 'ENOENT') throw error
     }
-    if (missing.length === 0 && currentInventory === expectedInventory) {
+    const expectedFiles = new Set([...requirements.entries.map(entry => entry.file), 'inventory.json', 'manifest.json'])
+    let currentFiles = []
+    try { currentFiles = await readdir(targetDirectory) } catch (error) {
+      if (error?.code !== 'ENOENT') throw error
+    }
+    if (missing.length === 0 && currentInventory === expectedInventory && currentFiles.every(file => expectedFiles.has(file))) {
       return { status: 'complete', count: requirements.entries.length, downloaded: [] }
     }
 

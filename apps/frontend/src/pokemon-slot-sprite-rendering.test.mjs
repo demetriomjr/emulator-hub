@@ -120,11 +120,19 @@ test('derives Save selectors from the global catalog without a second Hub catalo
   assert.match(source, /saveProfileGamesError=\{catalogError\}/)
 })
 
-test('visibly confirms an accepted empty snapshot response without changing its payload', async () => {
-  const source = await readFile(sourceFile, 'utf8')
+test('keeps snapshot messages out of the workspace layout and reports errors in a bottom-left toast', async () => {
+  const [source, css] = await Promise.all([readFile(sourceFile, 'utf8'), readFile(stylesheet, 'utf8')])
 
-  assert.match(source, /setPokemonHubSnapshotStatus\('Snapshot sincronizado\.'\)/)
-  assert.match(source, /pokemonHubSnapshotStatus && <p className="pokemon-hub-snapshot-status" role="status">\{pokemonHubSnapshotStatus\}<\/p>/)
+  assert.doesNotMatch(source, /pokemon-workspace-footer|pokemonHubSnapshotStatus/)
+  assert.match(source, /notification\.error/)
+  assert.match(source, /placement:\s*'bottomLeft'/)
+  assert.match(css, /\.pokemon-workspace\s*\{[^}]*grid-template-rows:\s*auto minmax\(0, 1fr\);/)
+})
+
+test('reserves scrollbar space in every open Pokémon pane', async () => {
+  const css = await readFile(stylesheet, 'utf8')
+
+  assert.match(css, /\.pokemon-pane-content\s*\{[^}]*scrollbar-gutter:\s*stable;/)
 })
 
 test('abandons the local workspace before waiting for the remote close response', async () => {

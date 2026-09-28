@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from '@dnd-kit/react'
 import { PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom'
-import { Button, Form, Input, Modal, Popconfirm, Select } from 'antd'
+import { Button, Form, Input, Modal, Popconfirm, Select, notification } from 'antd'
 import { CloseOutlined, CodeSandboxOutlined, DeleteOutlined, EditOutlined, FolderAddOutlined, InboxOutlined, LeftOutlined, PlusOutlined, RightOutlined, SaveOutlined, StopOutlined } from '@ant-design/icons'
 import { closePokemonHubSession, createPokemonHubProfile, deletePokemonHubProfile, getGames, getPokemonHubProfile, getPokemonHubProfiles, getSaveProfileLayout, heartbeatPokemonHubSession, loadPokemonHubSessionPane, openPokemonHubSession, renamePokemonHubProfile, syncPokemonHubSessionSnapshot } from './hub-client.js'
 import { isPokemonHubDraggable, pokemonHubDragId } from './pokemon-hub-drag-identity.mjs'
@@ -20,11 +20,12 @@ import { formatGameProfileLabel } from './save-profile-display.mjs'
 import { addWorkspacePane, choosePaneSource, createPokemonHubWorkspaceState, hasAvailableSaveProfile, isCompletePaneSource, isPaneSourceAvailable, paneControlSources, removeWorkspacePane } from './pokemon-hub-workspace.mjs'
 
 export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
+  function setPokemonHubError(error) {
+    if (error) notification.error({ message: error, placement: 'bottomLeft', className: 'pokemon-hub-error-toast' })
+  }
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [catalogError, setCatalogError] = useState('')
   const [pokemonHubData, setPokemonHubData] = useState(null)
-  const [pokemonHubError, setPokemonHubError] = useState('')
-  const [pokemonHubSnapshotStatus, setPokemonHubSnapshotStatus] = useState('')
   const [pokemonHubSelection, setPokemonHubSelection] = useState([])
   const [pokemonCardSelection, setPokemonCardSelection] = useState([])
   const [pokemonDetailsById, setPokemonDetailsById] = useState({})
@@ -118,17 +119,14 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
         onAccepted: snapshot => {
           if (pokemonHubSessionRef.current !== session) return
           session.version = snapshot.revision + 1
-          setPokemonHubSnapshotStatus('Snapshot sincronizado.')
         },
         onCorrection: snapshot => {
           if (pokemonHubSessionRef.current !== session) return
-          setPokemonHubSnapshotStatus('')
           applyCanonicalSessionSnapshot(snapshot)
           setPokemonHubError('The backend corrected the workspace snapshot.')
         },
         onFailure: cause => {
           if (pokemonHubSessionRef.current !== session) return
-          setPokemonHubSnapshotStatus('')
           console.error('[Pokemon Hub] snapshot synchronization failed', { code: cause.code, message: cause.message })
           endPokemonHubSessionLocally(cause)
         },
@@ -146,7 +144,6 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
     const target = event.operation.target?.data?.location
     if (isPokemonHubPartyDropForbidden(source, target)) {
       setPokemonHubActiveDrag(null)
-      setPokemonHubError('')
       return
     }
     if (source && target) {
@@ -163,8 +160,6 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
       setPokemonHubError('Load a save before moving a Pokémon in this workspace.')
       return
     }
-    setPokemonHubError('')
-    setPokemonHubSnapshotStatus('')
     try {
       await ensurePokemonHubSession(profileId)
       const sourceSnapshot = await ensureHubSessionSource(profileId, source)
@@ -250,8 +245,6 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
     if (pokemonHubBusyRef.current) return false
     pokemonHubBusyRef.current = true
     if (!paneLoad) setPokemonHubBusy(true)
-    setPokemonHubError('')
-    setPokemonHubSnapshotStatus('')
     try {
       const profileId = incomingSource?.kind === 'game'
         ? incomingSource.profileId
@@ -300,7 +293,6 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
         session.version = candidate.revision + 1
       }
       if (paneLoad) nextPanes = choosePaneSource(pokemonHubPanesRef.current, paneIndex, incomingSource).panes
-      setPokemonHubSnapshotStatus('Snapshot sincronizado.')
       const previousPanes = pokemonHubPanesRef.current
       const previousTriggers = pokemonCardTriggerRefs.current
       pokemonCardTriggerRefs.current = nextPanes.map(source => previousTriggers[previousPanes.findIndex(previous => samePokemonHubPaneSource(previous, source))] ?? null)
@@ -409,7 +401,6 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
       pokemonHubPanesRef.current = next
       setPokemonHubPanes(next)
       setPokemonHubSelection([])
-      setPokemonHubError('')
     } catch (cause) { setPokemonHubError(cause.message) }
   }
 
@@ -459,14 +450,12 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
   }
 
   function openPokemonHubProfileCreator(index) {
-    setPokemonHubError('')
     setPokemonHubProfileCreator(index)
     setPokemonHubProfileName('')
   }
 
   async function createHubProfile(index) {
     setPokemonHubBusy(true)
-    setPokemonHubError('')
     try {
       const profile = await createPokemonHubProfile({ name: pokemonHubProfileName })
       setPokemonHubProfiles(current => [...current, profile])
@@ -476,7 +465,6 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
   }
 
   function openPokemonHubProfileRenamer(profile) {
-    setPokemonHubError('')
     setPokemonHubProfileRenaming(profile)
     setPokemonHubProfileRenameName(profile.name)
   }
@@ -484,7 +472,6 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
   async function renameHubProfile() {
     if (!pokemonHubProfileRenaming) return
     setPokemonHubBusy(true)
-    setPokemonHubError('')
     try {
       const renamed = await renamePokemonHubProfile(pokemonHubProfileRenaming.hubProfileId, pokemonHubProfileRenameName)
       setPokemonHubProfiles(current => current.map(profile => profile.hubProfileId === renamed.hubProfileId ? { ...profile, name: renamed.name } : profile))
@@ -495,7 +482,6 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
   async function deleteHubProfile(profile) {
     const discardOccupied = Object.keys(profile.grid.entries).length > 0
     setPokemonHubBusy(true)
-    setPokemonHubError('')
     try {
       await deletePokemonHubProfile(profile.hubProfileId, { discardOccupied })
       setPokemonHubProfiles(current => current.filter(candidate => candidate.hubProfileId !== profile.hubProfileId))
@@ -536,7 +522,6 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
         {pokemonHubPanes.map((source, index) => <PokemonHubPane key={index} side={index} panes={pokemonHubPanes} paneCount={pokemonHubPanes.length} source={source} activeDrag={pokemonHubActiveDrag} data={pokemonHubData} hubProfiles={pokemonHubProfiles} profilesLoading={pokemonHubProfilesLoading} saveProfileGames={saveProfileGames} saveProfileGamesLoading={catalogLoading} saveProfileGamesError={catalogError} saveProfilesByGame={saveProfilesByGame} saveLayoutsBySource={saveLayoutsBySource} selected={pokemonHubSelection} cardSelection={pokemonCardSelection[index]} pokemonDetailsById={pokemonDetailsById} onCardClose={() => closePokemonCard(index)} selectedBox={pokemonHubBoxes[saveSourceKey(source?.gameId, source?.profileId)]} busy={pokemonHubBusy} loading={Boolean(pokemonHubPendingPanes[index])} structureBusy={Object.keys(pokemonHubPendingPanes).length > 0} onSourceChange={nextSource => selectPokemonHubPane(index, nextSource)} onCreate={() => openPokemonHubProfileCreator(index)} onAddPane={addPokemonHubPane} onClosePane={() => closePokemonHubPane(index)} onBoxChange={(gameId, profileId, box) => setPokemonHubBoxes(current => ({ ...current, [saveSourceKey(gameId, profileId)]: box }))} onSlotSelect={selectPokemonHubLocation} onRename={openPokemonHubProfileRenamer} onDelete={deleteHubProfile} />)}
       </div>
       {pokemonHubBusy && <div className="pokemon-workspace-stale" role="status" aria-label="Processando alteração do workspace"><span>Processando…</span></div>}
-      <footer className="pokemon-workspace-footer">{pokemonHubSnapshotStatus && <p className="pokemon-hub-snapshot-status" role="status">{pokemonHubSnapshotStatus}</p>}{pokemonHubError && <p className="profile-error" role="alert">{pokemonHubError}</p>}</footer>
     </div><PokemonHubDragOverlay slot={pokemonHubActiveDrag?.slot} /></DragDropProvider>
     <Modal
       className="pokemon-hub-profile-modal"

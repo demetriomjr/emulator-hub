@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import sharp from 'sharp'
 import { preferredBallIconSources } from '../../packages/pokemon-card-ball-icon.mjs'
@@ -13,6 +13,8 @@ const target = fileURLToPath(new URL('../public/resources/pokemon-card/ribbons/'
 const ballRevision = 'fb3512817b9c3f46952b3f89e82645e77bdcaf49'
 const ballBase = `https://raw.githubusercontent.com/PokeAPI/sprites/${ballRevision}/sprites/items/`
 const ballTarget = fileURLToPath(new URL('../public/resources/pokeballs/', import.meta.url))
+const legacyBallTarget = fileURLToPath(new URL('../public/resources/pokemon-card/balls/', import.meta.url))
+const required = process.argv.includes('--required')
 const typeBase = `https://raw.githubusercontent.com/PokeAPI/sprites/${ballRevision}/sprites/types/generation-viii/legends-arceus/small/`
 const typeTarget = fileURLToPath(new URL('../public/resources/pokemon-card/types/', import.meta.url))
 const typeIconSlugs = gen3MoveTypeSlugs.filter(type => type !== 'mystery')
@@ -95,6 +97,7 @@ async function syncBalls() {
           return [icon.slug, bytes]
         }))
         if (manifest.schemaVersion === 2) {
+          await cleanBallFiles()
           console.log(`Pokemon card balls: complete (${manifest.icons.length} normalized icons)`)
           return
         }
@@ -117,10 +120,22 @@ async function syncBalls() {
   await mkdir(ballTarget, { recursive: true })
   for (const icon of icons) await writeFile(`${ballTarget}${icon.file}`, icon.bytes)
   await writeFile(`${ballTarget}manifest.json`, JSON.stringify({ schemaVersion: 2, source: ballBase, canvasSize: 96, artworkSize: 72, icons: icons.map(({ slug, variant, file, sourceWidth, sourceHeight, sourceSha256, sha256 }) => ({ slug, variant, file, sourceWidth, sourceHeight, sourceSha256, sha256 })) }, null, 2))
+  await cleanBallFiles()
   console.log(`Pokemon card balls: synchronized (${icons.length} normalized icons)`)
 }
 
-try { await syncBalls() } catch (error) { console.warn(`Pokemon card balls: ${error.message}; card details remain available`) }
+async function cleanBallFiles() {
+  const expected = new Set(['manifest.json', ...preferredBallIconSources.map(({ slug }) => `${slug}.png`)])
+  for (const file of await readdir(ballTarget)) {
+    if (!expected.has(file)) await rm(`${ballTarget}${file}`, { recursive: true, force: true })
+  }
+  await rm(legacyBallTarget, { recursive: true, force: true })
+}
+
+try { await syncBalls() } catch (error) {
+  if (required) throw error
+  console.warn(`Pokemon card balls: ${error.message}; card details remain available`)
+}
 
 async function syncTypes() {
   if (!process.argv.includes('--refresh')) {

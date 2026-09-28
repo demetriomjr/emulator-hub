@@ -110,6 +110,7 @@ if (background) {
     const result = refresh
       ? await refreshRequirements()
       : await synchronizeRequiredResolution()
+    if (result.status === 'running' && !optional) throw new Error('Pokemon resources: another synchronization is still running')
     console.log(`Pokemon resources: ${result.status} (${result.count} entries)`)
   } catch (error) {
     console.error(error instanceof Error ? error.message : error)

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -51,6 +51,22 @@ test('subtracts matching local files from requirements and downloads only the ab
     { file: '6.png', sha256: sha256(image) },
     { file: 'egg.png', sha256: sha256(image) },
   ])
+})
+
+test('removes obsolete sprites even when every required sprite already matches', async t => {
+  const { directory, image } = await fixture(t)
+  const desired = requirements(image)
+  await writeFile(join(directory, '6.png'), image)
+  await writeFile(join(directory, 'egg.png'), image)
+  await writeFile(join(directory, 'inventory.json'), JSON.stringify({ schemaVersion: 1, spriteNormalizationVersion: SPRITE_NORMALIZATION_VERSION, entries: desired.entries.map(({ file, sha256: hash }) => ({ file, sha256: hash })) }, null, 2) + '\n')
+  await writeFile(join(directory, 'old-sprite.png'), 'obsolete')
+
+  const result = await syncPokemonRequirements({ targetDirectory: directory, requirements: desired, imageProcessor: sharp, download: async () => {
+    throw new Error('valid sprites must be reused')
+  } })
+
+  assert.deepEqual(result.downloaded, [])
+  assert.deepEqual((await readdir(directory)).sort(), ['6.png', 'egg.png', 'inventory.json'])
 })
 
 test('redownloads a file whose content differs from the required hash', async t => {
