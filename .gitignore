@@ -13,6 +13,8 @@ coverage/
 apps/tests/pokemon-hub/test-results/
 apps/tests/pokemon-hub/playwright-report/
 apps/frontend/public/resources/pokemon/
+apps/frontend/public/resources/items/
+apps/frontend/public/resources/.items.sync*
 apps/frontend/public/resources/pokeballs/
 apps/frontend/public/resources/pokemon-card/
 apps/frontend/public/resources/.pokemon.sync*

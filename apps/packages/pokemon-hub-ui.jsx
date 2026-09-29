@@ -259,18 +259,27 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
   async function submitStructuralPokemonHubPaneChange(nextPanes, incomingSource, { paneLoad = false, paneIndex = null, signal = undefined } = {}) {
     if (pokemonHubBusyRef.current) return false
     pokemonHubBusyRef.current = true
+    let switchingSession = false
     if (!paneLoad) setPokemonHubBusy(true)
     try {
+      const loadedHubProfile = incomingSource?.kind === 'hub' ? await getPokemonHubProfile(incomingSource.hubProfileId, signal) : null
+      signal?.throwIfAborted()
+      const currentSession = pokemonHubSessionRef.current
       const profileId = incomingSource?.kind === 'game'
-        ? incomingSource.profileId
-        : pokemonHubSessionRef.current?.profileId ?? pokemonHubProfiles.find(profile => profile.hubProfileId === incomingSource?.hubProfileId)?.ownerProfileId
-      if (!profileId) throw new Error('Open a game save before selecting this Hub profile.')
+        ? currentSession?.profileId ?? incomingSource.profileId
+        : loadedHubProfile?.profile.ownerProfileId ?? currentSession?.profileId ?? loadedHubProfile?.profile.hubProfileId ?? currentSession?.profileId
+      if (!profileId) throw new Error('The workspace source is not ready.')
       if (!await waitForPokemonHubLoad(flushPendingPokemonHubSnapshot(), signal)) throw new Error('The workspace snapshot could not be synchronized before changing a pane.')
       signal?.throwIfAborted()
 
+      if (currentSession && currentSession.profileId !== profileId) {
+        switchingSession = true
+        setPokemonHubBusy(true)
+        return await switchPokemonHubSession(profileId, nextPanes, signal)
+      }
+
       const nextSnapshots = { ...pokemonHubSnapshotsRef.current }
       let loadedSave = null
-      let loadedHubProfile = null
       if (incomingSource?.kind === 'game') {
         const session = await ensurePokemonHubSession(profileId, signal)
         const layout = await getSaveProfileLayout(incomingSource.gameId, incomingSource.profileId, session.profileId, signal)
@@ -280,8 +289,6 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
         nextSnapshots[key] = sourceSnapshot
         loadedSave = { key, layout, sourceSnapshot }
       } else if (incomingSource?.kind === 'hub') {
-        loadedHubProfile = await getPokemonHubProfile(incomingSource.hubProfileId, signal)
-        signal?.throwIfAborted()
         nextSnapshots[`hub:${incomingSource.hubProfileId}`] = createHubSessionSourceSnapshot({ profileId, profile: loadedHubProfile.profile })
       }
       const session = await ensurePokemonHubSession(profileId, signal)
@@ -330,7 +337,76 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
       return false
     } finally {
       pokemonHubBusyRef.current = false
-      if (!paneLoad) setPokemonHubBusy(false)
+      if (!paneLoad || switchingSession) setPokemonHubBusy(false)
+    }
+  }
+
+  async function switchPokemonHubSession(profileId, nextPanes, signal) {
+    const previousSession = pokemonHubSessionRef.current
+    for (const source of nextPanes) {
+      if (source?.kind !== 'hub') continue
+      const { profile } = await getPokemonHubProfile(source.hubProfileId, signal)
+      if (profile.ownerProfileId && profile.ownerProfileId !== profileId) {
+        setPokemonHubError('Close the other Hub profile before switching to this one.')
+        return false
+      }
+    }
+
+    const finalSnapshot = createCanonicalPokemonHubSnapshot(previousSession, pokemonHubPanesRef.current, pokemonHubSnapshotsRef.current)
+    const correction = await closePokemonHubSession(previousSession.profileId, previousSession.sessionId, finalSnapshot, previousSession.pendingCloseIdempotencyKey ??= crypto.randomUUID())
+    if (correction) {
+      applyCanonicalSessionSnapshot(correction)
+      setPokemonHubError('The workspace changed while switching profiles. Try again.')
+      return false
+    }
+    pokemonHubSessionRef.current = null
+    pokemonHubSessionOpeningRef.current = null
+
+    const snapshots = {}
+    const layouts = {}
+    const details = {}
+    const loadedPanes = Array.from({ length: nextPanes.length }, () => null)
+    try {
+      const session = await ensurePokemonHubSession(profileId, signal)
+      for (const [pane, source] of nextPanes.entries()) {
+        if (!source) continue
+        if (source.kind === 'game') {
+          const layout = await getSaveProfileLayout(source.gameId, source.profileId, profileId, signal)
+          const key = saveSourceKey(source.gameId, source.profileId)
+          snapshots[key] = createGameSessionSourceSnapshot({ profileId: source.profileId, gameId: source.gameId, layout })
+          layouts[key] = layout
+          Object.assign(details, layout.pokemonDetailsById)
+        } else {
+          const loaded = await getPokemonHubProfile(source.hubProfileId, signal)
+          snapshots[`hub:${source.hubProfileId}`] = createHubSessionSourceSnapshot({ profileId, profile: loaded.profile })
+          Object.assign(details, loaded.pokemonDetailsById)
+        }
+        const loaded = await waitForPokemonHubLoad(session.requestGate.run(() => loadPokemonHubSessionPane(profileId, session.sessionId, pane, source, signal)), signal)
+        if (loaded.corrected) throw new Error('The workspace source could not be loaded after switching Hub profiles.')
+        session.version = loaded.snapshot.revision
+        loadedPanes[pane] = source
+      }
+      pokemonHubPanesRef.current = nextPanes
+      setPokemonHubPanes(nextPanes)
+      commitSessionSnapshots(snapshots)
+      setSaveLayoutsBySource(current => ({ ...current, ...Object.fromEntries(Object.entries(layouts).map(([key, layout]) => [key, snapshotToSaveLayout(snapshots[key], layout)])) }))
+      setPokemonDetailsById(current => ({ ...current, ...details }))
+      setPokemonCardSelection([])
+      setPokemonHubSelection([])
+      setPokemonHubProfileCreator(null)
+      return true
+    } catch (cause) {
+      const session = pokemonHubSessionRef.current
+      if (session) {
+        try {
+          const snapshot = createCanonicalPokemonHubSnapshot(session, loadedPanes, snapshots)
+          await closePokemonHubSession(profileId, session.sessionId, snapshot, crypto.randomUUID())
+        } catch (closeError) {
+          console.error('[Pokemon Hub] replacement session close failed', { code: closeError.code, message: closeError.message })
+        }
+      }
+      endPokemonHubSessionLocally(cause)
+      return false
     }
   }
 
@@ -603,7 +679,7 @@ function PokemonHubPaneControls({ side, panes, source, hubProfiles, profilesLoad
       }} options={saveProfiles.filter(profile => isPaneSourceAvailable(panes, side, { kind: 'game', gameId: selectedGameId, profileId: profile.id })).map(profile => ({ value: profile.id, label: formatGameProfileLabel(profile, allSaveProfiles) }))} />
       {saveProfileGamesError && <p className="pokemon-pane-note" role="alert">{saveProfileGamesError}</p>}
     </>}
-    {activeSourceKind === 'hub' && <><Select className="pokemon-pane-profile" classNames={{ popup: { root: 'pokemon-hub-select-popup' } }} aria-label="Perfil do Hub" value={selectedHubSource?.hubProfileId} placeholder={profilesLoading ? 'Carregando perfis…' : 'Escolher perfil…'} loading={profilesLoading} disabled={busy} allowClear onClear={() => setSelectionDraft({ kind: 'hub' })} onChange={value => {
+    {activeSourceKind === 'hub' && <><Select className="pokemon-pane-profile" classNames={{ popup: { root: 'pokemon-hub-select-popup' } }} aria-label="Perfil do Hub" value={selectedHubSource?.hubProfileId} placeholder={profilesLoading ? 'Carregando perfis…' : 'Escolher perfil…'} loading={profilesLoading} disabled={busy} allowClear showSearch optionFilterProp="label" onClear={() => setSelectionDraft({ kind: 'hub' })} onChange={value => {
       if (!value) { setSelectionDraft({ kind: 'hub' }); return }
       setSelectionDraft(null)
       onSourceChange({ kind: 'hub', hubProfileId: value })

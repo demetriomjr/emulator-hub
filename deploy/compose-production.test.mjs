@@ -28,7 +28,7 @@ test('production frontend seeds a cache outside the atomically replaced sprite d
   assert.match(dockerfile, /cp -an \/tmp\/pokemon-seed\/\* \/tmp\/pokemon-cache\//)
   assert.doesNotMatch(dockerfile, /cp -an \/tmp\/pokemon-seed\/\. \/tmp\/pokemon-cache\//)
   assert.match(dockerfile, /cp -a \/tmp\/pokemon-cache\/\. \/app\/apps\/frontend\/public\/resources\/pokemon\//)
-  assert.match(dockerfile, /npm run build && cp -a \/app\/apps\/frontend\/public\/resources\/pokemon\/\. \/tmp\/pokemon-cache\//)
+  assert.match(dockerfile, /npm run build && rm -rf \/tmp\/pokemon-cache\/\* && cp -a \/app\/apps\/frontend\/public\/resources\/pokemon\/\. \/tmp\/pokemon-cache\//)
   assert.match(dockerfile, /ENV VITE_PLAYER_PORTS=\$PLAYER_ORIGIN_PORTS/)
 })
 
