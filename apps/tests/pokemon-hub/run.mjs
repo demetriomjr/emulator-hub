@@ -82,6 +82,13 @@ try {
     ['ruby-stack-capacity-source', 'ruby', {}],
     ['ruby-hub-items-source', 'ruby', {}],
     ['sapphire-hub-items-target', 'sapphire', {}],
+    ['ruby-hub-stack-source', 'ruby', {}],
+    ['emerald-hub-nearfull', 'emerald', { areas: { ...seed, items: [[13, 90], [14, 5]] } }],
+    ['ruby-hub-capacity-source', 'ruby', {}],
+    ['ruby-hub-items-19', 'ruby', { areas: { ...seed, items: Array.from({ length: 19 }, (_, index) => [index + 15, 1]) } }],
+    ['sapphire-hub-concurrent-source', 'sapphire', {}],
+    ['sapphire-hub-merge-source', 'sapphire', {}],
+    ['ruby-hub-merge-source', 'ruby', {}],
   ]) {
     const itemEntry = itemEntries[game]
     const profile = await profileStore.create(itemEntry.id, name)

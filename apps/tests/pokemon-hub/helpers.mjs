@@ -28,6 +28,7 @@ export async function readItemSave(name) {
 export async function selectItemSave(page, index, name) {
   const panel = pane(page, index)
   const identity = itemProfiles[name]
+  const selected = selectedSavesByPage.get(page) ?? new Set()
   await panel.getByRole('button', { name: 'Perfil de Save' }).click()
   const rom = panel.getByRole('combobox', { name: 'ROM com perfil' })
   await rom.click()
@@ -42,13 +43,15 @@ export async function selectItemSave(page, index, name) {
   const profile = panel.getByRole('combobox', { name: 'Perfil de Save' })
   await expect(profile).toBeEnabled()
   await profile.click()
-  const profileIndex = Object.entries(itemProfiles).filter(([, value]) => value.gameId === identity.gameId).findIndex(([candidate]) => candidate === name)
+  const profileIndex = Object.entries(itemProfiles).filter(([candidate, value]) => value.gameId === identity.gameId && !selected.has(candidate)).findIndex(([candidate]) => candidate === name)
   expect(profileIndex).toBeGreaterThanOrEqual(0)
   await profile.press('Home')
   for (let step = 0; step < profileIndex; step++) await profile.press('ArrowDown')
   await profile.press('Enter')
   await expect(panel.getByText(new RegExp(`#\\d+ ${escapeRegExp(name)}`))).toBeVisible()
   await expect(panel.getByRole('status', { name: `Processando painel ${index + 1}` })).toHaveCount(0)
+  selected.add(name)
+  selectedSavesByPage.set(page, selected)
 }
 
 export async function openItems(page, index) {
