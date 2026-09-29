@@ -30,3 +30,7 @@
 - The frontend uses React. The first runnable backend slice uses Node.js; the long-term backend language can be revisited before later specs.
 - Do not assume a backend framework, deployment topology, or shared package contract until it is specified.
 - Keep generated output, dependencies, local configuration, and secrets out of Git.
+
+## Open production save issue
+
+- Pokémon Emerald, profile `Falta Rayq - tem MB`: the fifth badge is set, but `FLAG_HAS_MATCH_CALL` and `FLAG_RECEIVED_AMULET_COIN` are unset in the persisted save. One Amulet Coin was manually added to the Bag in production on 2026-09-29. The cause of the missing Match Call progression remains open. See `.spec/085-emerald-amulet-coin-production.md` before changing this flow; account for a possible duplicate when the normal NPC event becomes available later.

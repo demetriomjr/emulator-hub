@@ -138,8 +138,10 @@ export async function selectSave(page, index, profileName) {
 
 export async function selectHub(page, index, hubProfile) {
   const panel = pane(page, index)
-  await panel.getByRole('button', { name: 'Perfil do Hub' }).click()
-  await panel.getByRole('combobox', { name: 'Perfil do Hub' }).click()
+  await panel.getByRole('button', { name: 'Perfil do Hub', exact: true }).click()
+  const selector = panel.getByRole('combobox', { name: 'Perfil do Hub' })
+  await selector.click()
+  await selector.fill(hubProfile.name)
   await activeDropdown(page).locator('.ant-select-item-option').filter({ hasText: hubProfile.name }).click()
   await expect(panel.getByRole('heading', { name: hubProfile.name })).toBeVisible()
 }
