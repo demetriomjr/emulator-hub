@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "test": "node run.mjs",
-    "stress": "node stress-campaign.mjs"
+    "stress": "node stress-campaign.mjs",
+    "fault": "node fault-runner.mjs fault-recovery.spec.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0"

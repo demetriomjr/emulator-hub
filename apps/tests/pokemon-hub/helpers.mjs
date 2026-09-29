@@ -98,7 +98,7 @@ export function hubSlot(page, index, hubProfile, slot) {
   return pane(page, index).getByRole('button', { name: new RegExp(`^${escapeRegExp(hubProfile.name)}, posição ${slot + 1},`) })
 }
 
-export async function drag(page, from, to, { travelSteps = 12 } = {}) {
+export async function drag(page, from, to, { travelSteps = 12, settleMs = 0 } = {}) {
   const start = await from.boundingBox()
   const end = await to.boundingBox()
   expect(start).not.toBeNull()
@@ -109,9 +109,17 @@ export async function drag(page, from, to, { travelSteps = 12 } = {}) {
   await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2, { steps: travelSteps })
   // Cross-pane drags can scroll the horizontal workspace while the pointer moves.
   // Resolve the destination again before mouseup so the pointer lands on that slot.
+  if (settleMs > 0) await page.waitForTimeout(settleMs)
   const settled = await to.boundingBox()
   expect(settled).not.toBeNull()
   await page.mouse.move(settled.x + settled.width / 2, settled.y + settled.height / 2, { steps: 2 })
+  if (settleMs > 0) {
+    await page.waitForTimeout(settleMs)
+    const final = await to.boundingBox()
+    expect(final).not.toBeNull()
+    await page.mouse.move(final.x + final.width / 2, final.y + final.height / 2)
+    await page.waitForTimeout(settleMs)
+  }
   await page.mouse.up()
 }
 

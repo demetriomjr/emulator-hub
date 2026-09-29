@@ -3,6 +3,7 @@ import { defineConfig } from '@playwright/test'
 export default defineConfig({
   testDir: '.',
   testMatch: '*.spec.mjs',
+  testIgnore: process.env.E2E_FAULT_FLUSH_PROFILE ? [] : ['fault-recovery.spec.mjs'],
   workers: 1,
   retries: 0,
   timeout: 45_000,

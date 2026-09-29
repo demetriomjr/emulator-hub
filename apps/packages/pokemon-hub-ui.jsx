@@ -52,6 +52,8 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
   const pokemonHubClosingRef = useRef(false)
   const pokemonHubAbortedRef = useRef(false)
   const pokemonHubLastDragRef = useRef(-Infinity)
+  const pokemonHubDragActiveRef = useRef(false)
+  const pokemonHubDragCancelledRef = useRef(false)
   const pokemonCardTriggerRefs = useRef([])
   pokemonHubPanesRef.current = pokemonHubPanes
   const games = pokemonHubData?.games || []
@@ -68,6 +70,13 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
     return () => { mounted = false; if (pokemonHubSnapshotTimerRef.current !== null) window.clearTimeout(pokemonHubSnapshotTimerRef.current) }
   }, [])
   useEffect(() => { if (closeSignal) void closePokemonHub() }, [closeSignal])
+  useEffect(() => {
+    const cancelActiveDrag = event => {
+      if (event.key === 'Escape' && pokemonHubDragActiveRef.current) pokemonHubDragCancelledRef.current = true
+    }
+    document.addEventListener('keydown', cancelActiveDrag, true)
+    return () => document.removeEventListener('keydown', cancelActiveDrag, true)
+  }, [])
   useEffect(() => {
     const renew = async () => {
       const session = pokemonHubSessionRef.current
@@ -140,6 +149,12 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
 
   async function completePokemonHubDrag(event) {
     pokemonHubLastDragRef.current = performance.now()
+    pokemonHubDragActiveRef.current = false
+    if (pokemonHubDragCancelledRef.current || pokemonHubClosingRef.current) {
+      pokemonHubDragCancelledRef.current = false
+      setPokemonHubActiveDrag(null)
+      return
+    }
     const source = event.operation.source?.data?.location
     const target = event.operation.target?.data?.location
     if (isPokemonHubPartyDropForbidden(source, target)) {
@@ -414,6 +429,7 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
   async function closePokemonHub() {
     if (pokemonHubClosingRef.current) return
     pokemonHubClosingRef.current = true
+    if (pokemonHubDragActiveRef.current) pokemonHubDragCancelledRef.current = true
     setPokemonHubBusy(true)
     await pokemonHubPaneQueueRef.current
     if (pokemonHubAbortedRef.current) return
@@ -513,8 +529,10 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
     <DragDropProvider sensors={pokemonHubDragSensors} onDragStart={event => {
       const data = event.operation.source?.data
       pokemonHubLastDragRef.current = performance.now()
+      pokemonHubDragActiveRef.current = true
+      pokemonHubDragCancelledRef.current = false
       setPokemonHubActiveDrag(data?.slot ? data : null)
-    }} onDragEnd={completePokemonHubDrag} onDragCancel={() => setPokemonHubActiveDrag(null)}><div className="pokemon-workspace" role="dialog" aria-modal="true" aria-label="Pokémon Hub">
+    }} onDragEnd={completePokemonHubDrag} onDragCancel={() => { pokemonHubDragActiveRef.current = false; pokemonHubDragCancelledRef.current = true; setPokemonHubActiveDrag(null) }}><div className="pokemon-workspace" role="dialog" aria-modal="true" aria-label="Pokémon Hub">
       <header className="pokemon-workspace-header">
         <Button className="dialog-close" type="text" aria-label="Fechar Pokémon Hub" icon={<CloseOutlined />} onClick={() => void closePokemonHub()} />
       </header>

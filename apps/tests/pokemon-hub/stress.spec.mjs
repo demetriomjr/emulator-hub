@@ -252,8 +252,13 @@ test('30 transferências pseudoaleatórias entre dois Saves e um perfil Hub cons
     for (const candidate of targetCandidates) if (await hittable(slot(candidate.source, candidate.index))) targets.push(candidate)
     expect(targets.length, `no hittable destination on turn ${turn}`).toBeGreaterThan(0)
     const to = targets[Math.floor(random() * targets.length)]
-    await drag(page, slot(from.source, from.index), slot(to.source, to.index), { travelSteps: 1 })
-    await expect(slot(to.source, to.index)).toHaveAccessibleName(/ocupada/)
+    await drag(page, slot(from.source, from.index), slot(to.source, to.index), { travelSteps: 1, settleMs: 80 })
+    try {
+      await expect(slot(to.source, to.index)).toHaveAccessibleName(/ocupada/)
+    } catch (error) {
+      await testInfo.attach('cross-failure.json', { body: JSON.stringify({ seed: initialSeed, turn, from, to, model }), contentType: 'application/json' })
+      throw error
+    }
     model[to.source][to.index] = model[from.source][from.index]
     model[from.source][from.index] = null
   }
@@ -436,4 +441,23 @@ test('fechar painel de origem com ack retido drena a operação e libera ambos o
   await openWorkspace(page)
   await selectSave(page, 0, 'stress-pane-a')
   await closeWorkspace(page)
+})
+
+test('vinte ciclos de abrir e fechar perfil Hub mantêm o seletor e as sessões estáveis', async ({ page }) => {
+  test.setTimeout(180_000)
+  const baseline = (await occupiedIds('stress-hub-selector')).sort()
+  const savedBefore = await readSave('stress-hub-selector')
+  const hub = await createHubProfile('E2E Selector Stress')
+  await openWorkspace(page)
+  await selectSave(page, 0, 'stress-hub-selector')
+  for (let cycle = 0; cycle < 20; cycle += 1) {
+    await addPane(page)
+    await selectHub(page, 1, hub)
+    await pane(page, 1).getByRole('button', { name: 'Fechar container' }).click()
+    await expect(page.locator('.pokemon-workspace-pane')).toHaveCount(1)
+  }
+  await closeWorkspace(page)
+  expect((await occupiedIds('stress-hub-selector')).sort()).toEqual(baseline)
+  const savedAfter = await readSave('stress-hub-selector')
+  expect(savedAfter.bytes).toEqual(savedBefore.bytes)
 })
