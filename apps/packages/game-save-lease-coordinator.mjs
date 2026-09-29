@@ -92,6 +92,7 @@ export function createGameSaveLeaseCoordinator({ persistence, now = () => Date.n
     assertPlayerWrite: input => run('assert', 'player', input, playerLeaseDurationMs),
     acquireHub: input => run('acquire-hub', 'pokemon-hub', input, hubLeaseDurationMs),
     renewHub: input => run('renew', 'pokemon-hub', input, hubLeaseDurationMs),
+    assertHub: input => run('assert', 'pokemon-hub', input, hubLeaseDurationMs),
     releaseHub: input => run('release', 'pokemon-hub', input, hubLeaseDurationMs),
     async get({ profileId, gameId }) {
       validateIdentity({ profileId, gameId })

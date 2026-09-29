@@ -8,6 +8,68 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { createSaveStore } from './save-store.mjs'
 
+test('writes a pair of item saves once and rejects a replayed revision', async () => {
+  const dataPath = await mkdtemp(join(tmpdir(), 'emulator-hub-save-pair-'))
+  try {
+    const store = createSaveStore({ dataPath })
+    await store.put('may', 'ruby', Buffer.from([10]), null)
+    await store.put('brendan', 'sapphire', Buffer.from([20]), null)
+    const pair = [
+      { profileId: 'may', gameId: 'ruby', bytes: Buffer.from([9]), expectedRevision: 1, fenceGeneration: 0 },
+      { profileId: 'brendan', gameId: 'sapphire', bytes: Buffer.from([21]), expectedRevision: 1, fenceGeneration: 0 },
+    ]
+    const saved = await store.putPair(pair)
+    assert.deepEqual(saved.map(entry => entry.revision), [2, 2])
+    assert.deepEqual((await store.get('may', 'ruby')).bytes, Buffer.from([9]))
+    assert.deepEqual((await store.get('brendan', 'sapphire')).bytes, Buffer.from([21]))
+    await assert.rejects(() => store.putPair(pair), { code: 'SAVE_REVISION_CONFLICT' })
+  } finally { await rm(dataPath, { recursive: true, force: true }) }
+})
+
+test('recovers both saves after a crash between the two item writes', async () => {
+  const dataPath = await mkdtemp(join(tmpdir(), 'emulator-hub-save-pair-'))
+  try {
+    const first = createSaveStore({ dataPath })
+    await first.put('may', 'ruby', Buffer.from([10]), null)
+    await first.put('brendan', 'sapphire', Buffer.from([20]), null)
+    const crashing = createSaveStore({ dataPath, afterFirstPairSaveReplace: () => { throw new Error('simulated crash') } })
+    await assert.rejects(() => crashing.putPair([
+      { profileId: 'may', gameId: 'ruby', bytes: Buffer.from([9]), expectedRevision: 1, fenceGeneration: 0 },
+      { profileId: 'brendan', gameId: 'sapphire', bytes: Buffer.from([21]), expectedRevision: 1, fenceGeneration: 0 },
+    ]), /simulated crash/)
+    const recovered = createSaveStore({ dataPath })
+    assert.deepEqual((await recovered.get('may', 'ruby')).bytes, Buffer.from([9]))
+    assert.deepEqual((await recovered.get('brendan', 'sapphire')).bytes, Buffer.from([21]))
+    assert.equal((await recovered.get('may', 'ruby')).revision, 2)
+    assert.equal((await recovered.get('brendan', 'sapphire')).revision, 2)
+  } finally { await rm(dataPath, { recursive: true, force: true }) }
+})
+
+test('readers wait for a two-save transfer and observe only its committed pair', async () => {
+  const dataPath = await mkdtemp(join(tmpdir(), 'emulator-hub-save-pair-'))
+  try {
+    const initial = createSaveStore({ dataPath })
+    await initial.put('may', 'ruby', Buffer.from([10]), null)
+    await initial.put('brendan', 'sapphire', Buffer.from([20]), null)
+    let pauseWrite
+    let resumeWrite
+    const paused = new Promise(resolve => { pauseWrite = resolve })
+    const resumed = new Promise(resolve => { resumeWrite = resolve })
+    const writer = createSaveStore({ dataPath, afterFirstPairSaveReplace: async () => { pauseWrite(); await resumed } })
+    const committing = writer.putPair([
+      { profileId: 'may', gameId: 'ruby', bytes: Buffer.from([9]), expectedRevision: 1, fenceGeneration: 0 },
+      { profileId: 'brendan', gameId: 'sapphire', bytes: Buffer.from([21]), expectedRevision: 1, fenceGeneration: 0 },
+    ])
+    await paused
+    const reader = createSaveStore({ dataPath })
+    const reads = Promise.all([reader.get('may', 'ruby'), reader.get('brendan', 'sapphire')])
+    resumeWrite()
+    await committing
+    const observed = await reads
+    assert.deepEqual(observed.map(save => [save.bytes[0], save.revision]), [[9, 2], [21, 2]])
+  } finally { await rm(dataPath, { recursive: true, force: true }) }
+})
+
 test('persists a Hub runtime-state invalidation through fence and ordinary save writes', async () => {
   const dataPath = await mkdtemp(join(tmpdir(), 'emulator-hub-save-store-'))
   try {
@@ -116,6 +178,8 @@ test('fails within a bounded deadline when an orphan save lock cannot be acquire
       error => error.code === 'SAVE_LOCK_TIMEOUT',
     )
     assert.equal(instant, 110)
+    await assert.rejects(() => store.get('profile-may', 'pokemon-emerald'), error => error.code === 'SAVE_LOCK_TIMEOUT')
+    await rm(join(dataPath, 'profile-may', 'pokemon-emerald.lock'))
     assert.equal((await store.get('profile-may', 'pokemon-emerald')).revision, 1)
   } finally {
     await rm(dataPath, { recursive: true, force: true })

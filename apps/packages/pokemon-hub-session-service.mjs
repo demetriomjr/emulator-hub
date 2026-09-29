@@ -70,7 +70,7 @@ export function createPokemonHubSessionService({ persistence, coordinator, logge
   if (!coordinator || typeof coordinator.getSnapshot !== 'function' || typeof coordinator.renew !== 'function' || typeof coordinator.release !== 'function' || typeof coordinator.sync !== 'function' || typeof coordinator.reconcileWorkspaceLeases !== 'function') throw new TypeError('Pokemon Hub snapshot coordinator is invalid')
   const queues = new Map()
 
-  return { open, attach, loadCanonicalPane, heartbeat, syncSnapshot, syncCanonicalSnapshot, closeCanonicalSession, getCanonicalSnapshot, detach, close, listExpired, releaseExpired }
+  return { open, attach, loadCanonicalPane, withLoadedSource, withLoadedSources, heartbeat, syncSnapshot, syncCanonicalSnapshot, closeCanonicalSession, getCanonicalSnapshot, detach, close, listExpired, releaseExpired }
 
   async function open({ profileId }) {
     assertString(profileId, 'Profile ID')
@@ -86,6 +86,25 @@ export function createPokemonHubSessionService({ persistence, coordinator, logge
     const session = await read(profileId, sessionId)
     if (!session) throw sessionError('SESSION_INVALID', 'Workspace session is invalid.')
     return canonicalSnapshotForSession(session)
+  }
+
+  async function withLoadedSource({ profileId, sessionId, sourceKey, run }) {
+    if (typeof run !== 'function') throw new TypeError('Loaded source operation is required.')
+    return withLoadedSources({ profileId, sessionId, sourceKeys: [sourceKey], run: async sources => run(sources[0]) })
+  }
+
+  async function withLoadedSources({ profileId, sessionId, sourceKeys, run }) {
+    assertString(profileId, 'Profile ID'); assertString(sessionId, 'Session ID')
+    if (!Array.isArray(sourceKeys) || sourceKeys.length < 1 || new Set(sourceKeys).size !== sourceKeys.length) throw new TypeError('Loaded source keys are invalid.')
+    sourceKeys.forEach(key => assertString(key, 'Source key'))
+    if (typeof run !== 'function') throw new TypeError('Loaded source operation is required.')
+    return enqueue(sessionId, async () => {
+      const session = await requireLive(profileId, sessionId)
+      const sources = sourceKeys.map(sourceKey => session.sources.find(candidate => candidate.sourceKey === sourceKey))
+      if (sources.some(source => !source)) throw sessionError('SESSION_SOURCE_INVALID', 'Session source is invalid.')
+      for (const source of sources) await coordinator.renew({ profileId, sourceKey: source.sourceKey, workspaceId: sessionId, sourceSessionId: source.sourceSessionId, leaseToken: source.leaseToken })
+      return run(structuredClone(sources))
+    })
   }
 
   async function loadCanonicalPane({ profileId, sessionId, pane, sourceKey, profile, acquireSource, flushOutgoingSource, releaseSource } = {}) {

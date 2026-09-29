@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { evaluateGenerationIIITransfer } from './pokemon-gen3-transfer-rules.mjs'
+import { evaluateGenerationIIITransfer, evaluateGenerationIIIItemTrade } from './pokemon-gen3-transfer-rules.mjs'
 
 const ruby = { title: 'pokemon-ruby', ordinaryTradeReady: true, nationalDexUnlocked: false, gameClear: false, networkMachineRestored: false }
 const sapphire = { ...ruby, title: 'pokemon-sapphire' }
@@ -69,4 +69,13 @@ test('requires the Network Machine when a Hoenn-passported Hub Pokemon enters Fi
 test('retains one Pokemon in the source even for a same-title direct trade', () => {
   expectRejected({ operation: 'direct', source: ruby, destination: ruby, pokemon: hoennPokemon, sourcePokemonCount: 1 }, 'TRANSFER_SOURCE_EMPTY_AFTER_MOVE')
   assert.deepEqual(evaluateGenerationIIITransfer({ operation: 'direct', source: { ...ruby, ordinaryTradeReady: false }, destination: { ...ruby, ordinaryTradeReady: false }, pokemon: hoennPokemon, sourcePokemonCount: 2 }), { allowed: true })
+})
+
+test('item trade follows the direct Pokémon title pair and ordinary trade readiness', () => {
+  assert.deepEqual(evaluateGenerationIIIItemTrade({ source: ruby, destination: sapphire }), { allowed: true })
+  assert.deepEqual(evaluateGenerationIIIItemTrade({ source: ruby, destination: emeraldBeforeNational }), { allowed: true })
+  assert.deepEqual(evaluateGenerationIIIItemTrade({ source: { ...ruby, ordinaryTradeReady: false }, destination: { ...ruby, ordinaryTradeReady: false } }), { allowed: true })
+  assert.equal(evaluateGenerationIIIItemTrade({ source: { ...ruby, ordinaryTradeReady: false }, destination: sapphire }).reason.code, 'TRANSFER_TRADE_NOT_READY')
+  assert.equal(evaluateGenerationIIIItemTrade({ source: ruby, destination: { ...sapphire, ordinaryTradeReady: false } }).reason.code, 'TRANSFER_TRADE_NOT_READY')
+  assert.equal(evaluateGenerationIIIItemTrade({ source: emeraldAfterNational, destination: fireRedWithoutMachine }).reason.code, 'TRANSFER_NETWORK_MACHINE_REQUIRED')
 })

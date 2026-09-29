@@ -66,6 +66,44 @@ test('loads a save into one pane without sending a canonical sync candidate', as
   } })
 })
 
+test('runs a save item operation only for a live, loaded source in the session queue', async () => {
+  const persistence = createMemoryRedisPersistence()
+  const coordinator = createPokemonHubSnapshotCoordinator({ persistence, eventStore: createPokemonHubEventStore({ persistence }) })
+  await coordinator.adopt({ profileId, sourceKey, sourceRevision: 1, adapter: 'gen3-gba-v1', slots: [] })
+  const service = createPokemonHubSessionService({ persistence, coordinator, newId: () => 'item-session' })
+  const opened = await service.open({ profileId })
+  const request = { profileId, sessionId: opened.sessionId, sourceKey }
+  await assert.rejects(() => service.withLoadedSource({ ...request, run: async () => {} }), { code: 'SESSION_SOURCE_INVALID' })
+  await service.loadCanonicalPane({ ...request, pane: 0, profile: { type: 'save', profileId, gameId: 'emerald' },
+    acquireSource: key => coordinator.acquire({ profileId, sourceKey: key, workspaceId: opened.sessionId }),
+    flushOutgoingSource: async () => {}, releaseSource: async () => {},
+  })
+  const sourceId = await service.withLoadedSource({ ...request, run: async source => source.sourceId })
+  assert.equal(typeof sourceId, 'string')
+  assert.ok(sourceId.length > 0)
+  await assert.rejects(() => service.withLoadedSource({ ...request, sourceKey: 'save:profile-may:ruby', run: async () => {} }), { code: 'SESSION_SOURCE_INVALID' })
+})
+
+test('requires both item transfer saves to be loaded in one live session', async () => {
+  const persistence = createMemoryRedisPersistence()
+  const coordinator = createPokemonHubSnapshotCoordinator({ persistence, eventStore: createPokemonHubEventStore({ persistence }) })
+  const sourceKeys = [sourceKey, `save:${profileId}:ruby`]
+  for (const key of sourceKeys) await coordinator.adopt({ profileId, sourceKey: key, sourceRevision: 1, adapter: 'gen3-gba-v1', slots: [] })
+  const service = createPokemonHubSessionService({ persistence, coordinator, newId: () => 'pair-session' })
+  const opened = await service.open({ profileId })
+  const input = { profileId, sessionId: opened.sessionId, sourceKeys }
+  await assert.rejects(() => service.withLoadedSources({ ...input, run: async () => {} }), { code: 'SESSION_SOURCE_INVALID' })
+  for (const [pane, key] of sourceKeys.entries()) {
+    await service.loadCanonicalPane({ profileId, sessionId: opened.sessionId, pane, sourceKey: key,
+      profile: { type: 'save', profileId, gameId: pane ? 'ruby' : 'emerald' },
+      acquireSource: candidate => coordinator.acquire({ profileId, sourceKey: candidate, workspaceId: opened.sessionId }),
+      flushOutgoingSource: async () => {}, releaseSource: async () => {},
+    })
+  }
+  assert.deepEqual(await service.withLoadedSources({ ...input, run: async sources => sources.map(source => source.sourceKey) }), sourceKeys)
+  await assert.rejects(() => service.withLoadedSources({ ...input, sourceKeys: [sourceKeys[0], 'save:other:emerald'], run: async () => {} }), { code: 'SESSION_SOURCE_INVALID' })
+})
+
 test('preserves a placement-rule reason when the snapshot coordinator corrects the workspace', async () => {
   const persistence = createMemoryRedisPersistence()
   const reason = { code: 'TRANSFER_NATIONAL_DEX_REQUIRED', message: 'Este save ainda não pode enviar ou receber esse Pokémon sem a Pokédex Nacional.' }

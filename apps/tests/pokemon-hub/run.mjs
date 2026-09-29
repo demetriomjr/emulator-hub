@@ -11,7 +11,7 @@ import { createHubServer } from '../../backend/server.mjs'
 import { createMemoryRedisPersistence } from '../../packages/redis-persistence.mjs'
 import { createRedisProfileStore } from '../../packages/profile-store.mjs'
 import { createSaveStore } from '../../packages/save-store.mjs'
-import { createEmeraldSave } from './gen3-fixture.mjs'
+import { createEmeraldSave, createItemSave } from './gen3-fixture.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const frontend = resolve(here, '../../frontend')
@@ -34,8 +34,20 @@ try {
     file: 'e2e-emerald.gba', sha256: createHash('sha256').update(rom).digest('hex'),
     pokemonSave: { adapter: 'gen3-gba-v1', layoutProfile: 'pokemon-emerald-gba', title: 'pokemon-emerald', saveKind: 'battery', supported: true },
   }
+  const itemEntries = Object.fromEntries([
+    ['ruby', 'pokemon-ruby', 'pokemon-ruby-sapphire-gba', 'AXVE'],
+    ['sapphire', 'pokemon-sapphire', 'pokemon-ruby-sapphire-gba', 'AXPE'],
+    ['emerald', 'pokemon-emerald', 'pokemon-emerald-gba', 'BPEE'],
+  ].map(([key, title, layoutProfile, gameCode]) => {
+    const itemRom = Buffer.alloc(0xc0)
+    itemRom.write(gameCode, 0xac, 'ascii')
+    return [key, { id: `e2e-items-${key}`, title: `Pokémon ${key[0].toUpperCase()}${key.slice(1)} Items Fixture`, system: 'gba', core: 'gba',
+      file: `e2e-items-${key}.gba`, sha256: createHash('sha256').update(itemRom).digest('hex'), romBytes: itemRom,
+      pokemonSave: { adapter: 'gen3-gba-v1', layoutProfile, title, saveKind: 'battery', supported: true } }]
+  }))
   await writeFile(join(runRoot, 'roms', entry.file), rom)
-  await writeFile(join(runRoot, 'catalog.json'), JSON.stringify([entry]))
+  for (const itemEntry of Object.values(itemEntries)) await writeFile(join(runRoot, 'roms', itemEntry.file), itemEntry.romBytes)
+  await writeFile(join(runRoot, 'catalog.json'), JSON.stringify([entry, ...Object.values(itemEntries).map(({ romBytes, ...itemEntry }) => itemEntry)]))
   const logger = Object.fromEntries(['info', 'warn', 'error'].map(level => [level, (event, context = {}) => {
     backendLog.write(`${JSON.stringify({ timestamp: new Date().toISOString(), level, event, ...context })}\n`)
   }]))
@@ -48,7 +60,34 @@ try {
     fixtureProfiles[name] = profile.id
     await saveStore.put(profile.id, entry.id, createEmeraldSave(name === 'guard' ? { party: [10] } : name === 'boxes' ? { secondBox: [25] } : {}), null)
   }
-  await writeFile(join(artifactDirectory, 'fixture.json'), JSON.stringify({ gameId: entry.id, profiles: fixtureProfiles }))
+  const itemProfiles = {}
+  const seed = { pc: [[13, 10], [14, 5], [19, 1]], items: [[13, 10], [14, 5], [15, 1]], 'key-items': [[262, 1], [263, 1]], 'poke-balls': [[4, 12], [2, 3]], 'tm-hm': [[289, 3], [339, 1]], berries: [[133, 5], [134, 2]] }
+  for (const [name, game, options] of [
+    ['ruby-a', 'ruby', {}], ['ruby-b', 'ruby', {}], ['sapphire-a', 'sapphire', {}],
+    ['sapphire-locked', 'sapphire', { tradeReady: false }], ['emerald-a', 'emerald', {}],
+    ['emerald-full', 'emerald', { areas: { ...seed, items: [[13, 99], [14, 5]] } }],
+    ['sapphire-empty', 'sapphire', { areas: { ...seed, 'tm-hm': [], berries: [] } }],
+    ['emerald-nearfull', 'emerald', { areas: { ...seed, items: [[13, 90], [14, 5]] } }],
+    ['ruby-reorder', 'ruby', {}], ['sapphire-reorder', 'sapphire', {}], ['emerald-reorder', 'emerald', {}],
+    ['ruby-limit', 'ruby', {}],
+    ['ruby-insert', 'ruby', { areas: { ...seed, pc: [[13, 2]] } }],
+    ['sapphire-insert', 'sapphire', { areas: { ...seed, pc: [[14, 1], [19, 1]] } }],
+    ['ruby-blocked', 'ruby', {}],
+    ['ruby-stack', 'ruby', {}], ['sapphire-stack', 'sapphire', {}],
+    ['sapphire-pc-49', 'sapphire', { areas: { ...seed, pc: Array.from({ length: 51 }, (_, index) => index + 1).filter(id => id !== 13 && id !== 14).map(id => [id, 1]) } }],
+    ['ruby-items-19', 'ruby', { areas: { ...seed, items: Array.from({ length: 19 }, (_, index) => [index + 15, 1]) } }],
+    ['emerald-stack-98', 'emerald', { areas: { ...seed, items: [[13, 98], [14, 5]] } }],
+    ['ruby-pc-capacity-source', 'ruby', {}],
+    ['sapphire-bag-capacity-source', 'sapphire', {}],
+    ['ruby-stack-capacity-source', 'ruby', {}],
+  ]) {
+    const itemEntry = itemEntries[game]
+    const profile = await profileStore.create(itemEntry.id, name)
+    itemProfiles[name] = { gameId: itemEntry.id, profileId: profile.id, title: itemEntry.pokemonSave.title }
+    await saveStore.put(profile.id, itemEntry.id, createItemSave(itemEntry.pokemonSave.title, { areas: seed, ...options }), null)
+  }
+  await writeFile(join(artifactDirectory, 'fixture.json'), JSON.stringify({ gameId: entry.id, profiles: fixtureProfiles,
+    itemGames: Object.fromEntries(Object.entries(itemEntries).map(([key, itemEntry]) => [key, itemEntry.id])), itemProfiles }))
   const faultProfileId = fixtureProfiles[process.env.E2E_FAULT_FLUSH_PROFILE]
   let faultRemaining = faultProfileId ? 1 : 0
   const injectedSaveStore = faultProfileId ? {

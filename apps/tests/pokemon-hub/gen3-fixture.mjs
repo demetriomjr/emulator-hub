@@ -1,3 +1,6 @@
+import itemProfiles from '../../packages/pokemon-item-save-profiles.json' with { type: 'json' }
+import capabilityProfiles from '../../packages/pokemon-gen3-save-capabilities.json' with { type: 'json' }
+
 // Synthetic Gen III save data. No personal or production save is used.
 export function createEmeraldSave({ box = [25, 64, 133], secondBox = [], party = [10, 11] } = {}) {
   const bytes = Buffer.alloc(0x20000, 0xff)
@@ -25,6 +28,33 @@ export function createEmeraldSave({ box = [25, 64, 133], secondBox = [], party =
     pcRecord(species, 300 + slot).copy(bytes, copy + 0x5000 + 4 + (30 + slot) * 80)
   }
   refreshChecksums(bytes, copy)
+  return bytes
+}
+
+export function createItemSave(title, { areas = {}, tradeReady = true, box, party } = {}) {
+  const bytes = createEmeraldSave({ ...(box ? { box } : {}), ...(party ? { party } : {}) })
+  const base = 0xe000
+  const capability = capabilityProfiles.titles[title]
+  const inventory = itemProfiles.profiles.find(profile => profile.titles.includes(title))
+  if (!capability || !inventory || !['pokemon-ruby', 'pokemon-sapphire', 'pokemon-emerald'].includes(title)) throw new TypeError('Item fixture title is invalid.')
+  for (const flag of [capability.ordinaryTradeFlag, capability.gameClearFlag, capability.nationalDexFlag]) {
+    const offset = capability.eventFlagBase + Math.floor(flag / 8)
+    const current = readLargeByte(bytes, base, offset)
+    writeLargeByte(bytes, base, offset, flag === capability.ordinaryTradeFlag && !tradeReady ? current & ~(1 << (flag % 8)) : current | (1 << (flag % 8)))
+  }
+  writeLargeByte(bytes, base, capability.eventWorkBase + capability.nationalDexWorkIndex * 2, capability.nationalDexWorkValue & 0xff)
+  writeLargeByte(bytes, base, capability.eventWorkBase + capability.nationalDexWorkIndex * 2 + 1, capability.nationalDexWorkValue >>> 8)
+  for (const area of inventory.areas) {
+    for (const [slot, [nativeId, quantity]] of (areas[area.id] ?? []).entries()) {
+      if (slot >= area.slots) throw new RangeError('Item fixture area is full.')
+      const offset = area.logicalOffset + slot * 4
+      writeLargeByte(bytes, base, offset, nativeId & 0xff)
+      writeLargeByte(bytes, base, offset + 1, nativeId >>> 8)
+      writeLargeByte(bytes, base, offset + 2, quantity & 0xff)
+      writeLargeByte(bytes, base, offset + 3, quantity >>> 8)
+    }
+  }
+  refreshChecksums(bytes, base)
   return bytes
 }
 

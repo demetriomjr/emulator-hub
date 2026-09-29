@@ -15,6 +15,7 @@ import { createSaveStore } from '../../packages/save-store.mjs'
 import { createSnapshotStore } from '../../packages/snapshot-store.mjs'
 import { inspectPokemonGen3Inventory } from '../../packages/pokemon-gen3-inventory.mjs'
 import { readPokemonGen3Flags } from '../../packages/pokemon-gen3-event-flags.mjs'
+import { pokemonGen3SaveByteOffset, refreshPokemonGen3SaveSectionChecksums, selectUnambiguousPokemonGen3SaveCopy } from '../../packages/pokemon-gen3-save-validation.mjs'
 
 const liveServers = new Set()
 const liveFixtures = new Set()
@@ -976,7 +977,7 @@ describe('hub backend HTTP contract', () => {
     assert.deepEqual(actions[1].request, { profileId: 'profile-may', sourceKey: source.sourceKey, workspaceId: 'expired-session', sourceSessionId: source.sourceSessionId, leaseToken: source.leaseToken })
   })
 
-  test('does not log an accepted canonical session snapshot', async () => {
+  test('traces an accepted canonical session snapshot without save bytes', async () => {
     const fixture = await createFixture([])
     const requests = []
     const events = []
@@ -1010,7 +1011,11 @@ describe('hub backend HTTP contract', () => {
     assert.deepEqual(requests.map(({ profileId, sessionId, idempotencyKey, snapshot }) => ({ profileId, sessionId, idempotencyKey, snapshot })), [{
       profileId: 'profile-may', sessionId: 'session-a', idempotencyKey: 'snapshot-7', snapshot: { revision: 0, panes: [null, null, null] },
     }])
-    assert.deepEqual(events, [])
+    assert.deepEqual(events.map(entry => entry.event), [
+      'snapshot.http.received', 'snapshot.http.body-read', 'snapshot.http.accepted', 'snapshot.http.response',
+    ])
+    assert.equal(events.every(entry => entry.level === 'info'), true)
+    assert.equal(events.some(entry => JSON.stringify(entry.context).includes('saveBytes')), false)
   })
 
   test('logs snapshot processing failures as errors', async () => {
@@ -1036,7 +1041,8 @@ describe('hub backend HTTP contract', () => {
 
     assert.equal(response.status, 400)
     assert.equal(events.some(entry => entry.event === 'snapshot.http.failed'), true)
-    assert.equal(events.every(entry => entry.level === 'error'), true)
+    assert.equal(events.find(entry => entry.event === 'snapshot.http.failed')?.level, 'error')
+    assert.equal(events.some(entry => entry.event === 'snapshot.http.accepted'), false)
   })
 
   test('does not log a successful heartbeat', async () => {
@@ -1545,6 +1551,173 @@ describe('hub backend HTTP contract', () => {
     assert.equal(body.pokemonDetailsById['pokemon-one'].identity.species, 25)
     assert.deepEqual(calls, [{ profileId: 'workspace-a', sourceKey: source.sourceKey }, { profileId: 'workspace-a', sourceKey: source.sourceKey }])
     assert.equal(JSON.stringify(body).includes('bytesBase64'), false)
+  })
+
+  test('includes the six save item areas when the frontend loads an Emerald layout', async () => {
+    const fixture = await createFixture([{
+      id: 'pokemon-emerald', title: 'Pokémon Emerald', system: 'gba', core: 'mgba', file: 'pokemon-emerald.gba', sha256: 'a'.repeat(64),
+      pokemonSave: { supported: true, adapter: 'gen3-gba-v1', layoutProfile: 'pokemon-emerald-gba', title: 'pokemon-emerald' },
+    }])
+    const bytes = eligibleEmeraldSave()
+    const selected = selectUnambiguousPokemonGen3SaveCopy(bytes)
+    const itemOffset = pokemonGen3SaveByteOffset(selected, 'large', 0x560)
+    bytes.writeUInt16LE(13, itemOffset)
+    bytes.writeUInt16LE(7 ^ 0x5678, itemOffset + 2)
+    refreshPokemonGen3SaveSectionChecksums(bytes, selected, new Set([1]))
+    const server = createHubServer({
+      ...fixture,
+      romDiscovery: { async scan() { return { accepted: [{ id: 'pokemon-emerald', title: 'Pokémon Emerald', system: 'gba', core: 'mgba', file: 'pokemon-emerald.gba', sha256: 'a'.repeat(64) }] } } },
+      romRegistry: { async load() { return [] }, async replace(entries) { return entries } },
+      profileStore: { async get() { return { id: 'profile-may' } } },
+      saveStore: { async get() { return { bytes, revision: 4 } } },
+      pokemonSaveAdapters: { get() { return { inspect() { return { party: [], boxes: [] } } } } },
+      pokemonHubSnapshotCoordinator: { async getSnapshot() { return { saveRevision: 4, needsSaveFlush: false, placements: [] } } },
+      pokemonHubSaveFlush: { async flushSource() { return { status: 'clean' } } },
+    })
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+    liveServers.add(server)
+
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/pokemon-hub/save-profiles/pokemon-emerald/profile-may/layout`)
+    const body = await jsonResponse(response)
+    assert.equal(response.status, 200)
+    assert.equal(body.itemInventory.status, 'ready')
+    assert.equal(body.itemInventory.saveRevision, 4)
+    assert.equal(body.itemInventory.title, 'pokemon-emerald')
+    assert.deepEqual(Object.keys(body.itemInventory.areas), ['pc', 'items', 'key-items', 'poke-balls', 'tm-hm', 'berries'])
+    assert.deepEqual(body.itemInventory.areas.items.slots[0], { index: 0, nativeId: 13, itemKey: 'potion', quantity: 7 })
+    assert.equal(body.itemInventory.areas.items.freeSlots, 29)
+    assert.equal(body.itemInventory.areas.items.maxPerStack, 99)
+    assert.equal(JSON.stringify(body).includes('saveBytes'), false)
+  })
+
+  test('routes save item reordering through the active Hub session and returns the authoritative inventory', async () => {
+    const calls = []
+    const { baseUrl } = await startFixture([], {}, {}, { pokemonItemReorderService: { async reorder(input) {
+      calls.push(input)
+      return { changed: true, itemInventory: { status: 'ready', saveRevision: 5, title: 'pokemon-emerald', areas: {} } }
+    } } })
+    const body = { gameId: 'pokemon-emerald', sourceProfileId: 'may', area: 'items', fromSlot: 0, toSlot: 2, expectedSaveRevision: 4 }
+    const response = await fetch(`${baseUrl}/api/profiles/workspace/pokemon-hub/sessions/session-a/items/reorder`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    })
+    assert.equal(response.status, 200)
+    assert.deepEqual(await jsonResponse(response), { changed: true, itemInventory: { status: 'ready', saveRevision: 5, title: 'pokemon-emerald', areas: {} } })
+    assert.deepEqual(calls, [{ profileId: 'workspace', sessionId: 'session-a', ...body }])
+  })
+
+  test('registers the real item reorder service when the backend starts', async () => {
+    const { baseUrl } = await startFixture([])
+    const response = await fetch(`${baseUrl}/api/profiles/workspace/pokemon-hub/sessions/missing-session/items/reorder`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gameId: 'pokemon-emerald', sourceProfileId: 'may', area: 'items', fromSlot: 0, toSlot: 1, expectedSaveRevision: 1 }),
+    })
+    assert.equal(response.status, 410)
+    assert.equal((await jsonResponse(response)).code, 'SESSION_INVALID')
+  })
+
+  test('reorders an Emerald save through the real HTTP service and returns the persisted order', async () => {
+    const entry = {
+      id: 'pokemon-emerald', title: 'Pokémon Emerald', system: 'gba', core: 'mgba', file: 'pokemon-emerald.gba', sha256: 'a'.repeat(64),
+      pokemonSave: { supported: true, adapter: 'gen3-gba-v1', layoutProfile: 'pokemon-emerald-gba', title: 'pokemon-emerald' },
+    }
+    const bytes = eligibleEmeraldSave()
+    const selected = selectUnambiguousPokemonGen3SaveCopy(bytes)
+    const first = pokemonGen3SaveByteOffset(selected, 'large', 0x560)
+    for (const [index, nativeId] of [13, 14].entries()) {
+      bytes.writeUInt16LE(nativeId, first + index * 4)
+      bytes.writeUInt16LE((index + 1) ^ 0x5678, first + index * 4 + 2)
+    }
+    refreshPokemonGen3SaveSectionChecksums(bytes, selected, new Set([1]))
+    let stored = { bytes, revision: 4, fenceGeneration: 0 }
+    const { baseUrl } = await startFixture([entry], {}, {}, {
+      romDiscovery: { async scan() { return { accepted: [entry] } } },
+      romRegistry: { async load() { return [] }, async replace(entries) { return entries } },
+      pokemonHubSessionService: {
+        async withLoadedSource({ run }) { return run({ sourceKey: 'save:may:pokemon-emerald' }) },
+        async withLoadedSources({ run }) { return run() },
+      },
+      gameSaveLeases: { async assertHub() {} },
+      playerLeases: {},
+      saveStore: {
+        async get() { return stored },
+        async putPair() { throw new Error('Unused item transfer method') },
+        async put(_profileId, _gameId, edited, expectedRevision, options) {
+          assert.equal(expectedRevision, stored.revision)
+          await options.beforeCommit()
+          stored = { ...stored, bytes: edited, revision: expectedRevision + 1 }
+          return stored
+        },
+      },
+      pokemonHubSaveFlush: { async flushSource() { return { status: 'clean' } } },
+      pokemonHubSnapshotCoordinator: {
+        async getSaveFlushPlan() { return { source: { sourceRevision: 1, needsSaveFlush: false } } },
+        async markSaveFlushed() {},
+      },
+      snapshotStore: { async delete() {} },
+    })
+    const response = await fetch(`${baseUrl}/api/profiles/workspace/pokemon-hub/sessions/session-a/items/reorder`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gameId: 'pokemon-emerald', sourceProfileId: 'may', area: 'items', fromSlot: 0, toSlot: 1, expectedSaveRevision: 4 }),
+    })
+    const body = await jsonResponse(response)
+    assert.equal(response.status, 200, JSON.stringify(body))
+    assert.deepEqual(body.itemInventory.areas.items.slots.slice(0, 2).map(slot => [slot.nativeId, slot.quantity]), [[14, 2], [13, 1]])
+    assert.equal(stored.revision, 5)
+    assert.deepEqual(stored.bytes.subarray(0, 8), bytes.subarray(0, 8))
+  })
+
+  test('reports a save item revision conflict without accepting a repeated swap', async () => {
+    const { baseUrl } = await startFixture([], {}, {}, { pokemonItemReorderService: { async reorder() {
+      throw Object.assign(new Error('The item save revision has changed.'), { code: 'SAVE_ITEM_REVISION_CONFLICT' })
+    } } })
+    const response = await fetch(`${baseUrl}/api/profiles/workspace/pokemon-hub/sessions/session-a/items/reorder`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gameId: 'pokemon-emerald', sourceProfileId: 'may', area: 'items', fromSlot: 0, toSlot: 2, expectedSaveRevision: 4 }),
+    })
+    assert.equal(response.status, 412)
+    assert.deepEqual(await jsonResponse(response), { error: 'The item save revision has changed.', code: 'SAVE_ITEM_REVISION_CONFLICT' })
+  })
+
+  test('routes a direct item transfer between two saves in the active Hub session', async () => {
+    const calls = []
+    const { baseUrl } = await startFixture([], {}, {}, { pokemonItemReorderService: {
+      async transfer(input) { calls.push(input); return { itemKey: 'potion', quantity: 2 } },
+    } })
+    const body = { source: { gameId: 'ruby', profileId: 'may', expectedSaveRevision: 3 },
+      destination: { gameId: 'sapphire', profileId: 'brendan', expectedSaveRevision: 5 }, area: 'items', fromSlot: 0, quantity: 2 }
+    const response = await fetch(`${baseUrl}/api/profiles/workspace/pokemon-hub/sessions/session-a/items/transfer`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    })
+    assert.equal(response.status, 200)
+    assert.deepEqual(await jsonResponse(response), { itemKey: 'potion', quantity: 2 })
+    assert.deepEqual(calls, [{ profileId: 'workspace', sessionId: 'session-a', ...body }])
+  })
+
+  test('keeps the Pokémon layout available when only the item inventory is ambiguous', async () => {
+    const fixture = await createFixture([{
+      id: 'pokemon-emerald', title: 'Pokémon Emerald', system: 'gba', core: 'mgba', file: 'pokemon-emerald.gba', sha256: 'a'.repeat(64),
+      pokemonSave: { supported: true, adapter: 'gen3-gba-v1', layoutProfile: 'pokemon-emerald-gba', title: 'pokemon-emerald' },
+    }])
+    const bytes = eligibleEmeraldSave()
+    for (let section = 0; section < 14; section++) bytes.writeUInt32LE(2, ((section * 5 + 3) % 14) * 0x1000 + 0xffc)
+    const server = createHubServer({
+      ...fixture,
+      romDiscovery: { async scan() { return { accepted: [{ id: 'pokemon-emerald', title: 'Pokémon Emerald', system: 'gba', core: 'mgba', file: 'pokemon-emerald.gba', sha256: 'a'.repeat(64) }] } } },
+      romRegistry: { async load() { return [] }, async replace(entries) { return entries } },
+      profileStore: { async get() { return { id: 'profile-may' } } },
+      saveStore: { async get() { return { bytes, revision: 4 } } },
+      pokemonSaveAdapters: { get() { return { inspect() { return { party: [{ occupied: false }], boxes: [] } } } } },
+      pokemonHubSnapshotCoordinator: { async getSnapshot() { return { saveRevision: 4, needsSaveFlush: false, placements: [] } } },
+      pokemonHubSaveFlush: { async flushSource() { return { status: 'clean' } } },
+    })
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+    liveServers.add(server)
+
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/pokemon-hub/save-profiles/pokemon-emerald/profile-may/layout`)
+    const body = await jsonResponse(response)
+    assert.equal(response.status, 200)
+    assert.deepEqual(body.party, [{ occupied: false }])
+    assert.deepEqual(body.itemInventory, { status: 'unavailable', saveRevision: 4, code: 'SAVE_AMBIGUOUS' })
   })
 
   test('creates and lists Hub profiles from the Redis-backed Hub collection', async () => {

@@ -4,13 +4,16 @@ import { dirname, join } from 'node:path'
 
 const maximumSaveBytes = 2 * 1024 * 1024
 
-export function createSaveStore({ dataPath, eventBackupsPath = null, afterEventSaveReplace = null, lockTimeoutMs = 5_000, lockRetryMs = 5, now = () => Date.now(), wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)) }) {
+export function createSaveStore({ dataPath, eventBackupsPath = null, afterEventSaveReplace = null, afterFirstPairSaveReplace = null, lockTimeoutMs = 5_000, lockRetryMs = 5, now = () => Date.now(), wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)) }) {
   if (!Number.isFinite(lockTimeoutMs) || lockTimeoutMs < 0) throw new TypeError('Save lock timeout is invalid.')
   if (!Number.isFinite(lockRetryMs) || lockRetryMs <= 0) throw new TypeError('Save lock retry interval is invalid.')
   const pending = new Map()
   const lockOptions = { lockTimeoutMs, lockRetryMs, now, wait }
+  const pairJournalDirectory = join(dataPath, '.item-transfer-journals')
+  let recoveryInFlight = null
   return {
     get,
+    putPair,
     async listAll() {
       let profiles
       try { profiles = await readdir(dataPath, { withFileTypes: true }) } catch (error) { if (error.code === 'ENOENT') return []; throw error }
@@ -29,6 +32,7 @@ export function createSaveStore({ dataPath, eventBackupsPath = null, afterEventS
       return saves
     },
     async put(profileId, gameId, bytes, expectedRevision, { fenceGeneration = 0, invalidateRuntimeStates = false, eventGrantReceipt = null, beforeCommit = null } = {}) {
+      await recoverPairJournals()
       return serialize(saveKey(profileId, gameId), async () => {
       const paths = savePaths(dataPath, profileId, gameId)
       return withSaveLock(paths, async () => {
@@ -89,6 +93,7 @@ export function createSaveStore({ dataPath, eventBackupsPath = null, afterEventS
       })
     },
     async advanceFence(profileId, gameId, nextGeneration) {
+      await recoverPairJournals()
       return serialize(saveKey(profileId, gameId), async () => {
         const paths = savePaths(dataPath, profileId, gameId)
         return withSaveLock(paths, async () => {
@@ -105,14 +110,87 @@ export function createSaveStore({ dataPath, eventBackupsPath = null, afterEventS
     },
   }
 
-  async function get(profileId, gameId) {
-    const paths = savePaths(dataPath, profileId, gameId)
-    if (await fileExists(paths.eventJournal)) return withSaveLock(paths, async () => { await recoverEventJournal(paths); return readCurrent(paths) }, lockOptions)
-    try { return await readCurrent(paths) }
-    catch (error) {
-      if (!await fileExists(paths.eventJournal)) return readCurrent(paths)
-      return withSaveLock(paths, async () => { await recoverEventJournal(paths); return readCurrent(paths) }, lockOptions)
+  async function putPair(entries, { beforeCommit = null } = {}) {
+    if (!Array.isArray(entries) || entries.length !== 2 || entries.some(entry => !entry || !Buffer.isBuffer(entry.bytes)
+      || entry.bytes.length === 0 || entry.bytes.length > maximumSaveBytes || !Number.isInteger(entry.expectedRevision)
+      || entry.expectedRevision < 1 || !Number.isInteger(entry.fenceGeneration) || entry.fenceGeneration < 0)
+      || saveKey(entries[0].profileId, entries[0].gameId) === saveKey(entries[1].profileId, entries[1].gameId)) {
+      throw saveError('SAVE_PAIR_INVALID', 'Save pair request is invalid.')
     }
+    await recoverPairJournals()
+    const paths = entries.map(entry => savePaths(dataPath, entry.profileId, entry.gameId))
+    return withPairLocks(paths, async () => {
+      const current = await Promise.all(paths.map(async path => { await recoverEventJournal(path); return readCurrent(path) }))
+      for (let index = 0; index < 2; index++) {
+        if (current[index]?.revision !== entries[index].expectedRevision) throw saveError('SAVE_REVISION_CONFLICT', 'Save revision does not match the current save.')
+        if (current[index].fenceGeneration !== entries[index].fenceGeneration) throw saveError('SAVE_FENCE_CONFLICT', 'Save fence generation does not match the current save.')
+      }
+      if (beforeCommit !== null) {
+        if (typeof beforeCommit !== 'function') throw saveError('SAVE_PRECONDITION_INVALID', 'Save pair precondition is invalid.')
+        await beforeCommit()
+      }
+      const targets = entries.map((entry, index) => {
+        const revision = current[index].revision + 1
+        const sha256 = createHash('sha256').update(entry.bytes).digest('hex')
+        return { profileId: entry.profileId, gameId: entry.gameId, originalRevision: current[index].revision,
+          originalSha256: current[index].sha256, bytesBase64: entry.bytes.toString('base64'),
+          metadata: { revision, sha256, fenceGeneration: entry.fenceGeneration, runtimeStateInvalidatedAtRevision: revision,
+            ...(current[index].eventGrantReceipt ? { eventGrantReceipt: current[index].eventGrantReceipt } : {}) } }
+      })
+      await mkdir(pairJournalDirectory, { recursive: true })
+      const journalPath = join(pairJournalDirectory, `${randomUUID()}.json`)
+      await writeAtomically(journalPath, JSON.stringify({ schemaVersion: 1, targets }), true)
+      for (let index = 0; index < 2; index++) {
+        await writeAtomically(paths[index].bytes, entries[index].bytes, true)
+        if (index === 0) await afterFirstPairSaveReplace?.()
+        await writeAtomically(paths[index].metadata, JSON.stringify(targets[index].metadata), true)
+      }
+      await unlink(journalPath)
+      return targets.map(target => ({ ...target.metadata }))
+    })
+  }
+
+  async function recoverPairJournals() {
+    if (recoveryInFlight) return recoveryInFlight
+    recoveryInFlight = (async () => {
+      let files
+      try { files = await readdir(pairJournalDirectory) }
+      catch (error) { if (error.code === 'ENOENT') return; throw error }
+      for (const file of files.filter(name => /^[0-9a-f-]{36}\.json$/.test(name))) {
+        const journalPath = join(pairJournalDirectory, file)
+        let journal
+        try { journal = JSON.parse(await readFile(journalPath, 'utf8')) }
+        catch (error) { if (error.code === 'ENOENT') continue; throw saveError('SAVE_PAIR_JOURNAL_INVALID', 'Item transfer journal is invalid.') }
+        if (journal.schemaVersion !== 1 || !Array.isArray(journal.targets) || journal.targets.length !== 2) throw saveError('SAVE_PAIR_JOURNAL_INVALID', 'Item transfer journal is invalid.')
+        const paths = journal.targets.map(target => savePaths(dataPath, target.profileId, target.gameId))
+        await withPairLocks(paths, async () => {
+          if (!await fileExists(journalPath)) return
+          for (let index = 0; index < 2; index++) {
+            const target = journal.targets[index]
+            const bytes = Buffer.from(target.bytesBase64 ?? '', 'base64')
+            if (!validMetadata(target.metadata, bytes) || target.metadata.revision !== target.originalRevision + 1) throw saveError('SAVE_PAIR_JOURNAL_INVALID', 'Item transfer journal is invalid.')
+            const currentBytes = await readFile(paths[index].bytes)
+            const currentHash = createHash('sha256').update(currentBytes).digest('hex')
+            if (currentHash !== target.originalSha256 && currentHash !== target.metadata.sha256) throw saveError('SAVE_PAIR_JOURNAL_CONFLICT', 'Item transfer journal conflicts with the save.')
+            await writeAtomically(paths[index].bytes, bytes, true)
+            await writeAtomically(paths[index].metadata, JSON.stringify(target.metadata), true)
+          }
+          await unlink(journalPath)
+        })
+      }
+    })().finally(() => { recoveryInFlight = null })
+    return recoveryInFlight
+  }
+
+  async function withPairLocks(paths, operation) {
+    const sorted = [...paths].sort((left, right) => left.lock.localeCompare(right.lock))
+    return withSaveLock(sorted[0], () => withSaveLock(sorted[1], operation, lockOptions), lockOptions)
+  }
+
+  async function get(profileId, gameId) {
+    await recoverPairJournals()
+    const paths = savePaths(dataPath, profileId, gameId)
+    return withSaveLock(paths, async () => { await recoverEventJournal(paths); return readCurrent(paths) }, lockOptions)
   }
   async function readCurrent(paths) {
     try {
@@ -233,8 +311,8 @@ async function withSaveLock(paths, operation, { lockTimeoutMs, lockRetryMs, now,
       }
     }
     catch (error) {
-      if (error.code !== 'EEXIST') throw error
-      if (await reclaimDeadSaveLock(paths.lock)) continue
+      if (error.code !== 'EEXIST' && !(process.platform === 'win32' && error.code === 'EPERM')) throw error
+      if (error.code === 'EEXIST' && await reclaimDeadSaveLock(paths.lock)) continue
       if (now() >= deadline) throw saveError('SAVE_LOCK_TIMEOUT', 'Save lock could not be acquired before the deadline.')
       await wait(Math.min(lockRetryMs, Math.max(0, deadline - now())))
     }
@@ -248,7 +326,11 @@ async function withSaveLock(paths, operation, { lockTimeoutMs, lockRetryMs, now,
 async function reclaimDeadSaveLock(path) {
   let source
   try { source = await readFile(path, 'utf8') }
-  catch (error) { if (error.code === 'ENOENT') return true; throw error }
+  catch (error) {
+    if (error.code === 'ENOENT') return true
+    if (process.platform === 'win32' && error.code === 'EPERM') return false
+    throw error
+  }
   let owner
   try { owner = JSON.parse(source) } catch { return false }
   if (!Number.isInteger(owner.pid) || owner.pid < 1 || owner.pid === process.pid) return false
@@ -258,7 +340,11 @@ async function reclaimDeadSaveLock(path) {
     if (await readFile(path, 'utf8') !== source) return false
     await unlink(path)
     return true
-  } catch (error) { if (error.code === 'ENOENT') return true; throw error }
+  } catch (error) {
+    if (error.code === 'ENOENT') return true
+    if (process.platform === 'win32' && error.code === 'EPERM') return false
+    throw error
+  }
 }
 function saveKey(profileId, gameId) { return `${profileId}\u0000${gameId}` }
 function saveError(code, message) { const error = new Error(message); error.code = code; return error }

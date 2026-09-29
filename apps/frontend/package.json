@@ -3,14 +3,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "predev": "node scripts/sync-pokemon-resources.mjs --background && node scripts/sync-pokemon-card-icons.mjs",
+    "predev": "node scripts/sync-pokemon-resources.mjs --background && node scripts/sync-pokemon-card-icons.mjs && node scripts/sync-pokemon-item-resources.mjs --background",
     "dev": "node scripts/dev.mjs",
     "sync:pokemon-resources": "node scripts/sync-pokemon-resources.mjs --refresh",
     "sync:pokemon-resources:force": "node scripts/sync-pokemon-resources.mjs --force",
     "sync:pokemon-sprite-resolution": "node scripts/sync-pokemon-resources.mjs",
     "lint": "eslint .",
-    "prebuild": "node scripts/sync-pokemon-resources.mjs && node scripts/sync-pokemon-card-icons.mjs --required && npm run lint",
+    "prebuild": "node scripts/sync-pokemon-resources.mjs && node scripts/sync-pokemon-card-icons.mjs --required && node scripts/sync-pokemon-item-resources.mjs --optional && npm run lint",
     "sync:pokemon-card-icons": "node scripts/sync-pokemon-card-icons.mjs --refresh",
+    "sync:pokemon-item-resources": "node scripts/sync-pokemon-item-resources.mjs --refresh",
     "build": "vite build"
   },
   "dependencies": {

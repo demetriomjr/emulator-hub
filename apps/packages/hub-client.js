@@ -142,6 +142,14 @@ export function heartbeatPokemonHubSession(profileId, sessionId, sequence) {
   return postPokemonHubSession(profileId, `/${encodeURIComponent(sessionId)}/heartbeat`, { sequence })
 }
 
+export function reorderPokemonSaveItems(profileId, sessionId, request) {
+  return postJson(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/sessions/${encodeURIComponent(sessionId)}/items/reorder`, request)
+}
+
+export function transferPokemonSaveItems(profileId, sessionId, request) {
+  return postJson(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/sessions/${encodeURIComponent(sessionId)}/items/transfer`, request)
+}
+
 export async function loadPokemonHubSessionPane(profileId, sessionId, pane, source, signal = undefined) {
   if (!Number.isInteger(pane) || pane < 0 || pane > 2) throw new TypeError('Pokemon Hub pane is invalid')
   const response = await fetch(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/sessions/${encodeURIComponent(sessionId)}/panes/${pane}`, {

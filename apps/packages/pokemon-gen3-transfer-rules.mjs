@@ -20,17 +20,27 @@ export function getGenerationIIITitlePolicy(title) {
   return structuredClone(policy)
 }
 
+export function evaluateGenerationIIIItemTrade({ source, destination }) {
+  assertSave(source); assertSave(destination)
+  return evaluateDirectPair(source, destination).decision
+}
+
 function evaluateDirect({ source, destination, pokemon, sourcePokemonCount }) {
   assertSave(source); assertSave(destination)
   if (!retainsSourcePokemon(sourcePokemonCount, transferRules.directTrade.sameTitle.minimumPokemonAfterTransaction)) return rejected('TRANSFER_SOURCE_EMPTY_AFTER_MOVE')
-  if (source.title === destination.title) return allowed()
-
-  if (!source.ordinaryTradeReady || !destination.ordinaryTradeReady) return rejected('TRANSFER_TRADE_NOT_READY')
-  const pair = resolvePair(source.title, destination.title)
-  if (!pair) return rejected('TRANSFER_GAME_PAIR_UNSUPPORTED')
-  if (!requirementsMet(source, pair.sourceRequires) || !requirementsMet(destination, pair.destinationRequires)) return rejected(requirementReason(pair, source, destination))
+  const { decision, pair } = evaluateDirectPair(source, destination)
+  if (!decision.allowed || !pair) return decision
   if (!regionalGateAllows(source, pokemon, { directRegionalGate: pair.sourceRegionalGate }) || !regionalGateAllows(destination, pokemon, { directRegionalGate: pair.destinationRegionalGate })) return rejected('TRANSFER_NATIONAL_DEX_REQUIRED')
   return allowed()
+}
+
+function evaluateDirectPair(source, destination) {
+  if (source.title === destination.title) return { decision: allowed(), pair: null }
+  if (!source.ordinaryTradeReady || !destination.ordinaryTradeReady) return { decision: rejected('TRANSFER_TRADE_NOT_READY'), pair: null }
+  const pair = resolvePair(source.title, destination.title)
+  if (!pair) return { decision: rejected('TRANSFER_GAME_PAIR_UNSUPPORTED'), pair: null }
+  if (!requirementsMet(source, pair.sourceRequires) || !requirementsMet(destination, pair.destinationRequires)) return { decision: rejected(requirementReason(pair, source, destination)), pair: null }
+  return { decision: allowed(), pair }
 }
 
 function evaluateHubExport({ source, sourcePokemonCount }) {

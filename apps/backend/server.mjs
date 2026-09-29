@@ -32,6 +32,8 @@ import { projectPokemonHubDetailSource } from '../packages/pokemon-hub-card-hydr
 import { createPokemonHubSaveFlushService } from '../packages/pokemon-hub-save-flush.mjs'
 import { createPokemonSaveAdapterRegistry } from '../packages/pokemon-save-adapter-registry.mjs'
 import { pokemonGen3Adapter } from '../packages/pokemon-gen3-adapter.mjs'
+import { readPokemonItemInventory } from '../packages/pokemon-item-inventory.mjs'
+import { createPokemonItemReorderService } from '../packages/pokemon-item-reorder-service.mjs'
 import { getPokemonSaveLayout, getPokemonSaveMetadataForTitle } from '../packages/pokemon-save-layouts.mjs'
 import { pokemonHubLocationKey } from '../packages/pokemon-hub-location-key.mjs'
 import { createRomDiscovery } from '../packages/rom-discovery.mjs'
@@ -155,6 +157,15 @@ export function createHubServer(options = {}) {
     snapshotStore: config.snapshotStore,
     resolveSaveSource: request => resolvePokemonHubSaveSource(config, request),
   })
+  config.pokemonItemReorderService = options.pokemonItemReorderService ?? (typeof config.pokemonHubSessionService?.withLoadedSource === 'function'
+    && typeof config.pokemonHubSessionService?.withLoadedSources === 'function'
+    && typeof config.gameSaveLeases?.assertHub === 'function' && typeof config.saveStore?.put === 'function' && typeof config.saveStore?.putPair === 'function'
+    && typeof config.pokemonHubSnapshotCoordinator?.getSaveFlushPlan === 'function'
+    ? createPokemonItemReorderService({
+      sessions: config.pokemonHubSessionService, gameSaveLeases: config.gameSaveLeases, saveStore: config.saveStore,
+      saveFlush: config.pokemonHubSaveFlush, snapshotCoordinator: config.pokemonHubSnapshotCoordinator, snapshotStore: config.snapshotStore,
+      resolveSaveSource: request => resolvePokemonHubSaveSource(config, request),
+    }) : null)
   config.pokemonHubService = options.pokemonHubService ?? createPokemonHubService({
     profileStore: config.profileStore,
     saveStore: config.saveStore,
@@ -299,7 +310,7 @@ async function handleRequest(request, response, config) {
     || (request.method === 'PATCH' && isUserPreferencesRoute)
     || (playerLeaseRoute && ((request.method === 'POST' && ['acquire', 'heartbeat'].includes(playerLeaseRoute.kind)) || (request.method === 'DELETE' && playerLeaseRoute.kind === 'release') || (request.method === 'GET' && playerLeaseRoute.kind === 'launch')))
     || (request.method === 'POST' && ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute?.kind))
-    || (pokemonHubSessionRoute && ((request.method === 'POST' && ['open', 'attach', 'pane-load', 'heartbeat', 'snapshot', 'close-command'].includes(pokemonHubSessionRoute.kind)) || (request.method === 'DELETE' && ['detach', 'close'].includes(pokemonHubSessionRoute.kind))))
+    || (pokemonHubSessionRoute && ((request.method === 'POST' && ['open', 'attach', 'pane-load', 'heartbeat', 'snapshot', 'close-command', 'item-reorder', 'item-transfer'].includes(pokemonHubSessionRoute.kind)) || (request.method === 'DELETE' && ['detach', 'close'].includes(pokemonHubSessionRoute.kind))))
     || (request.method === 'PATCH' && gameProfileRoute)
     || (request.method === 'PATCH' && oddsStateRoute)
     || (request.method === 'DELETE' && gameProfileRoute)
@@ -908,7 +919,7 @@ function parsePokemonHubRoute(pathname) {
 }
 
 function parsePokemonHubSessionRoute(pathname) {
-  const match = /^\/api\/profiles\/([^/]+)\/pokemon-hub\/sessions(?:\/([^/]+)(?:\/(sources)(?:\/([^/]+))?|\/(panes)\/(\d+)|\/(heartbeat|snapshots|close))?)?$/.exec(pathname)
+  const match = /^\/api\/profiles\/([^/]+)\/pokemon-hub\/sessions(?:\/([^/]+)(?:\/(sources)(?:\/([^/]+))?|\/(panes)\/(\d+)|\/(heartbeat|snapshots|close|items\/reorder|items\/transfer))?)?$/.exec(pathname)
   if (!match) return null
   const [, profileId, sessionId, sources, sourceId, panes, pane, action] = match
   if (!sessionId) return { profileId, kind: 'open' }
@@ -917,6 +928,8 @@ function parsePokemonHubSessionRoute(pathname) {
   if (panes) return { profileId, sessionId, pane: Number(pane), kind: 'pane-load' }
   if (action === 'heartbeat') return { profileId, sessionId, kind: 'heartbeat' }
   if (action === 'snapshots') return { profileId, sessionId, kind: 'snapshot' }
+  if (action === 'items/reorder') return { profileId, sessionId, kind: 'item-reorder' }
+  if (action === 'items/transfer') return { profileId, sessionId, kind: 'item-transfer' }
   if (action === 'close') return { profileId, sessionId, kind: 'close-command' }
   return { profileId, sessionId, kind: 'close' }
 }
@@ -967,12 +980,25 @@ async function getSaveLayout(response, config, { gameId, profileId, workspacePro
       profileId: workspaceProfileId, sourceKey: `save:${profileId}:${gameId}`, snapshot,
       title: layout.pokemonSaveTitle, adapter, layout, save,
     })
+    let itemInventory
+    try {
+      itemInventory = {
+        status: 'ready',
+        saveRevision: save.revision,
+        ...readPokemonItemInventory(save.bytes, layout.pokemonSaveTitle),
+      }
+    } catch (error) {
+      const code = error.code ?? 'SAVE_ITEM_READ_FAILED'
+      console.warn('[Pokemon Hub] item inventory inspection failed', { gameId, profileId, code, message: error.message })
+      itemInventory = { status: 'unavailable', saveRevision: save.revision, code }
+    }
     json(response, 200, {
       layout: { id: layout.id, party: { slots: layout.party.slots }, boxes: layout.boxes },
       ...(inspection.transferCapabilities ? { transferCapabilities: inspection.transferCapabilities } : {}),
       party: inspection.party.map((slot, index) => withPokemonId(slot, { kind: 'game', area: 'party', slot: index })),
       boxes: inspection.boxes.map((box, boxIndex) => ({ ...box, slots: box.slots.map((slot, index) => withPokemonId(slot, { kind: 'game', area: 'box', box: boxIndex, slot: index })) })),
       pokemonDetailsById,
+      itemInventory,
     })
   } catch (error) {
     console.error('[Pokemon Hub] save layout inspection failed', { gameId, profileId, code: error.code ?? 'SAVE_LAYOUT_READ_FAILED', message: error.message })
@@ -1100,6 +1126,21 @@ async function handlePokemonHubSession(request, response, config, route, logger 
     if (route.kind === 'heartbeat') {
       const result = await config.pokemonHubSessionService.heartbeat({ profileId: route.profileId, sessionId: route.sessionId, sequence: body.sequence })
       json(response, 200, result)
+      return
+    }
+    if (route.kind === 'item-reorder') {
+      if (!config.pokemonItemReorderService) throw serverError('SAVE_ITEM_REORDER_UNAVAILABLE', 'Item reordering is unavailable.')
+      json(response, 200, await config.pokemonItemReorderService.reorder({
+        profileId: route.profileId, sessionId: route.sessionId, gameId: body.gameId, sourceProfileId: body.sourceProfileId,
+        area: body.area, fromSlot: body.fromSlot, toSlot: body.toSlot, expectedSaveRevision: body.expectedSaveRevision,
+      }))
+      return
+    }
+    if (route.kind === 'item-transfer') {
+      if (!config.pokemonItemReorderService) throw serverError('SAVE_ITEM_TRANSFER_UNAVAILABLE', 'Item transfer is unavailable.')
+      json(response, 200, await config.pokemonItemReorderService.transfer({ profileId: route.profileId, sessionId: route.sessionId,
+        source: body.source, destination: body.destination, area: body.area, fromSlot: body.fromSlot,
+        ...(body.toSlot === undefined ? {} : { toSlot: body.toSlot }), quantity: body.quantity }))
       return
     }
     const idempotencyKey = request.headers['idempotency-key']
@@ -1257,7 +1298,7 @@ function jsonPokemonHubProfileError(response, error) {
 }
 
 function jsonPokemonHubError(response, error) {
-  const status = error.code === 'PROFILE_NOT_FOUND' || error.code === 'SOURCE_NOT_ADOPTED' ? 404 : error.code === 'SESSION_INVALID' ? 410 : error.code === 'POKEMON_HUB_REVISION_CONFLICT' || error.code === 'SNAPSHOT_STALE' ? 412 : error.code === 'SOURCE_RESERVED' || error.code === 'LEASE_INVALID' || error.code === 'SESSION_SOURCE_INVALID' || error.code === 'POKEMON_HUB_GAME_ACTIVE' || error.code === 'POKEMON_HUB_DESTINATION_OCCUPIED' || error.code === 'POKEMON_HUB_SOURCE_EMPTY' || error.code === 'CLOSE_IDEMPOTENCY_CONFLICT' || error.code === 'CLOSE_IN_PROGRESS' || error.code === 'CLOSE_GENERATION_FENCED' || error.code === 'SESSION_TRANSITION_IN_PROGRESS' || error.code === 'SESSION_TRANSITION_FENCED' ? 409 : 400
+  const status = error.code === 'PROFILE_NOT_FOUND' || error.code === 'SOURCE_NOT_ADOPTED' ? 404 : error.code === 'SESSION_INVALID' ? 410 : error.code === 'POKEMON_HUB_REVISION_CONFLICT' || error.code === 'SNAPSHOT_STALE' || error.code === 'SAVE_ITEM_REVISION_CONFLICT' ? 412 : error.code === 'SOURCE_RESERVED' || error.code === 'LEASE_INVALID' || error.code === 'HUB_LEASE_INVALID' || error.code === 'SESSION_SOURCE_INVALID' || error.code === 'SAVE_IN_USE_BY_PLAYER' || error.code === 'SAVE_REVISION_CONFLICT' || error.code === 'SAVE_FENCE_CONFLICT' || error.code === 'POKEMON_HUB_GAME_ACTIVE' || error.code === 'POKEMON_HUB_DESTINATION_OCCUPIED' || error.code === 'POKEMON_HUB_SOURCE_EMPTY' || error.code === 'CLOSE_IDEMPOTENCY_CONFLICT' || error.code === 'CLOSE_IN_PROGRESS' || error.code === 'CLOSE_GENERATION_FENCED' || error.code === 'SESSION_TRANSITION_IN_PROGRESS' || error.code === 'SESSION_TRANSITION_FENCED' ? 409 : 400
   json(response, status, { error: error.message, ...(typeof error.code === 'string' ? { code: error.code } : {}) })
 }
 

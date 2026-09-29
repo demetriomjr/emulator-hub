@@ -86,6 +86,14 @@ test('projects a loaded save layout into renderable Party and Box slots', () => 
   })
 })
 
+test('preserves item inventory while projecting Pokémon placement changes', () => {
+  const itemInventory = { status: 'ready', saveRevision: 4, title: 'pokemon-emerald', areas: { pc: { capacity: 50, freeSlots: 50, slots: [], issues: [] } } }
+  const layout = { party: [{}], boxes: [], itemInventory }
+  const snapshot = createGameSessionSourceSnapshot({ profileId: 'may', gameId: 'pokemon-emerald', layout })
+
+  assert.deepEqual(snapshotToSaveLayout(snapshot, layout).itemInventory, itemInventory)
+})
+
 test('matches persisted placements when Redis changes location property order', () => {
   const layout = {
     party: [{ occupied: true, species: 25 }],

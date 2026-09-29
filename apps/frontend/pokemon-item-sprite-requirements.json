@@ -1,0 +1,3098 @@
+{
+  "schemaVersion": 1,
+  "spriteNormalizationVersion": 2,
+  "catalogRevision": "f839c1943434bb01bd24fae9f6b5f6f6c977fc101c42c846ae54f408e051811d",
+  "spriteRepositoryRevision": "fb3512817b9c3f46952b3f89e82645e77bdcaf49",
+  "entries": [
+    {
+      "itemKey": "master-ball",
+      "status": "resolved",
+      "file": "master-ball.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/master-ball.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/master-ball.png",
+      "sourceSha256": "e150d8518e3c8c37f6c9505f7ec2c3344c79db9231ab0fdc99271d7f80bdcbc7",
+      "sha256": "f00e49c04dacf2c6ebf3c0af96f0a4ee8c534380f7355674bef5151d01cd05a2"
+    },
+    {
+      "itemKey": "ultra-ball",
+      "status": "resolved",
+      "file": "ultra-ball.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/ultra-ball.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/ultra-ball.png",
+      "sourceSha256": "e323506981b94b7e640cf3de039ba9331468ed92056c83e63e2c7b0339263d44",
+      "sha256": "1ca294216cc9691ca22fa56c6712905c144c546be674d313949a518730b55ab7"
+    },
+    {
+      "itemKey": "great-ball",
+      "status": "resolved",
+      "file": "great-ball.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/great-ball.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/great-ball.png",
+      "sourceSha256": "05cb63e9d4ddb22534f9b05a693e230cbb5983552e30235d8c8d00189c0c7d45",
+      "sha256": "41d2a496be69e20c7ab83c6bbaeecd0234c86cec9b2977bac3fef48347dd98de"
+    },
+    {
+      "itemKey": "poke-ball",
+      "status": "resolved",
+      "file": "poke-ball.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/poke-ball.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/poke-ball.png",
+      "sourceSha256": "60adb25b4b0758633808cfc8c43816b3569ad2c515f6156c6118bd52ec86a3a8",
+      "sha256": "0cb3cf7db7aa3e52d6807bf5607df5fb8d22fa8b8d9023c57468e7e49ba347cb"
+    },
+    {
+      "itemKey": "safari-ball",
+      "status": "resolved",
+      "file": "safari-ball.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/safari-ball.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/safari-ball.png",
+      "sourceSha256": "67adf388232c5e660f3035acc2081b4d753e98e71d59a181d66179f87b1d0cc7",
+      "sha256": "032adff086e5e0548d7389973aa1a1e0133e62365b1401be76c57a71d17e1006"
+    },
+    {
+      "itemKey": "net-ball",
+      "status": "resolved",
+      "file": "net-ball.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/net-ball.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/net-ball.png",
+      "sourceSha256": "595499050a53efc9e6fafc7a5a05782c9664808ba068c935d7e6e47163e39c0c",
+      "sha256": "ee0766208892025ef13e7156ba5da59966604635da9c584713536ad3f2c44b1f"
+    },
+    {
+      "itemKey": "dive-ball",
+      "status": "resolved",
+      "file": "dive-ball.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/dive-ball.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/dive-ball.png",
+      "sourceSha256": "3d38367afe14c12a32c2f4ea40a9d422aa68b53d3ee17762c0ac9db32b67958a",
+      "sha256": "35fe9ae06d6fdf4c55b1d37848618eb2ee49414266ce1b423b6bcbf83d72a64b"
+    },
+    {
+      "itemKey": "nest-ball",
+      "status": "resolved",
+      "file": "nest-ball.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/nest-ball.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/nest-ball.png",
+      "sourceSha256": "652d5f1deb5c94f108c1255b17a1184b3bc4ad0a6f1ff8d00cc255e23e08305d",
+      "sha256": "3b6a8c1b1be84edd40c83675661a1411fb68f3de9dc0effdeef63e83cab5dbf7"
+    },
+    {
+      "itemKey": "repeat-ball",
+      "status": "resolved",
+      "file": "repeat-ball.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/repeat-ball.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/repeat-ball.png",
+      "sourceSha256": "65e55560f00462d9d373b25cf81709427b148b67f4da849cbcca62b4b29fe7c1",
+      "sha256": "e95d71baa7fd8ec791beac0614f5dc97692f7b44845761a76729ef3a7472eac1"
+    },
+    {
+      "itemKey": "timer-ball",
+      "status": "resolved",
+      "file": "timer-ball.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/timer-ball.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/timer-ball.png",
+      "sourceSha256": "2d8d039189a5ef2b4ef775033afc3e85192b6469965238e975ebe0f6657a55e1",
+      "sha256": "5bcd52659ad16386a7fa13e0beb825638152c072507d5043cb2348da2edacb96"
+    },
+    {
+      "itemKey": "luxury-ball",
+      "status": "resolved",
+      "file": "luxury-ball.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/luxury-ball.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/luxury-ball.png",
+      "sourceSha256": "89affdbedd34c126c8c040ace51d7c89c821fa3d00e60009516f414e9b5c8f8b",
+      "sha256": "fe818e3338cea8aeef3eb09d182ebca82e0b3ee5874341471072afe77f423860"
+    },
+    {
+      "itemKey": "premier-ball",
+      "status": "resolved",
+      "file": "premier-ball.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/premier-ball.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/premier-ball.png",
+      "sourceSha256": "38eba92ae91f9eba41ffd7d2d6b1abd703d3c696e9225a217856a96cc9663bc3",
+      "sha256": "a569cf87aab2a4ee4123896911c83483d4d08379d389230788f8e947d5c0e6f5"
+    },
+    {
+      "itemKey": "potion",
+      "status": "resolved",
+      "file": "potion.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/potion.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/potion.png",
+      "sourceSha256": "3109a4b3d4dc3aaa272121d5d9e2454e5890cfa7c51796441668bf473577195d",
+      "sha256": "8ba2d1b584e482b66d8e731f7ebb3894c61ef17026d2504357ab635e6d85f6b3"
+    },
+    {
+      "itemKey": "antidote",
+      "status": "resolved",
+      "file": "antidote.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/antidote.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/antidote.png",
+      "sourceSha256": "50cecfb698c5c5b4ba3501e27ad9d8746007c3c10c0a477d6bb5cc134214d3b9",
+      "sha256": "56e490672d5df3988adcd428ba7a8d98f264fb61426cba5119f6e8ea854befaa"
+    },
+    {
+      "itemKey": "burn-heal",
+      "status": "resolved",
+      "file": "burn-heal.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/burn-heal.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/burn-heal.png",
+      "sourceSha256": "7439b3828c2d32e168901fc0d51d57fd19c413e5a7c8bd07f12ba3f532c18d74",
+      "sha256": "70e383f34d592a5db69b2da3318718a8e74d0e6bfd7b9f0245a15a9e8712c9e0"
+    },
+    {
+      "itemKey": "ice-heal",
+      "status": "resolved",
+      "file": "ice-heal.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/ice-heal.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/ice-heal.png",
+      "sourceSha256": "65096896acfc6cc221b70ca992c6609095a33398f1a579bee08e1512d01ceebc",
+      "sha256": "12727820672ace63fef819c28f546eed7df17de35732041ad10792a4744b6abd"
+    },
+    {
+      "itemKey": "awakening",
+      "status": "resolved",
+      "file": "awakening.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/awakening.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/awakening.png",
+      "sourceSha256": "5cba68f835812289ca41f570c3f0c56e422a36ebe9f49b46db8ecb639890e1d9",
+      "sha256": "344bd9099024a606883b27277290ba03b3681fd41a1c417db2a3394ebc2c182d"
+    },
+    {
+      "itemKey": "paralyze-heal",
+      "status": "resolved",
+      "file": "paralyze-heal.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/paralyze-heal.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/paralyze-heal.png",
+      "sourceSha256": "827fc8897d12dbd28e0d513c596a739c9f68746b6aafa13b82685eebac0765e6",
+      "sha256": "9a467d85770b28f1362971ca62d6273a32c1b3c9e1843dcf01b626802f4ff6ae"
+    },
+    {
+      "itemKey": "full-restore",
+      "status": "resolved",
+      "file": "full-restore.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/full-restore.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/full-restore.png",
+      "sourceSha256": "6c539a0a80b1739d5c7cf171f8811fcd3b963aa1b7133c1caad0680fcd9d2fda",
+      "sha256": "fce692889713128d68d805dc8920c08119cbbe98136e15c23c5fef6fac46a28e"
+    },
+    {
+      "itemKey": "max-potion",
+      "status": "resolved",
+      "file": "max-potion.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/max-potion.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/max-potion.png",
+      "sourceSha256": "49893d7dbee95cc340c163cd665ae49af8208e1f079cab17d0fff5bf17fe5cc5",
+      "sha256": "67e9eab09fb24a0c11c165d325779676cb025a1487117f7a81ddcf2f690932c1"
+    },
+    {
+      "itemKey": "hyper-potion",
+      "status": "resolved",
+      "file": "hyper-potion.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/hyper-potion.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/hyper-potion.png",
+      "sourceSha256": "dbc4d13de565a1f4ede1fcfe9d80fe965bef6399012869ad419d7796adb4b06e",
+      "sha256": "4b5e30c06b560e3912b8f48bf890361012fcc2bb363fffd0704143af3c38932f"
+    },
+    {
+      "itemKey": "super-potion",
+      "status": "resolved",
+      "file": "super-potion.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/super-potion.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/super-potion.png",
+      "sourceSha256": "ade63c3d9c3cf53db9c2d184ba9e099184b9f440f60de3383bdf117e0107d292",
+      "sha256": "ec7df00f534cd4dded5bc3361815b44b0ce6fd2c5fcd13dda98cb4ba795ef525"
+    },
+    {
+      "itemKey": "full-heal",
+      "status": "resolved",
+      "file": "full-heal.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/full-heal.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/full-heal.png",
+      "sourceSha256": "136ab089f3c751afecf942a58118c33ceece67ec673a9e9769c55869a3c4861d",
+      "sha256": "c5e71cb978018676eec177e2f5d1b3dba807c13dd504a86f33dcc43cb5c5a3c5"
+    },
+    {
+      "itemKey": "revive",
+      "status": "resolved",
+      "file": "revive.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/revive.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/revive.png",
+      "sourceSha256": "29d790e017074cf706744bd04a583632d3a277fce7ee7a57089ec8b8c79dbb86",
+      "sha256": "6dfd49430a7817fd2bd3377fb674fab5fdaa2521eeac5dd530b9bfe7832a3a20"
+    },
+    {
+      "itemKey": "max-revive",
+      "status": "resolved",
+      "file": "max-revive.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/max-revive.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/max-revive.png",
+      "sourceSha256": "e1ec86262d9309d4fa46cedef2bc9a2606cc8eae7706230545253331439d197e",
+      "sha256": "0ca22a321662c1a1a8daa60d0328c5537527b9de9d075ec88daec2092c45d0ff"
+    },
+    {
+      "itemKey": "fresh-water",
+      "status": "resolved",
+      "file": "fresh-water.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/fresh-water.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/fresh-water.png",
+      "sourceSha256": "ea188bf670f97853e96f84d7ebed3bad31890f9a37d9349dc40ecbaef4880408",
+      "sha256": "509ff69ac7b96d6ccc723a8865f248a1ab39e99fff36d99cb94b31be94109111"
+    },
+    {
+      "itemKey": "soda-pop",
+      "status": "resolved",
+      "file": "soda-pop.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/soda-pop.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/soda-pop.png",
+      "sourceSha256": "5dfcd12ded3e9892021523162562b51bac1286dcc083703d73fdc43325c812dd",
+      "sha256": "d45593f875a2a0123ab6070c6ef2246ea54051c8efcbbc8f759ec5f09851150b"
+    },
+    {
+      "itemKey": "lemonade",
+      "status": "resolved",
+      "file": "lemonade.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/lemonade.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/lemonade.png",
+      "sourceSha256": "a55e41cb32c67d1338b83b7da054ec0daa23494fc041e29577d87599cc604d35",
+      "sha256": "3f372f210211b5d7e0383df1849ec16e2720356992f3c6bb14ffbfd4847266c4"
+    },
+    {
+      "itemKey": "moomoo-milk",
+      "status": "resolved",
+      "file": "moomoo-milk.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/moomoo-milk.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/moomoo-milk.png",
+      "sourceSha256": "d3fd00b54412a8a7437685221e7203444f5f81c9e44b470d7c97e3ba588754b5",
+      "sha256": "b57d666eb314f4d89b4f5dbfe618afda586a631ee86551a8445901fda872b4f1"
+    },
+    {
+      "itemKey": "energy-powder",
+      "status": "resolved",
+      "file": "energy-powder.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/energy-powder.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/energy-powder.png",
+      "sourceSha256": "5fb1a9622d9735204f29928b00519a5f0b0f28448619cb7eb631bb658cd485eb",
+      "sha256": "c88a4c4aecb35ec1f586c44bdecfc66de37b687c7de0429b667f7e97d66466cc"
+    },
+    {
+      "itemKey": "energy-root",
+      "status": "resolved",
+      "file": "energy-root.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/energy-root.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/energy-root.png",
+      "sourceSha256": "51ec955cc1aec90334d004b7cf5e1b714308dc867032d11847eb832d9d17e3e1",
+      "sha256": "5a966a5f50271918a7c119871901c26666e30814e133a9a88791b2c75c0d45d0"
+    },
+    {
+      "itemKey": "heal-powder",
+      "status": "resolved",
+      "file": "heal-powder.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/heal-powder.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/heal-powder.png",
+      "sourceSha256": "bd62b9cebd1460b359e7b1655ca85110bcac808560d962a25e4fd5e5c8cb6367",
+      "sha256": "f4805346c0a9f8b3402f429ad49d5b9cd3a693bef192b2f7c6a3130dccee3fc9"
+    },
+    {
+      "itemKey": "revival-herb",
+      "status": "resolved",
+      "file": "revival-herb.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/revival-herb.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/revival-herb.png",
+      "sourceSha256": "9ea3cc9fc8de3aee55496431d7b04710af23882d479e1b287ecce2f61bdef135",
+      "sha256": "83e45d4c149705032af9839f982e3648f09f92cb6a748a26ab46d1ad3bdcc2c7"
+    },
+    {
+      "itemKey": "ether",
+      "status": "resolved",
+      "file": "ether.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/ether.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/ether.png",
+      "sourceSha256": "b65a18d30148b9180d1daf989c89e30245c9c48ecc2d07cb476018e708ced1a8",
+      "sha256": "e26de793577495a14178ebcfa4db75003b8516909d28baaf087b1161a8ceca82"
+    },
+    {
+      "itemKey": "max-ether",
+      "status": "resolved",
+      "file": "max-ether.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/max-ether.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/max-ether.png",
+      "sourceSha256": "b2b2e39b249279b3900bdffb078ef211de5de5c6bce467968c451b6f7bedfbcb",
+      "sha256": "262287233b807b6169324a389951654de1a4f52604fcc6f1d53bb24e8e734232"
+    },
+    {
+      "itemKey": "elixir",
+      "status": "resolved",
+      "file": "elixir.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/elixir.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/elixir.png",
+      "sourceSha256": "a1a0614eb3303c5528eb29eb01658452a76bae41d56b12e11fe0d79ba3ff4d82",
+      "sha256": "fc28a45a177ef99d92da6a8ba6e249d6f1d011f279f2b9edeb211bb412d714ac"
+    },
+    {
+      "itemKey": "max-elixir",
+      "status": "resolved",
+      "file": "max-elixir.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/max-elixir.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/max-elixir.png",
+      "sourceSha256": "36eb0a4cf8ce033b397f9ebfdcfa39090129e57f2c04514046ad418f3bf307ad",
+      "sha256": "bd16e01d0cfe3b4d84907f8b0722b6ec35657383c2746bf5ddc93dbdfa4a5256"
+    },
+    {
+      "itemKey": "lava-cookie",
+      "status": "resolved",
+      "file": "lava-cookie.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/lava-cookie.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/lava-cookie.png",
+      "sourceSha256": "663979201162ef077f59ce702dc2d15081e4dec97aecd47de7795e7175da3ce9",
+      "sha256": "aa020b068f0583f9aefbbc09d7320bebe66816051dc8803820b7485117359234"
+    },
+    {
+      "itemKey": "blue-flute",
+      "status": "resolved",
+      "file": "blue-flute.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/blue-flute.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/blue-flute.png",
+      "sourceSha256": "657a57dbec388912c97eb74f0b4e66dd2ea71569794d77655d9da94e65328b68",
+      "sha256": "786de838dce37d80d57df041c297c51b54fc163d04d363f6cecbfacc2c82b6be"
+    },
+    {
+      "itemKey": "yellow-flute",
+      "status": "resolved",
+      "file": "yellow-flute.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/yellow-flute.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/yellow-flute.png",
+      "sourceSha256": "1677d835676c2c2b1e6ae477281d5c029369716192d868a356af4fb301098102",
+      "sha256": "cc7c5b514a425e73fdc284dd324889a39ecd745905fde081af89920576ea275c"
+    },
+    {
+      "itemKey": "red-flute",
+      "status": "resolved",
+      "file": "red-flute.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/red-flute.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/red-flute.png",
+      "sourceSha256": "f3bbc4b6a9e3b3950eac7781b3d434761559c80fba6281756eea7225d1831d49",
+      "sha256": "a65d85c8c6e72e0a5044fcd066272f3c6bd2b67206daf23fad5a0dab8a9c0060"
+    },
+    {
+      "itemKey": "black-flute",
+      "status": "resolved",
+      "file": "black-flute.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/black-flute.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/black-flute.png",
+      "sourceSha256": "8f8a62cc26bf1a1992ec2c4593035723d5336ea419eb89df11ec2564290fe73e",
+      "sha256": "8304a23d1d8f16c2affc10e0938f4fe07b177ed2892b2c3aa9aeabe08acb7c32"
+    },
+    {
+      "itemKey": "white-flute",
+      "status": "resolved",
+      "file": "white-flute.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/white-flute.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/white-flute.png",
+      "sourceSha256": "a7cc080a943df8f256d2b2309e5aa5cf5f5aec985df203c77b29e988df9638b6",
+      "sha256": "56d1f8a9d8e913d0c32d27140d6665a094a50e3c2abca230602df953ef875ae1"
+    },
+    {
+      "itemKey": "berry-juice",
+      "status": "resolved",
+      "file": "berry-juice.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/berry-juice.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/berry-juice.png",
+      "sourceSha256": "f754e611de8addf77b162c26c3a861891618ad08e0e23443373ae750cbf30ed1",
+      "sha256": "8fe911bdcbc914453c2e8fe078848cbb96d7cc35aa2e51886d426a51f6d4e476"
+    },
+    {
+      "itemKey": "sacred-ash",
+      "status": "resolved",
+      "file": "sacred-ash.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/sacred-ash.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/sacred-ash.png",
+      "sourceSha256": "3b71d06ac76695efee83a5d0b51bc85656378df85640aaf4cad04846b1a15059",
+      "sha256": "74308ddc5ddf265fa00fb0043745ed5221327b72e2cb872d58c87129ed311baf"
+    },
+    {
+      "itemKey": "shoal-salt",
+      "status": "resolved",
+      "file": "shoal-salt.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/shoal-salt.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/shoal-salt.png",
+      "sourceSha256": "ca551f1bc40fc9557aae6946831efb82f9014470396e3f0ba16dfbfacef68cec",
+      "sha256": "5f9bda0e187f912b3bc18f62ad2358b95bf91051bf89a1fe6e0a65541c8f8ae5"
+    },
+    {
+      "itemKey": "shoal-shell",
+      "status": "resolved",
+      "file": "shoal-shell.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/shoal-shell.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/shoal-shell.png",
+      "sourceSha256": "4c26457292d241abe8d873c505cb63206697bd44ea5af3ca61d5288350ec2109",
+      "sha256": "bcaaead914f079468eccf0b79483c540d99707b3af6e45df2b8028fd4a462842"
+    },
+    {
+      "itemKey": "red-shard",
+      "status": "resolved",
+      "file": "red-shard.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/red-shard.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/red-shard.png",
+      "sourceSha256": "5820122b5aff345d1a1c59b3187e6d3b34bbc7fbcdf5cb56de1a2ab85e063d12",
+      "sha256": "863c0c29cc41dfac01ce2223d869530fe1311df34c5de58c8473fba546d72350"
+    },
+    {
+      "itemKey": "blue-shard",
+      "status": "resolved",
+      "file": "blue-shard.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/blue-shard.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/blue-shard.png",
+      "sourceSha256": "22f7d60818a7198dd80355e70b0a7de632a62030f440a2318d9871602172b594",
+      "sha256": "c4e12127771903920a1eb60bdc80c768aa8a388f90f9af944004f45efd8803c1"
+    },
+    {
+      "itemKey": "yellow-shard",
+      "status": "resolved",
+      "file": "yellow-shard.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/yellow-shard.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/yellow-shard.png",
+      "sourceSha256": "5282faffde8e64f98eedebe3a0911ac393116e9d3c480da8044a692430b7779b",
+      "sha256": "885605b3421b0413603859bc002d523b9e35c379210b0778d53b29b1eb1e7fab"
+    },
+    {
+      "itemKey": "green-shard",
+      "status": "resolved",
+      "file": "green-shard.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/green-shard.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/green-shard.png",
+      "sourceSha256": "165dab9f777ed653e8d75b7566ecbc733e4049298c8fe386590bbff85c830151",
+      "sha256": "720e07bffb6f6f112914c787baa8be43a4695982c1d4d9af742df52663953d01"
+    },
+    {
+      "itemKey": "hp-up",
+      "status": "resolved",
+      "file": "hp-up.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/hp-up.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/hp-up.png",
+      "sourceSha256": "7a603b4513a139c5a166024c99ecc06f0212b07312ccc5599716ffacec7e79d1",
+      "sha256": "9120adca7a1332eff84a5ec80fd235f23432548ca6f04808fc686a3665d330ad"
+    },
+    {
+      "itemKey": "protein",
+      "status": "resolved",
+      "file": "protein.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/protein.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/protein.png",
+      "sourceSha256": "1c04ade593d0de2f085709194e5df6ada87e1a7bf7e87d8f19f0fad0758ff3d6",
+      "sha256": "dc4efe13c37ddd0bf1ac65a72c8b43699feadd4faa15c387da2f6282de5787d9"
+    },
+    {
+      "itemKey": "iron",
+      "status": "resolved",
+      "file": "iron.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/iron.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/iron.png",
+      "sourceSha256": "fbb3b9802b9b830219ccd8042bf47dbfe647bbc1c85455a569c893ca85f861b1",
+      "sha256": "1e59cedc6bb509a3cb79be898def9aea12e8d438e7307cd081f4d750d2f43494"
+    },
+    {
+      "itemKey": "carbos",
+      "status": "resolved",
+      "file": "carbos.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/carbos.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/carbos.png",
+      "sourceSha256": "888b03fc812960a4a5107a42ef3492a5965544c7455e4e5bd173cd81f1bb51c1",
+      "sha256": "9fcf516b63da8317e226e0107aa0844a3288a138d30daa6d0ee98150e2c5889e"
+    },
+    {
+      "itemKey": "calcium",
+      "status": "resolved",
+      "file": "calcium.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/calcium.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/calcium.png",
+      "sourceSha256": "fb96242aae3f5ed99b317909174b3b775786b9b45e466862643cf0c0fe9a77c1",
+      "sha256": "37fe03e97831fbd13df340fb280e86a6233650d3b58f2a5cc3873e7e1160deab"
+    },
+    {
+      "itemKey": "rare-candy",
+      "status": "resolved",
+      "file": "rare-candy.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/rare-candy.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/rare-candy.png",
+      "sourceSha256": "a452b8a3583b6305e4502c560c89f7e5a55d091e9944543be9a4cef1141ec988",
+      "sha256": "1599feb677f794d26d2d943722b573c6b40e6386c2558096933b684ae575263b"
+    },
+    {
+      "itemKey": "pp-up",
+      "status": "resolved",
+      "file": "pp-up.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/pp-up.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/pp-up.png",
+      "sourceSha256": "8b5528f8f7f0ac392f885e3e866f247f112cd7c72d503469cc17c18d3f55ac45",
+      "sha256": "606c2e168df53cc94ba792c011da59df1a0aa947875650b950a1d5a49c0392cb"
+    },
+    {
+      "itemKey": "zinc",
+      "status": "resolved",
+      "file": "zinc.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/zinc.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/zinc.png",
+      "sourceSha256": "c1e4e3f31b5d504a1d8f03b3210af41d3274a4c7fe38cc3089b5bba8e6321248",
+      "sha256": "1790719abadb698584f71317d2b6b727d9b590960dd20390d80a47f0296dbd21"
+    },
+    {
+      "itemKey": "pp-max",
+      "status": "resolved",
+      "file": "pp-max.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/pp-max.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/pp-max.png",
+      "sourceSha256": "4c1c2e80b909684158a7b12e7c6884ef64d530c1bec7d7c539d0194b33d35791",
+      "sha256": "fccc0c1abca04a97c530d104682dc0bac5882abed6324f401351e716f47d32a9"
+    },
+    {
+      "itemKey": "guard-spec",
+      "status": "resolved",
+      "file": "guard-spec.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/guard-spec.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/guard-spec.png",
+      "sourceSha256": "cc1f87df51750eded4ffef3dde6df4157623110d7a777d17e6e0ce7d6fc809eb",
+      "sha256": "7b42fc4ad5565946980bf98a08587aa010ff5ef3fdb5c150ff1ac08048f743eb"
+    },
+    {
+      "itemKey": "dire-hit",
+      "status": "resolved",
+      "file": "dire-hit.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/dire-hit.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/dire-hit.png",
+      "sourceSha256": "063d943d40b3fc209903329638b934c2b081a25752371641799dec27234f7179",
+      "sha256": "1eb2fa3c17c3c70d29d6f86589a504d2af7480111db2b142c34fbacae460a9c0"
+    },
+    {
+      "itemKey": "x-attack",
+      "status": "resolved",
+      "file": "x-attack.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/x-attack.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/x-attack.png",
+      "sourceSha256": "0c3853f13ff3c7e59641ccc406037399476129dbe338ef83fae0e4e2933adaeb",
+      "sha256": "0c5cbec1543b9449fd31a95ada2999786a45e13e6474ab0dffcee44ea94ad358"
+    },
+    {
+      "itemKey": "x-defend",
+      "status": "resolved",
+      "file": "x-defend.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/x-defense.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/x-defense.png",
+      "sourceSha256": "073dba502ddc2f5032c8ed63bf5b918836c07665c3266ce4c4214992127bbd68",
+      "sha256": "92c484bba10ca0c9bd8326be010b296433c5ad9b90d0e2355a0916b71b6feeb5"
+    },
+    {
+      "itemKey": "x-speed",
+      "status": "resolved",
+      "file": "x-speed.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/x-speed.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/x-speed.png",
+      "sourceSha256": "f83e58dc72f2c213a91b29c165d1852a8f7e61bd67a20565a9a0933d8c65e400",
+      "sha256": "6bba9b358c8aceee4e2bbb9f1151e6ec4f2346cdcda6ca0c2575b89a11be07c2"
+    },
+    {
+      "itemKey": "x-accuracy",
+      "status": "resolved",
+      "file": "x-accuracy.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/x-accuracy.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/x-accuracy.png",
+      "sourceSha256": "495c706aaf292bb95694b61adf23a4db9dfa6ed058e1ae065771d4c9ded9a347",
+      "sha256": "abc3ae1fd6f992a2f663b7f651963c3095fe1c502e2dfeb148d45b0b6d1edc2f"
+    },
+    {
+      "itemKey": "x-special",
+      "status": "resolved",
+      "file": "x-special.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/x-sp-atk.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/x-sp-atk.png",
+      "sourceSha256": "0c04997e1ea6309a8fc2a71a4ebbf02624a68ba16cf7149fe56e0433f3629846",
+      "sha256": "a4cc00970df87072d463766965280ab5241e57dc72decadf0be71a1496483bda"
+    },
+    {
+      "itemKey": "poke-doll",
+      "status": "resolved",
+      "file": "poke-doll.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/poke-doll.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/poke-doll.png",
+      "sourceSha256": "ce0c269e0ca045e548ea1fc3eb8c017bed62b554fe379a6dcced6cce33743e83",
+      "sha256": "37d64d3e84e6d8ea532d3f117d1dc68998f15643242ab645d67974170c80443f"
+    },
+    {
+      "itemKey": "fluffy-tail",
+      "status": "resolved",
+      "file": "fluffy-tail.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/fluffy-tail.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/fluffy-tail.png",
+      "sourceSha256": "ab0f5c7b2ba1cdb5f857d66aad01f7505829e1a2dde1976a978a859f94255d7a",
+      "sha256": "2b57982dcb87ecf6d55c9a62062111a16a341dc6f605dd5ee85911a360e9b3c2"
+    },
+    {
+      "itemKey": "super-repel",
+      "status": "resolved",
+      "file": "super-repel.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/super-repel.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/super-repel.png",
+      "sourceSha256": "69eb06b435b43cad8d56b5677795d3672b3783c5d19fb306c6f354e50d586340",
+      "sha256": "b220b921934561e73121a8428a559e06ce42f083862f6a830e6a74ad1d9f188c"
+    },
+    {
+      "itemKey": "max-repel",
+      "status": "resolved",
+      "file": "max-repel.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/max-repel.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/max-repel.png",
+      "sourceSha256": "25ec0644993eed8cfdac303d36e35f89ffb80c5ee64bfee949188be44705fc7f",
+      "sha256": "6e30722bca7db23478007f3cb3075752d6080ce51911e379d49cc15b5d5d69e6"
+    },
+    {
+      "itemKey": "escape-rope",
+      "status": "resolved",
+      "file": "escape-rope.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/escape-rope.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/escape-rope.png",
+      "sourceSha256": "faa4b35f1c42a65fd20d1ecce2ca3d6d07014b2300b3d8573b89af32e950f458",
+      "sha256": "c5336c51075dc9ccc0cfb1cb3a51e9ade6e0019246c79255fd2680d1393b0197"
+    },
+    {
+      "itemKey": "repel",
+      "status": "resolved",
+      "file": "repel.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/repel.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/repel.png",
+      "sourceSha256": "e011fd563e35dd6818cb85249f111163ef8fe71ea3c1358b922c562eb161b76c",
+      "sha256": "68995109df95224415d09d5930a79f8ddef18d0d135bc7c1f34ae804792b3cb7"
+    },
+    {
+      "itemKey": "sun-stone",
+      "status": "resolved",
+      "file": "sun-stone.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/sun-stone.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/sun-stone.png",
+      "sourceSha256": "a0957e4bc054519046c9712a2a66648b6f157df4d9f1be7a7379b6e4480052e6",
+      "sha256": "ab249987dc19b8bab4dbc867088ff172613e8339d157e5f0c99d86aa5cad085d"
+    },
+    {
+      "itemKey": "moon-stone",
+      "status": "resolved",
+      "file": "moon-stone.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/moon-stone.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/moon-stone.png",
+      "sourceSha256": "5f0b8609123e2ec7b260d128563636bba339e8a321dec319843912198008e040",
+      "sha256": "8905ce70404261400c783077440a753ac10a44970077bf418c5ff8669539ccdb"
+    },
+    {
+      "itemKey": "fire-stone",
+      "status": "resolved",
+      "file": "fire-stone.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/fire-stone.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/fire-stone.png",
+      "sourceSha256": "31214b66b784796ea2a1075135d8f1cddbd6fdd81d76f125a60faef7ce813e1e",
+      "sha256": "2d1bfc1fac7b81f61e9f5786d8c902ab81da2dbdafdb2d5c791355d83719cf67"
+    },
+    {
+      "itemKey": "thunder-stone",
+      "status": "resolved",
+      "file": "thunder-stone.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/thunder-stone.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/thunder-stone.png",
+      "sourceSha256": "23ff3c0c7d67dc1ecb2f9865d2c8444fb5f2d1f5751e8e0b61a199e2ef794e72",
+      "sha256": "b5826c5bec5e923ddcae1c49920292f290bab1b90cc2a881b4d9bb2667d55d67"
+    },
+    {
+      "itemKey": "water-stone",
+      "status": "resolved",
+      "file": "water-stone.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/water-stone.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/water-stone.png",
+      "sourceSha256": "e54aa6bcac6930b4546cfb5e80dd007fa2cc14ae7884eeab20d9162b503e92b9",
+      "sha256": "c153a0e9b9691491fb1ae67f07fa9c4beea906d44775a2ec0e202e2c77805d02"
+    },
+    {
+      "itemKey": "leaf-stone",
+      "status": "resolved",
+      "file": "leaf-stone.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/leaf-stone.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/leaf-stone.png",
+      "sourceSha256": "f166a87ef3acfef3b0b2aa90ff502d9d894169984389867afa87c5fc962fa0bd",
+      "sha256": "6bc3a476ef489909e15f95f4e48441e4da4864328e777bfbafd6bc3e79758007"
+    },
+    {
+      "itemKey": "tiny-mushroom",
+      "status": "resolved",
+      "file": "tiny-mushroom.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/tiny-mushroom.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/tiny-mushroom.png",
+      "sourceSha256": "29816dd226ea0e4b536152116aa963303dd14a9f3939eb1cd062887873e7f5bc",
+      "sha256": "05ad58d4560d1b4179c5476325a79f7bb5ce1fb8c714b98375d324f42ae4a716"
+    },
+    {
+      "itemKey": "big-mushroom",
+      "status": "resolved",
+      "file": "big-mushroom.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/big-mushroom.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/big-mushroom.png",
+      "sourceSha256": "d13cff5d41bebe899af855df91eb4e38d22f240b505f7c438f5849c97691e627",
+      "sha256": "59ed9524b60e34a276e45db28e7b8171b309b2265d4d056da93ae6bf1756cd45"
+    },
+    {
+      "itemKey": "pearl",
+      "status": "resolved",
+      "file": "pearl.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/pearl.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/pearl.png",
+      "sourceSha256": "6d583835ab073af06202ecee670580730f26159e0c95da1b0a901b988d7e4d33",
+      "sha256": "230be25dd91475bf71e99a02a52698063a48f889ea33b9be826e7341a5ab0852"
+    },
+    {
+      "itemKey": "big-pearl",
+      "status": "resolved",
+      "file": "big-pearl.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/big-pearl.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/big-pearl.png",
+      "sourceSha256": "d85644d413994a8f9e2e3ff6047fcfddd277a24f75771cea5602850ff4b0ba21",
+      "sha256": "602478fe325a60d72ed47448c1d0239ac476563fa10d35e2506eedb66e152126"
+    },
+    {
+      "itemKey": "stardust",
+      "status": "resolved",
+      "file": "stardust.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/stardust.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/stardust.png",
+      "sourceSha256": "6361860f2f087be7418a272acfa7d8245ae0baa9036c7957f3333a4a838f49cb",
+      "sha256": "54dbda6ffc1d8de41100928764e0100526c4aedd593293eef97252a9e534a155"
+    },
+    {
+      "itemKey": "star-piece",
+      "status": "resolved",
+      "file": "star-piece.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/star-piece.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/star-piece.png",
+      "sourceSha256": "9ebe81bcec990396fa3c2c84b90bf3dec9a71cc62463f1520d4082913322a3ee",
+      "sha256": "912d9447184dcdbdb8dfc2849ee65a49fdeb8462c364fb0fd7e641874375c001"
+    },
+    {
+      "itemKey": "nugget",
+      "status": "resolved",
+      "file": "nugget.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/nugget.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/nugget.png",
+      "sourceSha256": "2dd99f62c59245883c5b50d1b14afe8c8e2ae8139c336a09d3e24f555c063a1e",
+      "sha256": "0aebd35a7d8434dd1721a3ce361d5d034145124e7ca3725960dd98dddd7f243f"
+    },
+    {
+      "itemKey": "heart-scale",
+      "status": "resolved",
+      "file": "heart-scale.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/heart-scale.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/heart-scale.png",
+      "sourceSha256": "fa1a498f11b86c493b5845970c6e36392578b7a14917793cde334be0faac1cad",
+      "sha256": "556a95eb1604338518ce431e071abccb8e444a6972ea4e04def9d335866c3810"
+    },
+    {
+      "itemKey": "orange-mail",
+      "status": "resolved",
+      "file": "orange-mail.png",
+      "family": "default",
+      "sourcePath": "orange-mail.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/orange-mail.png",
+      "sourceSha256": "9444dc67480f59195b9d43fa1914874900920275db230734e4f66065cdcd8425",
+      "sha256": "27612370ecec3c51de2d965fc849efd8a53d9732ff7f3a4305d4296da0edd2b6"
+    },
+    {
+      "itemKey": "harbor-mail",
+      "status": "resolved",
+      "file": "harbor-mail.png",
+      "family": "default",
+      "sourcePath": "harbor-mail.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/harbor-mail.png",
+      "sourceSha256": "bde9fad037453ee6cda5da5db224d505719324723ec35b8dce1203237a36ec42",
+      "sha256": "b768dfaa23faf34e4fb9784c470941c6495c5a4d3fcc769c6917096990c81aed"
+    },
+    {
+      "itemKey": "glitter-mail",
+      "status": "resolved",
+      "file": "glitter-mail.png",
+      "family": "default",
+      "sourcePath": "glitter-mail.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/glitter-mail.png",
+      "sourceSha256": "8d75a69335b2918eac0111e7c6d6548f8e28d939b24a5ab72945063d254c2dff",
+      "sha256": "aa88518f520d97742c9d579fab611f2c3750a3acb4e41a02e97f3b96e720c1c5"
+    },
+    {
+      "itemKey": "mech-mail",
+      "status": "resolved",
+      "file": "mech-mail.png",
+      "family": "default",
+      "sourcePath": "mech-mail.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/mech-mail.png",
+      "sourceSha256": "78b18dc82093ea789077a297176087241d174b800cac35c2b3d03e77ae5b1db5",
+      "sha256": "c42fa15058a70b8b6e27e198c2510fd2f1418c943b40e7230cfb0c9342c3e0b0"
+    },
+    {
+      "itemKey": "wood-mail",
+      "status": "resolved",
+      "file": "wood-mail.png",
+      "family": "default",
+      "sourcePath": "wood-mail.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/wood-mail.png",
+      "sourceSha256": "38281e09965b02a826b3c81be5e58ab1b41fda64ff470b553e2cfcdf5a86388f",
+      "sha256": "4dabb09c97b58b53bfa30d0873129c6c1264470f215009262e9808ca0d6adfb5"
+    },
+    {
+      "itemKey": "wave-mail",
+      "status": "resolved",
+      "file": "wave-mail.png",
+      "family": "default",
+      "sourcePath": "wave-mail.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/wave-mail.png",
+      "sourceSha256": "4ccc41d167dc72517f9f37ac10acb710abaea39883d2a6d11cf30cd84ada7fd3",
+      "sha256": "2b408fddece2d070e7fcb6566f6fed1ecd3860ce6bf88b2ec379dbfe922b0799"
+    },
+    {
+      "itemKey": "bead-mail",
+      "status": "resolved",
+      "file": "bead-mail.png",
+      "family": "default",
+      "sourcePath": "bead-mail.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/bead-mail.png",
+      "sourceSha256": "83796c8cf0c5d26422293484fb338f4ae735f070112d73d9e1e43a8ca6af4166",
+      "sha256": "0eef91fed815122abaaac65dac7007dfc877fc210f77f4c8234fd2d7e25b8e2f"
+    },
+    {
+      "itemKey": "shadow-mail",
+      "status": "resolved",
+      "file": "shadow-mail.png",
+      "family": "default",
+      "sourcePath": "shadow-mail.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/shadow-mail.png",
+      "sourceSha256": "90d25ee6f1c1b0fd7fcc07071ea092045dc90cb100b82d361b8a65bce9c79e52",
+      "sha256": "0931549557c5c387371a0163979dbd2530d8c2d34b718a824a04cb389c70ee04"
+    },
+    {
+      "itemKey": "tropic-mail",
+      "status": "resolved",
+      "file": "tropic-mail.png",
+      "family": "default",
+      "sourcePath": "tropic-mail.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tropic-mail.png",
+      "sourceSha256": "a320353c6f61dcc21100c9dee19d8fb57f942555dbeb5af76acaaf3edfdabfad",
+      "sha256": "5809fda754764bc3d5c1a27bc2f409dc6603d158507ba71f6e3e26a324d53fdd"
+    },
+    {
+      "itemKey": "dream-mail",
+      "status": "resolved",
+      "file": "dream-mail.png",
+      "family": "default",
+      "sourcePath": "dream-mail.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-mail.png",
+      "sourceSha256": "99ad96f2936de1c66b4524404f30d02cad1fd71706968eb10ca05c39a8c060df",
+      "sha256": "52300f4da0ea77695a50bbaca7960115d56dfd8ed819f33ab2e770f0065a9d45"
+    },
+    {
+      "itemKey": "fab-mail",
+      "status": "resolved",
+      "file": "fab-mail.png",
+      "family": "default",
+      "sourcePath": "fab-mail.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/fab-mail.png",
+      "sourceSha256": "3ebbbb59d761fd22eb0050a71e9319f4454a9736d49981238e93676ecf5d54c0",
+      "sha256": "959049510373e32dcfb19e942831f1ea4863c5bb7c23c6b89bda6249f134a2b2"
+    },
+    {
+      "itemKey": "retro-mail",
+      "status": "resolved",
+      "file": "retro-mail.png",
+      "family": "default",
+      "sourcePath": "retro-mail.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/retro-mail.png",
+      "sourceSha256": "3207b031028f9505b4d85d1aa94655f6c65ddcd38c2cad24f8fe8accce2f95db",
+      "sha256": "a47da9deb09ba188416fdaf97ffa81099067080d1a1df63a188cd4b52024d85c"
+    },
+    {
+      "itemKey": "cheri-berry",
+      "status": "resolved",
+      "file": "cheri-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/cheri-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/cheri-berry.png",
+      "sourceSha256": "a9ec2e71b35303a04c0dad9c38d40edb6feb2f793f0983d6fdce1c3e2a95db57",
+      "sha256": "1b3a97dd9cb023499b28f4c036787e3f57600d851e014842b5c6ced320a7d0f4"
+    },
+    {
+      "itemKey": "chesto-berry",
+      "status": "resolved",
+      "file": "chesto-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/chesto-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/chesto-berry.png",
+      "sourceSha256": "e6d0311f0e8742dad601c1f471d527318e04f63d825061c91cbc1c6c8adef079",
+      "sha256": "f2db74fd424fae2d15b7206eb6c84767df7034709241d11877393a84d3706789"
+    },
+    {
+      "itemKey": "pecha-berry",
+      "status": "resolved",
+      "file": "pecha-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/pecha-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/pecha-berry.png",
+      "sourceSha256": "5c353f9caaeeb2b477fcd8fef82f697ea1cf4a3715b31cc721e2c00990462bcc",
+      "sha256": "93dc9d357e148ca4a6eb8c4e3f3bdc39e8ab11d7716b28e075a65deb005c7da2"
+    },
+    {
+      "itemKey": "rawst-berry",
+      "status": "resolved",
+      "file": "rawst-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/rawst-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/rawst-berry.png",
+      "sourceSha256": "4d64640102d018aba42017d0a1cfc0e7672071fe8bcf1a470189f5a918c375d2",
+      "sha256": "37a1a1a14d4edf07782c0fad5ac0d3f847b4ca25049ff324c0692de9a1f1fa76"
+    },
+    {
+      "itemKey": "aspear-berry",
+      "status": "resolved",
+      "file": "aspear-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/aspear-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/aspear-berry.png",
+      "sourceSha256": "4e14d21cd8193c49a4bc4f5947db8561a95892d306a87a22fbed9261770b8d12",
+      "sha256": "c28e1dd1a88ffe78d93307ad0e4d975978e4b8e4d876ed864419d594b51d1642"
+    },
+    {
+      "itemKey": "leppa-berry",
+      "status": "resolved",
+      "file": "leppa-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/leppa-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/leppa-berry.png",
+      "sourceSha256": "299a909207b6ba2807de6c4686b8be06ab723969af8c1a012fb0ec2c4dfc5f43",
+      "sha256": "89c738fa586c79e0c27b620d7656f3ba2aea83f83e16a5a633650ef9aee337f6"
+    },
+    {
+      "itemKey": "oran-berry",
+      "status": "resolved",
+      "file": "oran-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/oran-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/oran-berry.png",
+      "sourceSha256": "001bae587cb26c2d1e12ab8c237f532f3e8502b4aeca43f81efba27592c7ef31",
+      "sha256": "211283822d596542b07dbb79952a07893b2e711a51b199f0371f566fe4dd0ce5"
+    },
+    {
+      "itemKey": "persim-berry",
+      "status": "resolved",
+      "file": "persim-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/persim-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/persim-berry.png",
+      "sourceSha256": "c5c6988fcf04255d2268c2a2c9fffd0975d226ee87f19a4667ab17eba9da5b0b",
+      "sha256": "02fbfe38292e6fc90789f0d85f7dc8a8b5162a7524a586e844678971a5dd8464"
+    },
+    {
+      "itemKey": "lum-berry",
+      "status": "resolved",
+      "file": "lum-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/lum-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/lum-berry.png",
+      "sourceSha256": "f7102b0b338b2fdaf13209057b5093b78d49754c2fc54d41de1ac3b368236181",
+      "sha256": "6f6d450b0bef948c6efef67ff66037cf717e0f1e8c9ed2a365681fec94bca25d"
+    },
+    {
+      "itemKey": "sitrus-berry",
+      "status": "resolved",
+      "file": "sitrus-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/sitrus-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/sitrus-berry.png",
+      "sourceSha256": "fd6f0d888abf9c46d6f56d9f4041f00800076a46727cb99964ec65539e4692cb",
+      "sha256": "7c789407f01d40251fbc4022ed9c69de0c770fada23b2de34786c82c83956454"
+    },
+    {
+      "itemKey": "figy-berry",
+      "status": "resolved",
+      "file": "figy-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/figy-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/figy-berry.png",
+      "sourceSha256": "3f89f9b95ee959b875c834f1b6516541a0c5a2c16ce1d07f43c4149cb106b875",
+      "sha256": "376b7f5f05a73a546d8d493fb77f34167511c4500691d08078fa75fa9881fdfd"
+    },
+    {
+      "itemKey": "wiki-berry",
+      "status": "resolved",
+      "file": "wiki-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/wiki-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/wiki-berry.png",
+      "sourceSha256": "8a765b426a97bf31127f2ca7bd994a273a4855c451034f93f80bdaecc8c9aaea",
+      "sha256": "675f543e46c48a078ea317e2194300fab5264d46414ce57597a7d9c51e6b0edc"
+    },
+    {
+      "itemKey": "mago-berry",
+      "status": "resolved",
+      "file": "mago-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/mago-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/mago-berry.png",
+      "sourceSha256": "f5b76c2eb9e2c00dd878162911fd6ab50c4c881acf30c5c8ce846b8b09b65f91",
+      "sha256": "d90185d6714b56f1d623e66edb2dc265724b7873fbb8a913239d35e0fba91c74"
+    },
+    {
+      "itemKey": "aguav-berry",
+      "status": "resolved",
+      "file": "aguav-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/aguav-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/aguav-berry.png",
+      "sourceSha256": "14f3c55711ccebe46f67bf5783afbd0cfb7abcb4c08addd44d9d2d04723bd927",
+      "sha256": "6090381f6e63a89c28f2a14179d3a6f46b8e99b027c2e0178729c8ecc719e455"
+    },
+    {
+      "itemKey": "iapapa-berry",
+      "status": "resolved",
+      "file": "iapapa-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/iapapa-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/iapapa-berry.png",
+      "sourceSha256": "e140576f17a957fd5ecd10883f88cc869589f067b1ed138864f9602e93a52fa9",
+      "sha256": "66268a84f548ba1c08a9888073a9f42053e3cba2c7c3753929bcca1ea662e1e8"
+    },
+    {
+      "itemKey": "razz-berry",
+      "status": "resolved",
+      "file": "razz-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/razz-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/razz-berry.png",
+      "sourceSha256": "2372ac62fcd8c698a0e7e855b811ec83909d1224674543864deabf15cd912317",
+      "sha256": "5f2dd4700690812b140985d5cb133e2eb65680512e7a39e2b11734d15425305d"
+    },
+    {
+      "itemKey": "bluk-berry",
+      "status": "resolved",
+      "file": "bluk-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/bluk-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/bluk-berry.png",
+      "sourceSha256": "d2f57799cd0cb9263c7425ece48e82588d34668a93f51213b20b1bac815133b1",
+      "sha256": "62543eeb314b658c7dff0fdcdb84af463330f1eb92506184e780907b07a51f90"
+    },
+    {
+      "itemKey": "nanab-berry",
+      "status": "resolved",
+      "file": "nanab-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/nanab-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/nanab-berry.png",
+      "sourceSha256": "44c35e60d0772c70d05b8dfd0a4ece0cbc375823661eaad9820dad2e1bcf7370",
+      "sha256": "d76702f862084da5258ae9f9d33dd3177f89493a951d62717ab6bbd55b005884"
+    },
+    {
+      "itemKey": "wepear-berry",
+      "status": "resolved",
+      "file": "wepear-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/wepear-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/wepear-berry.png",
+      "sourceSha256": "7660f0f3af94dc0a1ebf16d1c7073144dc982492620595e9b2abc6bfdc3bf88e",
+      "sha256": "e36abd1ec35ba0bdb55dbce7b4bb9a82e87695fccdf2f71edb72a5bb1a9d9c08"
+    },
+    {
+      "itemKey": "pinap-berry",
+      "status": "resolved",
+      "file": "pinap-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/pinap-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/pinap-berry.png",
+      "sourceSha256": "10496a86f095bbb876b53e3e1a6cea42071c639bfa4622d582aeda56a148728b",
+      "sha256": "c36eaaccfa816fbbbcd9647c56065d59040028a4a8bca39cf5549d44cf424ce9"
+    },
+    {
+      "itemKey": "pomeg-berry",
+      "status": "resolved",
+      "file": "pomeg-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/pomeg-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/pomeg-berry.png",
+      "sourceSha256": "486ae82c39fefc5a98c990d9a43fed9697274f19df3c53355863d1e4464f5117",
+      "sha256": "c3827d96c303087321ba9c8734e8e3623995cf9bb9dd7d1025c3a9c8acbf3617"
+    },
+    {
+      "itemKey": "kelpsy-berry",
+      "status": "resolved",
+      "file": "kelpsy-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/kelpsy-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/kelpsy-berry.png",
+      "sourceSha256": "47fa338ec157bb431fb2744bf1e86d9b468442d8fcc381df4ae733232ee68d60",
+      "sha256": "9db232b3b3114e810c2964d041ffd5161c3c19e6ae48012ee8a19a3c2e9089ff"
+    },
+    {
+      "itemKey": "qualot-berry",
+      "status": "resolved",
+      "file": "qualot-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/qualot-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/qualot-berry.png",
+      "sourceSha256": "888b12e8d16e62fd4c72657c140794beec12579e6018a08bfbc3977275061781",
+      "sha256": "d5c9ff1a9fdfbe7ba3b92a7a3f6e63a57eb28fc00af1d1e445bd7264f4d0c558"
+    },
+    {
+      "itemKey": "hondew-berry",
+      "status": "resolved",
+      "file": "hondew-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/hondew-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/hondew-berry.png",
+      "sourceSha256": "e90509034b5983249954ad759b4702c44f93da5e56622316285e4fd10fe9ea2c",
+      "sha256": "1f66067a9e81bb293f2ae30429c9df66b188300fce91996123771e47de041096"
+    },
+    {
+      "itemKey": "grepa-berry",
+      "status": "resolved",
+      "file": "grepa-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/grepa-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/grepa-berry.png",
+      "sourceSha256": "a6680d19c08f69d5452ccb07d0f738e709876ae21c27280b9bf4c911cd46f3ca",
+      "sha256": "64f4dd9d8352ae2b7af2358c401f0f055597f8049b53e4740df86a90701ddb22"
+    },
+    {
+      "itemKey": "tamato-berry",
+      "status": "resolved",
+      "file": "tamato-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/tamato-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/tamato-berry.png",
+      "sourceSha256": "e385682b441442a1f741ad8d618ef8d6dacd90e81c7b671ba63d787a13922bd7",
+      "sha256": "7698a2fcf2ab0a827a7bd4b3158f19843a90fa3ec6e4b201a634ce0252581b4a"
+    },
+    {
+      "itemKey": "cornn-berry",
+      "status": "resolved",
+      "file": "cornn-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/cornn-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/cornn-berry.png",
+      "sourceSha256": "977230204e04a6609312668257cda9d2d8f377a1cbfc469439c1116a599273da",
+      "sha256": "5ab2f2bfc396ef26b2622c823b2f00aae8749299f7f9787727d919d26845fc91"
+    },
+    {
+      "itemKey": "magost-berry",
+      "status": "resolved",
+      "file": "magost-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/magost-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/magost-berry.png",
+      "sourceSha256": "8cfaed6080f967cbadd652e40ebd495175788e03ee811de4cf5f844efc3651b2",
+      "sha256": "56b5fc631a7770a0abe7c2e8633d58d146c4566c676e5d2b031a9e3291930691"
+    },
+    {
+      "itemKey": "rabuta-berry",
+      "status": "resolved",
+      "file": "rabuta-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/rabuta-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/rabuta-berry.png",
+      "sourceSha256": "020be2efcd79d6bf96faf73da9da9977244c66a8de589ee4a273eb738cd827c5",
+      "sha256": "288fae0646be0bc8b84789884c50d85b445a3e6f6c7064c8d2eecd3db99b6e8a"
+    },
+    {
+      "itemKey": "nomel-berry",
+      "status": "resolved",
+      "file": "nomel-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/nomel-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/nomel-berry.png",
+      "sourceSha256": "4a27878b19676b7353a891d4a9724feba21b5414098c5e9de55118e8d0ee022b",
+      "sha256": "027e5dbac2ece00a17b287af03216fa575d24e0da758140ef7f73c74216c7d08"
+    },
+    {
+      "itemKey": "spelon-berry",
+      "status": "resolved",
+      "file": "spelon-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/spelon-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/spelon-berry.png",
+      "sourceSha256": "630590a4552b6d6a395c9e30e757b26ae92655b0150e62021761ed0a977e2b06",
+      "sha256": "d0b2f54917951c70c72742ec9e15191959789321ee4b29755b6da6c365dab5f7"
+    },
+    {
+      "itemKey": "pamtre-berry",
+      "status": "resolved",
+      "file": "pamtre-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/pamtre-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/pamtre-berry.png",
+      "sourceSha256": "c53018c435cf647d246448a26c46ab34c9efaf4b64ecc34e3a83e0c479fcbff3",
+      "sha256": "bf6276e0c5baefd6745a0d6e93db5e38b9786527cd7802c2073b698d85a8c28b"
+    },
+    {
+      "itemKey": "watmel-berry",
+      "status": "resolved",
+      "file": "watmel-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/watmel-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/watmel-berry.png",
+      "sourceSha256": "00702ff8703d6ce51351363e9fcbb082f9dc83362215f28d05cfeb3f7a6ab868",
+      "sha256": "e510c1967c9d1a28a4fa679bb725c3accec7e67a9d32b511dde4112d3f160a51"
+    },
+    {
+      "itemKey": "durin-berry",
+      "status": "resolved",
+      "file": "durin-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/durin-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/durin-berry.png",
+      "sourceSha256": "b325dabce87b081772d9282adcb19856bcbd2087c7281cecc3e924f23dbc4437",
+      "sha256": "293d15225776c01f4f23edcd1d39496b0023117c011754499e18a28c3d6f6f38"
+    },
+    {
+      "itemKey": "belue-berry",
+      "status": "resolved",
+      "file": "belue-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/belue-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/belue-berry.png",
+      "sourceSha256": "33c76cb0cfed7a7720dd3ae4d72674cdd76f480e2c29b7f0774e25f867adb820",
+      "sha256": "895a733ff03f1d2ec791bc140f04d2a47e29feb4866f25de2a599ea5d2c21d26"
+    },
+    {
+      "itemKey": "liechi-berry",
+      "status": "resolved",
+      "file": "liechi-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/liechi-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/liechi-berry.png",
+      "sourceSha256": "32d2a9805f677b557c21751c9dd0e6282962fd9f129deb37ba1d652fd9a83aa5",
+      "sha256": "84354bf9b23e88b7d49897ed62a2b5f5c88a360a10d574fd071495e99ab9f83f"
+    },
+    {
+      "itemKey": "ganlon-berry",
+      "status": "resolved",
+      "file": "ganlon-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/ganlon-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/ganlon-berry.png",
+      "sourceSha256": "26e1ea30a5456ef7775aaa12fa0f0d210226db6a06a1658b3a51ad6dcc39333e",
+      "sha256": "58e74f9f2bd41844e1b750b46656d64844ca59be9a5cb0413995948a76e65f8b"
+    },
+    {
+      "itemKey": "salac-berry",
+      "status": "resolved",
+      "file": "salac-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/salac-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/salac-berry.png",
+      "sourceSha256": "e0741d580b8a5f02a1fc4995bd993e99aa77d7579568d602548b321554cdfbe9",
+      "sha256": "4e4e7e8ea50ab2cc2ddd191a77c6d264c462a96d12d07e8e3f88cbc510d9cc36"
+    },
+    {
+      "itemKey": "petaya-berry",
+      "status": "resolved",
+      "file": "petaya-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/petaya-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/petaya-berry.png",
+      "sourceSha256": "8a5171d1979c0e265779bd63a5b3e06c4c8fd86f7518db09ff72e98dc96f5000",
+      "sha256": "6259ffae0a6980739733211425a86b31c5d7d055677cb323affda459d62e95bb"
+    },
+    {
+      "itemKey": "apicot-berry",
+      "status": "resolved",
+      "file": "apicot-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/apicot-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/apicot-berry.png",
+      "sourceSha256": "49916df2ff2ec39093577308d7f300bd4a8dfc4ef71e7f5b87faf1d72a6c8e6d",
+      "sha256": "9080792828c2d794652c2444e7dcb757e7a55a40c104a1ea22990223b66204df"
+    },
+    {
+      "itemKey": "lansat-berry",
+      "status": "resolved",
+      "file": "lansat-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/lansat-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/lansat-berry.png",
+      "sourceSha256": "c79069f221f5dc4dc54012d8fe2bd6d09c9790c2ac18d00a994bc352a7929e90",
+      "sha256": "89e4a3e0614d250106f11dd069abd91215ef8ecd17eff0ba33462c479df29b03"
+    },
+    {
+      "itemKey": "starf-berry",
+      "status": "resolved",
+      "file": "starf-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/starf-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/starf-berry.png",
+      "sourceSha256": "79b6bbfb1a599ac70b90f4dfa0cdc77bba15070aa2914c355745caab09aea74e",
+      "sha256": "99ab9e21819c694ae6c309b36a438ef0eebefeb387792b86d9c5e49e30369a50"
+    },
+    {
+      "itemKey": "enigma-berry",
+      "status": "resolved",
+      "file": "enigma-berry.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/enigma-berry.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/enigma-berry.png",
+      "sourceSha256": "a3b4f2cb1c62d29ec8b4c0cc7fe75ba8aebcbd84e8caf7eb8ab886429bf69f2d",
+      "sha256": "5d9ab8d5caf0cd9eb2d39a7c9c352dc5464a8529e414fe5faf48dfde1bd0e48e"
+    },
+    {
+      "itemKey": "bright-powder",
+      "status": "resolved",
+      "file": "bright-powder.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/bright-powder.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/bright-powder.png",
+      "sourceSha256": "b942a87a76aa93a25f29fe9bc9c7c11ea6076b962d9134048ff19c5af972b45f",
+      "sha256": "7a5586bc6c676f12c1b320389a0679c161ca29a34943d03a6f6187a5673286d5"
+    },
+    {
+      "itemKey": "white-herb",
+      "status": "resolved",
+      "file": "white-herb.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/white-herb.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/white-herb.png",
+      "sourceSha256": "35c10aba3705163b3fa7186f3510d82a5e4de56009eafc08cc94f87a192cdda3",
+      "sha256": "0c45135bf6716143704f87f3bbbdd9d898211e6b62992853ea243a76fcd833d1"
+    },
+    {
+      "itemKey": "macho-brace",
+      "status": "resolved",
+      "file": "macho-brace.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/macho-brace.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/macho-brace.png",
+      "sourceSha256": "0370904e8fde3e403d4f074089d2733e119c757a562cfd6f73ce74b7e9b3462d",
+      "sha256": "a8110049e2d063e91d085013e06e188af130867bc78b5754c6a9f06a289bc352"
+    },
+    {
+      "itemKey": "exp-share",
+      "status": "resolved",
+      "file": "exp-share.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/exp-share.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/exp-share.png",
+      "sourceSha256": "09eab418634ce31c8e965115b0b177891cde1ab181f06cf0795c084070ebe293",
+      "sha256": "0d3d8ef82fae46f2724f0cffe2f623fac168ad84d6ab74b86f3d94008d913edd"
+    },
+    {
+      "itemKey": "quick-claw",
+      "status": "resolved",
+      "file": "quick-claw.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/quick-claw.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/quick-claw.png",
+      "sourceSha256": "8107d28b4dca852b1dc729cff572a4552548e16e849567590a7cb9bd9eba1e16",
+      "sha256": "02d5db66c8fe83175f6b419ce8568f77f8557bb23d28d9bd45aed185ee02b15b"
+    },
+    {
+      "itemKey": "soothe-bell",
+      "status": "resolved",
+      "file": "soothe-bell.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/soothe-bell.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/soothe-bell.png",
+      "sourceSha256": "b197234e30fd413b5699c8a6d7eb4b235a601d3a9031d7d956d1d30fa0d147b5",
+      "sha256": "b8ca16f1e3de22bfc68112ea61f9a3dd905031ee0d5aa305ac9ec0da9ca2f983"
+    },
+    {
+      "itemKey": "mental-herb",
+      "status": "resolved",
+      "file": "mental-herb.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/mental-herb.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/mental-herb.png",
+      "sourceSha256": "035e0e4dfcfe17db18be5454f869229b410265892ac674fea7e88ef00ed7ace3",
+      "sha256": "9de7e6796d3ad07b09a98976eee4378ea72607a4139b035d89c092ec9ee8fc57"
+    },
+    {
+      "itemKey": "choice-band",
+      "status": "resolved",
+      "file": "choice-band.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/choice-band.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/choice-band.png",
+      "sourceSha256": "fd875d7c8accbee3e697047a1c195e8c47e5ccb4017e1798e836dded0edc0adc",
+      "sha256": "a60a096cb27802221689743f2f145cb03be0ca602d995831822628c00b646f5c"
+    },
+    {
+      "itemKey": "kings-rock",
+      "status": "resolved",
+      "file": "kings-rock.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/kings-rock.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/kings-rock.png",
+      "sourceSha256": "4f55e23beb22a34c506f21c9185383fb8783da35bdb735ec376911a2121c8dc3",
+      "sha256": "93d0b8a649b23671fdbe82209faa81981d07021c6afeba0c3959e55c742b53b3"
+    },
+    {
+      "itemKey": "silver-powder",
+      "status": "resolved",
+      "file": "silver-powder.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/silver-powder.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/silver-powder.png",
+      "sourceSha256": "ac6e6a54c3bc34b1ef270d7c81a551259be3a21401328a5c09b680f0a82f67af",
+      "sha256": "de151417932dc159244ef51150eeef79387ec71fcfe66b6738016d6e8822866a"
+    },
+    {
+      "itemKey": "amulet-coin",
+      "status": "resolved",
+      "file": "amulet-coin.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/amulet-coin.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/amulet-coin.png",
+      "sourceSha256": "caaccc6ec4439505c9c1b14a7222a8e323c68cbed84d41021d1435ca6dc5b9b4",
+      "sha256": "4bbd12d5c8027301f56839faf4b9850d02bab3954b1c5de1dd4faaa84103f49c"
+    },
+    {
+      "itemKey": "cleanse-tag",
+      "status": "resolved",
+      "file": "cleanse-tag.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/cleanse-tag.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/cleanse-tag.png",
+      "sourceSha256": "fbcbb333baf006e493c90b768a40544ba25191dfc0824ea81e4b1f5469411b92",
+      "sha256": "9bd2448460392350f319ec13286cc754bc2f674f2b2b42af95913c53fdc521df"
+    },
+    {
+      "itemKey": "soul-dew",
+      "status": "resolved",
+      "file": "soul-dew.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/soul-dew.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/soul-dew.png",
+      "sourceSha256": "1782a9d6dc6ae8ec9943dd04f4acf77792b0dd9a8d879ed956bfc70b4dc36f3b",
+      "sha256": "c887317035e36a5c553f963b75f17db0274a85ca4e6566adbcaa3515c9cdd8e4"
+    },
+    {
+      "itemKey": "deep-sea-tooth",
+      "status": "resolved",
+      "file": "deep-sea-tooth.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/deep-sea-tooth.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/deep-sea-tooth.png",
+      "sourceSha256": "8a6f81c0c44c1ec9e2adce21b17e818560a8acfd0a18afb0f1427a377a06beb8",
+      "sha256": "211837fa0f1137ddd4ed61c3ba76408c00a6656c61f2707c276125eca5170827"
+    },
+    {
+      "itemKey": "deep-sea-scale",
+      "status": "resolved",
+      "file": "deep-sea-scale.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/deep-sea-scale.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/deep-sea-scale.png",
+      "sourceSha256": "f1946bb37194e42fd600734a3519b8944c19a53abfe9c330b89fba9ab7155f87",
+      "sha256": "ec2a05e693081e4c6f1e2dadda7eeddd9d9722bbc69ec2be28a7bb0ec280d095"
+    },
+    {
+      "itemKey": "smoke-ball",
+      "status": "resolved",
+      "file": "smoke-ball.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/smoke-ball.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/smoke-ball.png",
+      "sourceSha256": "337c7eab92505a42163f07f174a620533b8eeaa9d1f3a67fa5a9d11b2797300a",
+      "sha256": "e0679bffb06c0d6310ef9e20e4d818a8be799575f6bed3fe123a83b76efb7f25"
+    },
+    {
+      "itemKey": "everstone",
+      "status": "resolved",
+      "file": "everstone.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/everstone.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/everstone.png",
+      "sourceSha256": "f0fae2d51f0daa04845f1f14637f08b96f431a5453b7b6ee621fec901de16fea",
+      "sha256": "fd5ed2c1dd5d5c4b302fad9c1cf38afb4f4c20c16d3f196ea115b624ff7d2cba"
+    },
+    {
+      "itemKey": "focus-band",
+      "status": "resolved",
+      "file": "focus-band.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/focus-band.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/focus-band.png",
+      "sourceSha256": "709a0d2ebe4b008bb1d1e1384d9954d1ba88caf0eb1b1a3e61db792134c1135f",
+      "sha256": "9901ef8902849e0e63569e635b182ded758c6f75da3af492b2a9970332c433db"
+    },
+    {
+      "itemKey": "lucky-egg",
+      "status": "resolved",
+      "file": "lucky-egg.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/lucky-egg.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/lucky-egg.png",
+      "sourceSha256": "8739654ac70c13dcc522ff489436dbaa0437c206ff5fc8ab78225f7a4985e3c2",
+      "sha256": "97a08618f26a752bf4724fecf571e0ba985b403ec3ba73eedba41244a50c5c47"
+    },
+    {
+      "itemKey": "scope-lens",
+      "status": "resolved",
+      "file": "scope-lens.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/scope-lens.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/scope-lens.png",
+      "sourceSha256": "4f909874a7b0d0d8a40c3e319b962e6a6e1db67ff67cbd8b789e060ebac9ad7b",
+      "sha256": "bc11816ae239f8312676ae976a94a0df464816e9f60795bd75b417c01e2236b6"
+    },
+    {
+      "itemKey": "metal-coat",
+      "status": "resolved",
+      "file": "metal-coat.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/metal-coat.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/metal-coat.png",
+      "sourceSha256": "b12b6157abd22221f1138f3023b1b64622f42aa60f4aa433c1392bbee79e30a7",
+      "sha256": "cb82caff9155da1f3c3fc0c3d24a213f634b7257024ec29eed2faf2c11403c54"
+    },
+    {
+      "itemKey": "leftovers",
+      "status": "resolved",
+      "file": "leftovers.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/leftovers.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/leftovers.png",
+      "sourceSha256": "03f5bb58ef3ba9a8a286db0e0d5bda9328b86ff69bab8daff47fdd3f3de2ba1e",
+      "sha256": "efd137f7b059f4cb87f7f8b70414726cc2323b44d619679634804f9bfa47ae5f"
+    },
+    {
+      "itemKey": "dragon-scale",
+      "status": "resolved",
+      "file": "dragon-scale.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/dragon-scale.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/dragon-scale.png",
+      "sourceSha256": "27eed2db0373e71b5db373efe2aa55a2f15a0f2eeb73a9e8a633a215417b1243",
+      "sha256": "467921d229c50f8d361668fab499f0e5cd3a9ee5552233ccd803f05b80075a26"
+    },
+    {
+      "itemKey": "light-ball",
+      "status": "resolved",
+      "file": "light-ball.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/light-ball.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/light-ball.png",
+      "sourceSha256": "07e64b490c5d8055d44eac97258684333ca5941571f12cfa7320630df66bd973",
+      "sha256": "0d72c2fa432e6c1ef14af1c72f80d5d1c43b90237fe924d813ee119652177ae7"
+    },
+    {
+      "itemKey": "soft-sand",
+      "status": "resolved",
+      "file": "soft-sand.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/soft-sand.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/soft-sand.png",
+      "sourceSha256": "6506b0f45b9c4bc4b2e6fbc90a9ae2bb99adc6a2b31d116ce8c4226b84103ecf",
+      "sha256": "ac93a43f50b4ecc4c9630c7ac7185ba4b8f767ede2d2d54559aa29c5c460fd58"
+    },
+    {
+      "itemKey": "hard-stone",
+      "status": "resolved",
+      "file": "hard-stone.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/hard-stone.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/hard-stone.png",
+      "sourceSha256": "c5a9753bbb6a3a83baa2faa930cc2c983980a267b84d06700811e7a7135dec33",
+      "sha256": "ceeff98b25581564652e5e337b0640737694f5ff2161fb85bec29adb1bbd4e30"
+    },
+    {
+      "itemKey": "miracle-seed",
+      "status": "resolved",
+      "file": "miracle-seed.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/miracle-seed.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/miracle-seed.png",
+      "sourceSha256": "3f1b6d0126c6b05dee11c6018cb28b2587984dfe3b8641eb09a20aa16c8c42a4",
+      "sha256": "cc5a6c222a81563d01172cc884dd1396bbb053e417b58f69ffa839c7ecf0066b"
+    },
+    {
+      "itemKey": "black-glasses",
+      "status": "resolved",
+      "file": "black-glasses.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/black-glasses.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/black-glasses.png",
+      "sourceSha256": "3ca33b86206d9ff7c5f96ffa450ccc101014088fab343b00b87a9a22baf2c861",
+      "sha256": "7cecf4cf61e2ce72ac70c95348f39d8966bcac25800658da289936c4b721ec9d"
+    },
+    {
+      "itemKey": "black-belt",
+      "status": "resolved",
+      "file": "black-belt.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/black-belt.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/black-belt.png",
+      "sourceSha256": "3e5679c53d916550c6b44e97b937e0a6b99931bcec675281652471bb6d8028b8",
+      "sha256": "c7205a9ee43cd7e94b0e6a8e46f14ddebc5a46af1a5737631deaa8f5c4fc3dd7"
+    },
+    {
+      "itemKey": "magnet",
+      "status": "resolved",
+      "file": "magnet.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/magnet.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/magnet.png",
+      "sourceSha256": "5324ce76aa2dc52e0c8101925ce914c9dfdeec2bac0da2ebc2b9396558348157",
+      "sha256": "24c0a3180f857db9df5113d19dbbe3329ece12f94589472c96a0c9c284b4eb1c"
+    },
+    {
+      "itemKey": "mystic-water",
+      "status": "resolved",
+      "file": "mystic-water.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/mystic-water.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/mystic-water.png",
+      "sourceSha256": "89070e7eab5419b81220985212169cc8227507408eba43fc3385b64b61939c47",
+      "sha256": "9d82bdc891d09b95a2b9c1c4d443b3733c0207bfa1a2f7e7107005ed62ddc93a"
+    },
+    {
+      "itemKey": "sharp-beak",
+      "status": "resolved",
+      "file": "sharp-beak.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/sharp-beak.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/sharp-beak.png",
+      "sourceSha256": "6b5b81ad9447b07f8fab7a5a59544ce30734f48ab4066bfba27ca86f7590a479",
+      "sha256": "ec2228bb4e496fe6976cc1b0a1811ee354302806c5ad7d04211e4f07d715d395"
+    },
+    {
+      "itemKey": "poison-barb",
+      "status": "resolved",
+      "file": "poison-barb.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/poison-barb.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/poison-barb.png",
+      "sourceSha256": "8adaca0f9e9705f5324b91232bf74134faeefdbe221c5303493fa7c83f4b22b5",
+      "sha256": "639349eb1106394eef9a0fa7b54727922be43b791047c162f8f7b5089ea000bd"
+    },
+    {
+      "itemKey": "never-melt-ice",
+      "status": "resolved",
+      "file": "never-melt-ice.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/never-melt-ice.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/never-melt-ice.png",
+      "sourceSha256": "98fa35c71785832dfb9bac339abdad0598d8898c3b1930340a8c36f2b7ec551e",
+      "sha256": "0e31cddccfb2f4e35c910d6e4d7519f4c69143afd23291c456747f64404164b4"
+    },
+    {
+      "itemKey": "spell-tag",
+      "status": "resolved",
+      "file": "spell-tag.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/spell-tag.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/spell-tag.png",
+      "sourceSha256": "8bf4f98272fc1562e3ba0d21ed27ecdcbd1ea9999069a273bb9e0e8b516ed026",
+      "sha256": "4722e596f664de074b93c4fea798e329b0669472f6e0c790e858366e27c16228"
+    },
+    {
+      "itemKey": "twisted-spoon",
+      "status": "resolved",
+      "file": "twisted-spoon.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/twisted-spoon.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/twisted-spoon.png",
+      "sourceSha256": "0bc48285568c1ba99d211f0540e2408c1e03820fd28a3f5cbd1ab30122a4a001",
+      "sha256": "c22a03ea5138616102e8628c67bd24faf6eaab369099f3adef20b94da06085fc"
+    },
+    {
+      "itemKey": "charcoal",
+      "status": "resolved",
+      "file": "charcoal.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/charcoal.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/charcoal.png",
+      "sourceSha256": "20b01c3cc32ea5e7df790b568df115abecfe500b3413d06586169e32ed52af26",
+      "sha256": "606851be1e125b6ae2dbfb678f4a153fd1bc4cdfbdef75f9f0e9fac8d4a92d9c"
+    },
+    {
+      "itemKey": "dragon-fang",
+      "status": "resolved",
+      "file": "dragon-fang.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/dragon-fang.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/dragon-fang.png",
+      "sourceSha256": "6894ab0993588f68f92f25331abda4a37f0a1894ac25b011eaa2bb89bd0a7ed7",
+      "sha256": "fea9099358adc15216488288d482eaf10983d273dc5bcc588417f2161a6c1db7"
+    },
+    {
+      "itemKey": "silk-scarf",
+      "status": "resolved",
+      "file": "silk-scarf.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/silk-scarf.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/silk-scarf.png",
+      "sourceSha256": "4a204bdd8fb62f45223336237e911b3e7e0a511ebfa698cc5104db64f0f46cc6",
+      "sha256": "b3a8a4f6decc2ffe112604edcfb312f2ad51d33a6e900c5e0ec8be093bfd94eb"
+    },
+    {
+      "itemKey": "up-grade",
+      "status": "resolved",
+      "file": "up-grade.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/up-grade.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/up-grade.png",
+      "sourceSha256": "3521d7d489396d1dd63dbe8de64fe6dad4814d21199cdbf83990cc7b54b29ac5",
+      "sha256": "8b8da507eb75df085b14a1a6b97568ea8704ba86142cb9fde3b6674a6c332a67"
+    },
+    {
+      "itemKey": "shell-bell",
+      "status": "resolved",
+      "file": "shell-bell.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/shell-bell.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/shell-bell.png",
+      "sourceSha256": "39fa6037da47c4193e098dca60cb4dbcb851f051f5e780f46532688942f4cc57",
+      "sha256": "b9d97b998594fb101bb7387a6e4e247b0f8120573306b4f31b270d608590f054"
+    },
+    {
+      "itemKey": "sea-incense",
+      "status": "resolved",
+      "file": "sea-incense.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/sea-incense.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/sea-incense.png",
+      "sourceSha256": "b40339f1920d410a767abf7497f23c8457ef1e1e7ef193dcd252228ba6bd9562",
+      "sha256": "e33d10ff6a654dbc792c819171bb4280d7aa677541cb962ac89a4d9b6b913401"
+    },
+    {
+      "itemKey": "lax-incense",
+      "status": "resolved",
+      "file": "lax-incense.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/lax-incense.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/lax-incense.png",
+      "sourceSha256": "c996d1c0b12f2216cb2e311b6eb60ae5379f32cc427ce119632ad9d087cb2dac",
+      "sha256": "a92ce1933aebc3742104ca36f8b95efb153dae2cea39d96f8eafbaeb0cb33457"
+    },
+    {
+      "itemKey": "lucky-punch",
+      "status": "resolved",
+      "file": "lucky-punch.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/lucky-punch.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/lucky-punch.png",
+      "sourceSha256": "7254190da97e0041423b3375ece4e330f72bd4f0e46526682eb75097ee6d2a5c",
+      "sha256": "bbfb655b283c8d067bf8bcc2829844c01ce501b13003a84b5910ce696d222165"
+    },
+    {
+      "itemKey": "metal-powder",
+      "status": "resolved",
+      "file": "metal-powder.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/metal-powder.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/metal-powder.png",
+      "sourceSha256": "3e395d288dbfe349a30d661c7744ac7b06125a3146ba7c3980884387b379c60e",
+      "sha256": "90deaad94f941390cddb983b4d9868266d0f7ced1cfb88141dd1ff61775a435c"
+    },
+    {
+      "itemKey": "thick-club",
+      "status": "resolved",
+      "file": "thick-club.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/thick-club.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/thick-club.png",
+      "sourceSha256": "1841b94c9fad1129c971cc83c6e9be6f580fab4771981304461ad9b5f62dbb40",
+      "sha256": "6ab0ee49e773ec9225a8d72a59539a72aaca239d2b5c8514f88450a57569a2cf"
+    },
+    {
+      "itemKey": "stick",
+      "status": "resolved",
+      "file": "stick.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/stick.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/stick.png",
+      "sourceSha256": "a9a07df91beaaf540d3e2ab82596600e7f0fe488ffa1b48549d09dbaf548de5f",
+      "sha256": "fd5ffba6629047da0770310494ee1edbfd582b688a8c646c70ec1c3274e6e6ee"
+    },
+    {
+      "itemKey": "red-scarf",
+      "status": "resolved",
+      "file": "red-scarf.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/red-scarf.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/red-scarf.png",
+      "sourceSha256": "13313e18ddf423affc30860e48acec40b06a7e08b96b6689cc5429c887084bba",
+      "sha256": "edbe81b47856173c2071226a7b204f2cd9b319fd1dfc5f033b720728010418c6"
+    },
+    {
+      "itemKey": "blue-scarf",
+      "status": "resolved",
+      "file": "blue-scarf.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/blue-scarf.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/blue-scarf.png",
+      "sourceSha256": "c2f09df5e11c83faa005c84ac40eef1a6e6ae2163bb84e66d63c715d0bfc5492",
+      "sha256": "55b363141db526ec1baa87badd1c766d95da6bc823182b85351d3ad54f3a0394"
+    },
+    {
+      "itemKey": "pink-scarf",
+      "status": "resolved",
+      "file": "pink-scarf.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/pink-scarf.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/pink-scarf.png",
+      "sourceSha256": "15055a7629d0a3aeacecd8e87775343f6a812842364a640455194676ba3f09e1",
+      "sha256": "0e0f96ce39d533a1af969cf6bad8537d983a91d3f1a708db9ee2336bb1c91b8c"
+    },
+    {
+      "itemKey": "green-scarf",
+      "status": "resolved",
+      "file": "green-scarf.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/green-scarf.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/green-scarf.png",
+      "sourceSha256": "a5448bfe59a6cbd9408aef4e13eb9c63d0d4fd6ba28f19980415aea43b5b55ee",
+      "sha256": "e3abfd189e0485da0a9bd5ef63e03d3b464833abba53f8af3a6a62a5ba181d01"
+    },
+    {
+      "itemKey": "yellow-scarf",
+      "status": "resolved",
+      "file": "yellow-scarf.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/yellow-scarf.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/yellow-scarf.png",
+      "sourceSha256": "255cf0a9e043cb5de3d9908605cabd322433af4d938e65c7d47e370ea6d50a67",
+      "sha256": "885f95eb56be781a84dbbb3d4f39c830fd099c523973abf53e5a7f429d45b0b6"
+    },
+    {
+      "itemKey": "mach-bike",
+      "status": "resolved",
+      "file": "mach-bike.png",
+      "family": "default",
+      "sourcePath": "mach-bike.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/mach-bike.png",
+      "sourceSha256": "a758a86e3dd294e7301278818d8097a7f8f032f44be90708615a5636e8aa9871",
+      "sha256": "c99d33e7c2101c579655187e8ec780b47eab8cd6f38199774542506336c30ecc"
+    },
+    {
+      "itemKey": "coin-case",
+      "status": "resolved",
+      "file": "coin-case.png",
+      "family": "default",
+      "sourcePath": "coin-case.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/coin-case.png",
+      "sourceSha256": "d7f9e4eb06603dd2feb36c766599a53287c57da93e25a2d3f055528c04fd0ca8",
+      "sha256": "799d8a1b13030bad8f2c712bf3a3b5baffe3b18f06ee4b6bf589b7330782cbae"
+    },
+    {
+      "itemKey": "itemfinder",
+      "status": "resolved",
+      "file": "itemfinder.png",
+      "family": "gen3",
+      "sourcePath": "gen3/itemfinder.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/gen3/itemfinder.png",
+      "sourceSha256": "a0470749682debeb37e5d8a03f51a50473540d77f5d617997fc6ecdfe83983bb",
+      "sha256": "8c86ddecd1a9ef3e5c5adf192dd9d70b78429581a274e22371719862f24dfa3c"
+    },
+    {
+      "itemKey": "old-rod",
+      "status": "resolved",
+      "file": "old-rod.png",
+      "family": "default",
+      "sourcePath": "old-rod.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/old-rod.png",
+      "sourceSha256": "623ce54423bac4c4d318b095840dbe59cf90ee117d2ce1f8cbcb4598a86b9f6c",
+      "sha256": "8516dc620b5586010a82e15a2cc58b5def7420e802d104e59af0866eb387a244"
+    },
+    {
+      "itemKey": "good-rod",
+      "status": "resolved",
+      "file": "good-rod.png",
+      "family": "default",
+      "sourcePath": "good-rod.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/good-rod.png",
+      "sourceSha256": "9d382a75d0daf357bf61bc30c89a65fb85828f749414f66523314e288b18d030",
+      "sha256": "1f110a85d923cd63114e629089cad365798aca27dc0e7333050e033b6fb1b888"
+    },
+    {
+      "itemKey": "super-rod",
+      "status": "resolved",
+      "file": "super-rod.png",
+      "family": "default",
+      "sourcePath": "super-rod.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/super-rod.png",
+      "sourceSha256": "cce06cfc682125f2d8fc577fef4be4b1652c1f6487765d3ac34e35009537a792",
+      "sha256": "04273f4677676a724da85ef8a6efce1fc706d3d7a0d485d7ad1b7e5975bbe990"
+    },
+    {
+      "itemKey": "ss-ticket",
+      "status": "resolved",
+      "file": "ss-ticket.png",
+      "family": "default",
+      "sourcePath": "ss-ticket--hoenn.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/ss-ticket--hoenn.png",
+      "sourceSha256": "eb66f59c0e564e6ce0bb6e08f8488d7b3f89c7d3f8a4a7c51a2460c71c706ade",
+      "sha256": "0889dcaf1e0e15f6c6119fd28b53072c31d6a234908567a908dea760c0af9cd5"
+    },
+    {
+      "itemKey": "contest-pass",
+      "status": "resolved",
+      "file": "contest-pass.png",
+      "family": "default",
+      "sourcePath": "contest-pass.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/contest-pass.png",
+      "sourceSha256": "93bc537cd0a2d8da4ad75e748eb48f0e9d5b28276770a6b8b9302c4d3a572722",
+      "sha256": "c26b355e29770b529a4711e700a90bbbebeb07c4f63a856ffa0d427b7bd9ade8"
+    },
+    {
+      "itemKey": "wailmer-pail",
+      "status": "resolved",
+      "file": "wailmer-pail.png",
+      "family": "default",
+      "sourcePath": "wailmer-pail.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/wailmer-pail.png",
+      "sourceSha256": "3bb0e2118d18ac719d1cf264a36d34123122f7c38c484f86a13e8861bf2f7b91",
+      "sha256": "c45172472c2a0cc8eb3431a1a130c4d3005e219c1b8c2186f2990f26579caa9e"
+    },
+    {
+      "itemKey": "devon-goods",
+      "status": "resolved",
+      "file": "devon-goods.png",
+      "family": "default",
+      "sourcePath": "devon-goods.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/devon-goods.png",
+      "sourceSha256": "238c262eef7390d8cb4d1df9582a1512de77c1887eea1cc79a10404d6d8b6dba",
+      "sha256": "1af7807679fbc12490c592c0fedf8486510cdb350ed090ad2d4626eaa4c73334"
+    },
+    {
+      "itemKey": "soot-sack",
+      "status": "resolved",
+      "file": "soot-sack.png",
+      "family": "default",
+      "sourcePath": "soot-sack.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/soot-sack.png",
+      "sourceSha256": "befd24f163a2861089ce8b9253a689d0a6862899b3e95486e15194fdab6d6646",
+      "sha256": "22a3425de0fe50d7d3f1191bbd6a04a0aa3b601d78fd89a2f4ccf2517c958587"
+    },
+    {
+      "itemKey": "basement-key",
+      "status": "resolved",
+      "file": "basement-key.png",
+      "family": "default",
+      "sourcePath": "basement-key--new-mauville.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/basement-key--new-mauville.png",
+      "sourceSha256": "7d6fb05fe51ebc7e3ad460cb19c0e1a23158792e006651c6883b8f9483ee6a8d",
+      "sha256": "02b92ab3d8d5866beedc2afcedb6d3a9e2b5fb9dca5f622b1d10980a86df66d9"
+    },
+    {
+      "itemKey": "acro-bike",
+      "status": "resolved",
+      "file": "acro-bike.png",
+      "family": "default",
+      "sourcePath": "acro-bike.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/acro-bike.png",
+      "sourceSha256": "67c6008d056c480e7092b9ff69cb3b89b0741a0ef44a2a569986fb16e9f08728",
+      "sha256": "6a4707fbb0fbe1383db60497e7cbecbd0f36484973eea8bbbcb6b34846cc8d35"
+    },
+    {
+      "itemKey": "pokeblock-case",
+      "status": "resolved",
+      "file": "pokeblock-case.png",
+      "family": "default",
+      "sourcePath": "pokeblock-case.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/pokeblock-case.png",
+      "sourceSha256": "8b49c2bf3437aee278bba3916e6baabce0ed85ea45fa2768dfadebd36661ab12",
+      "sha256": "e45855b86686388ae2808f43b623d5394b2d2a0ad07cbb821084364f7f2a7d66"
+    },
+    {
+      "itemKey": "letter",
+      "status": "resolved",
+      "file": "letter.png",
+      "family": "default",
+      "sourcePath": "letter.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/letter.png",
+      "sourceSha256": "61403e6b5e401d8d01dc671ae2289aa27ad1c9dd2556d7b6f9f4fae7a59a976d",
+      "sha256": "5e441f0b20a7d5a78fd2201f58e3a13d37a1b2c194b32348f87148d439b8b781"
+    },
+    {
+      "itemKey": "eon-ticket",
+      "status": "resolved",
+      "file": "eon-ticket.png",
+      "family": "default",
+      "sourcePath": "eon-ticket.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/eon-ticket.png",
+      "sourceSha256": "e7aeb80df447f2da95dd1446b37abd8ddaa25aecd802e608a499cfb2f6d47398",
+      "sha256": "73dd3ea4e9e092771b58741a9c942b07cfbda22aeedb9e0ff2db65bf18b062be"
+    },
+    {
+      "itemKey": "red-orb",
+      "status": "resolved",
+      "file": "red-orb.png",
+      "family": "default",
+      "sourcePath": "red-orb.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/red-orb.png",
+      "sourceSha256": "2594e85902c827286f9953cbff79d8be0995fc07740c2f7a2cb39aa3623ccdf9",
+      "sha256": "1d5230e442df375537f5cbecc90b93051dba8fed7becdd194cfb1444d6cdc9cb"
+    },
+    {
+      "itemKey": "blue-orb",
+      "status": "resolved",
+      "file": "blue-orb.png",
+      "family": "default",
+      "sourcePath": "blue-orb.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/blue-orb.png",
+      "sourceSha256": "cdced517c34ce2b14cfce08a0db87d49bbf97e871f258f9eb3dff9de66771e5b",
+      "sha256": "45d279545b640d409dd31e8128390799f60314eb49732b70086d18262b00e085"
+    },
+    {
+      "itemKey": "scanner",
+      "status": "resolved",
+      "file": "scanner.png",
+      "family": "default",
+      "sourcePath": "scanner.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/scanner.png",
+      "sourceSha256": "b1ee792954129c4055a8e19dd15d3641e0959b2e4d067f1f25683a8bf545a392",
+      "sha256": "b118362b76b151d7be37915e450e2668b8c90dfc3b90f915b3144556e68e497f"
+    },
+    {
+      "itemKey": "go-goggles",
+      "status": "resolved",
+      "file": "go-goggles.png",
+      "family": "default",
+      "sourcePath": "go-goggles.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/go-goggles.png",
+      "sourceSha256": "bf3777e74957de5f6922122f9248608d10af3c6ea4d3ba53985061b73d4e3ff1",
+      "sha256": "58140900aff30a9532e33975994e89a52a34d7eefcd9679e548e02de40f306ab"
+    },
+    {
+      "itemKey": "meteorite",
+      "status": "resolved",
+      "file": "meteorite.png",
+      "family": "default",
+      "sourcePath": "meteorite.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/meteorite.png",
+      "sourceSha256": "31cbb76e1215acb510aa5bc408c8f9c4a5d8417f785a5d3d9c4d3b047c23b1a8",
+      "sha256": "fda0d3d6a38dd85b395a5421119c18bdf72ad5d98275ee113514b712639d4233"
+    },
+    {
+      "itemKey": "room-1-key",
+      "status": "resolved",
+      "file": "room-1-key.png",
+      "family": "default",
+      "sourcePath": "rm-1-key.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/rm-1-key.png",
+      "sourceSha256": "2f741837df88ac6e8c194c2551f953e3a53ac42ff3620109bfa46cca6fcc76ca",
+      "sha256": "0cb183bbce7dc02dc3d9c66b3b87884f2ab44f6e599b61d5564a6d302d06ab6c"
+    },
+    {
+      "itemKey": "room-2-key",
+      "status": "resolved",
+      "file": "room-2-key.png",
+      "family": "default",
+      "sourcePath": "rm-2-key.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/rm-2-key.png",
+      "sourceSha256": "122ada81b7b962af5f8705b9fee3b9f0ca1c3a9913fd34712a4ed0bf0d0bc9cb",
+      "sha256": "8d52cc3871306b83711759dcec1ccb86d98008d6385f75f9f97071713baee8fc"
+    },
+    {
+      "itemKey": "room-4-key",
+      "status": "resolved",
+      "file": "room-4-key.png",
+      "family": "default",
+      "sourcePath": "rm-4-key.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/rm-4-key.png",
+      "sourceSha256": "f8d47032c3b7f402508adf5c519d4eb3140b3804bd1c7f499856655e7930988c",
+      "sha256": "23743480d35deb4c32fb039a3ac093f87dd0e935c5a26d2bc519ccb9546f1eb7"
+    },
+    {
+      "itemKey": "room-6-key",
+      "status": "resolved",
+      "file": "room-6-key.png",
+      "family": "default",
+      "sourcePath": "rm-6-key.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/rm-6-key.png",
+      "sourceSha256": "cd55842aa5f31aa572449281425b47782004923650af8f101364ae4f83293ec7",
+      "sha256": "aa2e140c8b1cf896acf2afff0e9c6821454b7b193de16b7313d1f38aa95fcb01"
+    },
+    {
+      "itemKey": "storage-key",
+      "status": "resolved",
+      "file": "storage-key.png",
+      "family": "default",
+      "sourcePath": "storage-key--sea-mauville.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/storage-key--sea-mauville.png",
+      "sourceSha256": "a9d4e9c4f325dcd6e7f5b024f24401b221df950bfafd13b7d4335b8094a133d9",
+      "sha256": "3368425e91698a570b22fce50467c23439288edae65f75be14032fcc8bb6b7be"
+    },
+    {
+      "itemKey": "root-fossil",
+      "status": "resolved",
+      "file": "root-fossil.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/root-fossil.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/root-fossil.png",
+      "sourceSha256": "db37c509649740623af9d0a54753499984d1fc2824fc3169e713836bf1a40bfd",
+      "sha256": "03be62ec3b0dbf8394fb84f1004340b9ad882bdcb103a4e636735ab3c06f9d49"
+    },
+    {
+      "itemKey": "claw-fossil",
+      "status": "resolved",
+      "file": "claw-fossil.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/claw-fossil.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/claw-fossil.png",
+      "sourceSha256": "72e01b3cb16242b0c573779ec49552a292b00e0c8be1f438a28683120cc5dfc6",
+      "sha256": "4a127f51e8e9b2a1675afd2f0be73df64824ca9cee8d3d4d1e8531f6f852571a"
+    },
+    {
+      "itemKey": "devon-scope",
+      "status": "resolved",
+      "file": "devon-scope.png",
+      "family": "default",
+      "sourcePath": "devon-scope.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/devon-scope.png",
+      "sourceSha256": "b8d5b34360709d8a046045da2b901da40c9cdc3a05d4f207bb084293c6178278",
+      "sha256": "d2785987e0086e30bcb3d94caef975f256530967b88bb0f671b8c01e0330f3d5"
+    },
+    {
+      "itemKey": "tm01-focus-punch",
+      "status": "resolved",
+      "file": "tm01-focus-punch.png",
+      "family": "default",
+      "sourcePath": "tm-fighting.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-fighting.png",
+      "sourceSha256": "dd51d0c80ec5186afabb224371126ef87dd71015a6634e9f4008f8e8ece6bd07",
+      "sha256": "f2ad12c4cd425eb91e57bb9320ef54ca12fbc686a83bfda14270a5e4ffe98611"
+    },
+    {
+      "itemKey": "tm02-dragon-claw",
+      "status": "resolved",
+      "file": "tm02-dragon-claw.png",
+      "family": "default",
+      "sourcePath": "tm-dragon.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-dragon.png",
+      "sourceSha256": "4ce9a88348db98cae84c0a574b4c27fbbfd380227849e2188f4723f4b7693ad7",
+      "sha256": "0eb641fc611053a5f2fe117fea2a79e185e2ad855286c314c90bf275796e9d37"
+    },
+    {
+      "itemKey": "tm03-water-pulse",
+      "status": "resolved",
+      "file": "tm03-water-pulse.png",
+      "family": "default",
+      "sourcePath": "tm-water.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-water.png",
+      "sourceSha256": "d0512082244a4e5a1c99c150d7eec98c300135d93eec5e651b32a9f686ed25aa",
+      "sha256": "32b75261863ce01ff0e5f8d71acdee1655464d1117016a62a219b73e63ba8905"
+    },
+    {
+      "itemKey": "tm04-calm-mind",
+      "status": "resolved",
+      "file": "tm04-calm-mind.png",
+      "family": "default",
+      "sourcePath": "tm-psychic.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-psychic.png",
+      "sourceSha256": "2389efbbf9db12a15d27ecae5178fe05fb364dc8e83e54416782861be9181e38",
+      "sha256": "40879d10373aa6af8c7bc2b43a125105a015355c03c931681278b743eb272530"
+    },
+    {
+      "itemKey": "tm05-roar",
+      "status": "resolved",
+      "file": "tm05-roar.png",
+      "family": "default",
+      "sourcePath": "tm-normal.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-normal.png",
+      "sourceSha256": "b349d5435a7b8d14c50c4f0b6e2bd9bb65b6b6d6dd6c44613e9255682702b5bc",
+      "sha256": "7c2c8a1756bcffa11d6fc1dacaae0d2d235270089e4948d47b06edbc5ee19cde"
+    },
+    {
+      "itemKey": "tm06-toxic",
+      "status": "resolved",
+      "file": "tm06-toxic.png",
+      "family": "default",
+      "sourcePath": "tm-poison.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-poison.png",
+      "sourceSha256": "3532241b3d2912ef5c434878e51be175481a6c99dc6f4f5d5d1146be8b4b9d7d",
+      "sha256": "fd3dc6437777f5840f7c992d28f14403576c93e57a7781a9037c98d3a95669cd"
+    },
+    {
+      "itemKey": "tm07-hail",
+      "status": "resolved",
+      "file": "tm07-hail.png",
+      "family": "default",
+      "sourcePath": "tm-ice.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-ice.png",
+      "sourceSha256": "53f48f29f6bdea329d44582e0d268eccf2facc762088dcd69d9c5902ccc9164a",
+      "sha256": "1e523d71e1af660efa48f383b706c9393d0c800579fed3a967a31b7a7f010cc2"
+    },
+    {
+      "itemKey": "tm08-bulk-up",
+      "status": "resolved",
+      "file": "tm08-bulk-up.png",
+      "family": "default",
+      "sourcePath": "tm-fighting.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-fighting.png",
+      "sourceSha256": "dd51d0c80ec5186afabb224371126ef87dd71015a6634e9f4008f8e8ece6bd07",
+      "sha256": "f2ad12c4cd425eb91e57bb9320ef54ca12fbc686a83bfda14270a5e4ffe98611"
+    },
+    {
+      "itemKey": "tm09-bullet-seed",
+      "status": "resolved",
+      "file": "tm09-bullet-seed.png",
+      "family": "default",
+      "sourcePath": "tm-grass.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-grass.png",
+      "sourceSha256": "accad0bdbdf1d9f7c7d72b7cc152872be6a5d10f6ec37f645ef9906d2e6f02fa",
+      "sha256": "7f633eba598eb5f0e9df4d8de8917692e9ba8f4f65edda3a053f51ee97cb1b81"
+    },
+    {
+      "itemKey": "tm10-hidden-power",
+      "status": "resolved",
+      "file": "tm10-hidden-power.png",
+      "family": "default",
+      "sourcePath": "tm-normal.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-normal.png",
+      "sourceSha256": "b349d5435a7b8d14c50c4f0b6e2bd9bb65b6b6d6dd6c44613e9255682702b5bc",
+      "sha256": "7c2c8a1756bcffa11d6fc1dacaae0d2d235270089e4948d47b06edbc5ee19cde"
+    },
+    {
+      "itemKey": "tm11-sunny-day",
+      "status": "resolved",
+      "file": "tm11-sunny-day.png",
+      "family": "default",
+      "sourcePath": "tm-fire.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-fire.png",
+      "sourceSha256": "10c0559ce0777d405ed071d6288be4c4c7d378f52318c88dcc4d3054dbd73724",
+      "sha256": "7088b0393750890767e1e4c382675b6df339e89803688b3fa2b13978cbf76a48"
+    },
+    {
+      "itemKey": "tm12-taunt",
+      "status": "resolved",
+      "file": "tm12-taunt.png",
+      "family": "default",
+      "sourcePath": "tm-dark.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-dark.png",
+      "sourceSha256": "6ffecdbf68d1d69870ab11038af3d7d477066f510dc21e6fc925ace9fd53c9e4",
+      "sha256": "92c5536ca8f747b06bf2d1096fad6b8cedd25d3e15253bfc60b414bb26b5fd44"
+    },
+    {
+      "itemKey": "tm13-ice-beam",
+      "status": "resolved",
+      "file": "tm13-ice-beam.png",
+      "family": "default",
+      "sourcePath": "tm-ice.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-ice.png",
+      "sourceSha256": "53f48f29f6bdea329d44582e0d268eccf2facc762088dcd69d9c5902ccc9164a",
+      "sha256": "1e523d71e1af660efa48f383b706c9393d0c800579fed3a967a31b7a7f010cc2"
+    },
+    {
+      "itemKey": "tm14-blizzard",
+      "status": "resolved",
+      "file": "tm14-blizzard.png",
+      "family": "default",
+      "sourcePath": "tm-ice.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-ice.png",
+      "sourceSha256": "53f48f29f6bdea329d44582e0d268eccf2facc762088dcd69d9c5902ccc9164a",
+      "sha256": "1e523d71e1af660efa48f383b706c9393d0c800579fed3a967a31b7a7f010cc2"
+    },
+    {
+      "itemKey": "tm15-hyper-beam",
+      "status": "resolved",
+      "file": "tm15-hyper-beam.png",
+      "family": "default",
+      "sourcePath": "tm-normal.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-normal.png",
+      "sourceSha256": "b349d5435a7b8d14c50c4f0b6e2bd9bb65b6b6d6dd6c44613e9255682702b5bc",
+      "sha256": "7c2c8a1756bcffa11d6fc1dacaae0d2d235270089e4948d47b06edbc5ee19cde"
+    },
+    {
+      "itemKey": "tm16-light-screen",
+      "status": "resolved",
+      "file": "tm16-light-screen.png",
+      "family": "default",
+      "sourcePath": "tm-psychic.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-psychic.png",
+      "sourceSha256": "2389efbbf9db12a15d27ecae5178fe05fb364dc8e83e54416782861be9181e38",
+      "sha256": "40879d10373aa6af8c7bc2b43a125105a015355c03c931681278b743eb272530"
+    },
+    {
+      "itemKey": "tm17-protect",
+      "status": "resolved",
+      "file": "tm17-protect.png",
+      "family": "default",
+      "sourcePath": "tm-normal.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-normal.png",
+      "sourceSha256": "b349d5435a7b8d14c50c4f0b6e2bd9bb65b6b6d6dd6c44613e9255682702b5bc",
+      "sha256": "7c2c8a1756bcffa11d6fc1dacaae0d2d235270089e4948d47b06edbc5ee19cde"
+    },
+    {
+      "itemKey": "tm18-rain-dance",
+      "status": "resolved",
+      "file": "tm18-rain-dance.png",
+      "family": "default",
+      "sourcePath": "tm-water.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-water.png",
+      "sourceSha256": "d0512082244a4e5a1c99c150d7eec98c300135d93eec5e651b32a9f686ed25aa",
+      "sha256": "32b75261863ce01ff0e5f8d71acdee1655464d1117016a62a219b73e63ba8905"
+    },
+    {
+      "itemKey": "tm19-giga-drain",
+      "status": "resolved",
+      "file": "tm19-giga-drain.png",
+      "family": "default",
+      "sourcePath": "tm-grass.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-grass.png",
+      "sourceSha256": "accad0bdbdf1d9f7c7d72b7cc152872be6a5d10f6ec37f645ef9906d2e6f02fa",
+      "sha256": "7f633eba598eb5f0e9df4d8de8917692e9ba8f4f65edda3a053f51ee97cb1b81"
+    },
+    {
+      "itemKey": "tm20-safeguard",
+      "status": "resolved",
+      "file": "tm20-safeguard.png",
+      "family": "default",
+      "sourcePath": "tm-normal.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-normal.png",
+      "sourceSha256": "b349d5435a7b8d14c50c4f0b6e2bd9bb65b6b6d6dd6c44613e9255682702b5bc",
+      "sha256": "7c2c8a1756bcffa11d6fc1dacaae0d2d235270089e4948d47b06edbc5ee19cde"
+    },
+    {
+      "itemKey": "tm21-frustration",
+      "status": "resolved",
+      "file": "tm21-frustration.png",
+      "family": "default",
+      "sourcePath": "tm-normal.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-normal.png",
+      "sourceSha256": "b349d5435a7b8d14c50c4f0b6e2bd9bb65b6b6d6dd6c44613e9255682702b5bc",
+      "sha256": "7c2c8a1756bcffa11d6fc1dacaae0d2d235270089e4948d47b06edbc5ee19cde"
+    },
+    {
+      "itemKey": "tm22-solarbeam",
+      "status": "resolved",
+      "file": "tm22-solarbeam.png",
+      "family": "default",
+      "sourcePath": "tm-grass.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-grass.png",
+      "sourceSha256": "accad0bdbdf1d9f7c7d72b7cc152872be6a5d10f6ec37f645ef9906d2e6f02fa",
+      "sha256": "7f633eba598eb5f0e9df4d8de8917692e9ba8f4f65edda3a053f51ee97cb1b81"
+    },
+    {
+      "itemKey": "tm23-iron-tail",
+      "status": "resolved",
+      "file": "tm23-iron-tail.png",
+      "family": "default",
+      "sourcePath": "tm-steel.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-steel.png",
+      "sourceSha256": "1cf00567c832ab6c93b6e6dff60cb1f8eef4b05150f0c254dfaa1c2400c7b010",
+      "sha256": "2546c5bc6dcc23a18f5ec758c4ad922b9a8d87c885f0220d01ee4b48fd6ab4d3"
+    },
+    {
+      "itemKey": "tm24-thunderbolt",
+      "status": "resolved",
+      "file": "tm24-thunderbolt.png",
+      "family": "default",
+      "sourcePath": "tm-electric.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-electric.png",
+      "sourceSha256": "9836de38bf7f2de336293f91b58a7cd74d5573a36829e07e94450a60125c2bb7",
+      "sha256": "a75c6c7c847cbc744e740726a58978a86f622b325571203bda1048acf68274a5"
+    },
+    {
+      "itemKey": "tm25-thunder",
+      "status": "resolved",
+      "file": "tm25-thunder.png",
+      "family": "default",
+      "sourcePath": "tm-electric.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-electric.png",
+      "sourceSha256": "9836de38bf7f2de336293f91b58a7cd74d5573a36829e07e94450a60125c2bb7",
+      "sha256": "a75c6c7c847cbc744e740726a58978a86f622b325571203bda1048acf68274a5"
+    },
+    {
+      "itemKey": "tm26-earthquake",
+      "status": "resolved",
+      "file": "tm26-earthquake.png",
+      "family": "default",
+      "sourcePath": "tm-ground.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-ground.png",
+      "sourceSha256": "23c091a15e5b744fdf29e9c28e601ffb3d3009a9f68ff1956d22448ae88b3f21",
+      "sha256": "64add764c14def1911bde88930af2283f03721a02dccac0339a628940b762ae2"
+    },
+    {
+      "itemKey": "tm27-return",
+      "status": "resolved",
+      "file": "tm27-return.png",
+      "family": "default",
+      "sourcePath": "tm-normal.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-normal.png",
+      "sourceSha256": "b349d5435a7b8d14c50c4f0b6e2bd9bb65b6b6d6dd6c44613e9255682702b5bc",
+      "sha256": "7c2c8a1756bcffa11d6fc1dacaae0d2d235270089e4948d47b06edbc5ee19cde"
+    },
+    {
+      "itemKey": "tm28-dig",
+      "status": "resolved",
+      "file": "tm28-dig.png",
+      "family": "default",
+      "sourcePath": "tm-ground.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-ground.png",
+      "sourceSha256": "23c091a15e5b744fdf29e9c28e601ffb3d3009a9f68ff1956d22448ae88b3f21",
+      "sha256": "64add764c14def1911bde88930af2283f03721a02dccac0339a628940b762ae2"
+    },
+    {
+      "itemKey": "tm29-psychic",
+      "status": "resolved",
+      "file": "tm29-psychic.png",
+      "family": "default",
+      "sourcePath": "tm-psychic.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-psychic.png",
+      "sourceSha256": "2389efbbf9db12a15d27ecae5178fe05fb364dc8e83e54416782861be9181e38",
+      "sha256": "40879d10373aa6af8c7bc2b43a125105a015355c03c931681278b743eb272530"
+    },
+    {
+      "itemKey": "tm30-shadow-ball",
+      "status": "resolved",
+      "file": "tm30-shadow-ball.png",
+      "family": "default",
+      "sourcePath": "tm-ghost.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-ghost.png",
+      "sourceSha256": "abd8009245077dec203577d3b6d899372f58f5ac744a9726e6804f9cf506965f",
+      "sha256": "6b5da4156864fb0e02bb8adcfccc05390bc256e6f879f0be826b597d251a366f"
+    },
+    {
+      "itemKey": "tm31-brick-break",
+      "status": "resolved",
+      "file": "tm31-brick-break.png",
+      "family": "default",
+      "sourcePath": "tm-fighting.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-fighting.png",
+      "sourceSha256": "dd51d0c80ec5186afabb224371126ef87dd71015a6634e9f4008f8e8ece6bd07",
+      "sha256": "f2ad12c4cd425eb91e57bb9320ef54ca12fbc686a83bfda14270a5e4ffe98611"
+    },
+    {
+      "itemKey": "tm32-double-team",
+      "status": "resolved",
+      "file": "tm32-double-team.png",
+      "family": "default",
+      "sourcePath": "tm-normal.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-normal.png",
+      "sourceSha256": "b349d5435a7b8d14c50c4f0b6e2bd9bb65b6b6d6dd6c44613e9255682702b5bc",
+      "sha256": "7c2c8a1756bcffa11d6fc1dacaae0d2d235270089e4948d47b06edbc5ee19cde"
+    },
+    {
+      "itemKey": "tm33-reflect",
+      "status": "resolved",
+      "file": "tm33-reflect.png",
+      "family": "default",
+      "sourcePath": "tm-psychic.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-psychic.png",
+      "sourceSha256": "2389efbbf9db12a15d27ecae5178fe05fb364dc8e83e54416782861be9181e38",
+      "sha256": "40879d10373aa6af8c7bc2b43a125105a015355c03c931681278b743eb272530"
+    },
+    {
+      "itemKey": "tm34-shock-wave",
+      "status": "resolved",
+      "file": "tm34-shock-wave.png",
+      "family": "default",
+      "sourcePath": "tm-electric.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-electric.png",
+      "sourceSha256": "9836de38bf7f2de336293f91b58a7cd74d5573a36829e07e94450a60125c2bb7",
+      "sha256": "a75c6c7c847cbc744e740726a58978a86f622b325571203bda1048acf68274a5"
+    },
+    {
+      "itemKey": "tm35-flamethrower",
+      "status": "resolved",
+      "file": "tm35-flamethrower.png",
+      "family": "default",
+      "sourcePath": "tm-fire.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-fire.png",
+      "sourceSha256": "10c0559ce0777d405ed071d6288be4c4c7d378f52318c88dcc4d3054dbd73724",
+      "sha256": "7088b0393750890767e1e4c382675b6df339e89803688b3fa2b13978cbf76a48"
+    },
+    {
+      "itemKey": "tm36-sludge-bomb",
+      "status": "resolved",
+      "file": "tm36-sludge-bomb.png",
+      "family": "default",
+      "sourcePath": "tm-poison.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-poison.png",
+      "sourceSha256": "3532241b3d2912ef5c434878e51be175481a6c99dc6f4f5d5d1146be8b4b9d7d",
+      "sha256": "fd3dc6437777f5840f7c992d28f14403576c93e57a7781a9037c98d3a95669cd"
+    },
+    {
+      "itemKey": "tm37-sandstorm",
+      "status": "resolved",
+      "file": "tm37-sandstorm.png",
+      "family": "default",
+      "sourcePath": "tm-rock.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-rock.png",
+      "sourceSha256": "ec3119e7fc5483ad11c04ccfd9f692500e53b130dd72c9682344b1b456f33aa6",
+      "sha256": "c20ebe56d39b20201b0952c054aa6cd63f671594d1c0ee18357cd6e93ea222c0"
+    },
+    {
+      "itemKey": "tm38-fire-blast",
+      "status": "resolved",
+      "file": "tm38-fire-blast.png",
+      "family": "default",
+      "sourcePath": "tm-fire.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-fire.png",
+      "sourceSha256": "10c0559ce0777d405ed071d6288be4c4c7d378f52318c88dcc4d3054dbd73724",
+      "sha256": "7088b0393750890767e1e4c382675b6df339e89803688b3fa2b13978cbf76a48"
+    },
+    {
+      "itemKey": "tm39-rock-tomb",
+      "status": "resolved",
+      "file": "tm39-rock-tomb.png",
+      "family": "default",
+      "sourcePath": "tm-rock.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-rock.png",
+      "sourceSha256": "ec3119e7fc5483ad11c04ccfd9f692500e53b130dd72c9682344b1b456f33aa6",
+      "sha256": "c20ebe56d39b20201b0952c054aa6cd63f671594d1c0ee18357cd6e93ea222c0"
+    },
+    {
+      "itemKey": "tm40-aerial-ace",
+      "status": "resolved",
+      "file": "tm40-aerial-ace.png",
+      "family": "default",
+      "sourcePath": "tm-flying.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-flying.png",
+      "sourceSha256": "d4f51a9341c23bd1838060639cbf844ae4452775333e5d7b9d97605ca54a0c7a",
+      "sha256": "c0f2ea00ff1de77aa4a2aa5a325b1b2b4343197fd058f3757c47820b3c871ea1"
+    },
+    {
+      "itemKey": "tm41-torment",
+      "status": "resolved",
+      "file": "tm41-torment.png",
+      "family": "default",
+      "sourcePath": "tm-dark.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-dark.png",
+      "sourceSha256": "6ffecdbf68d1d69870ab11038af3d7d477066f510dc21e6fc925ace9fd53c9e4",
+      "sha256": "92c5536ca8f747b06bf2d1096fad6b8cedd25d3e15253bfc60b414bb26b5fd44"
+    },
+    {
+      "itemKey": "tm42-facade",
+      "status": "resolved",
+      "file": "tm42-facade.png",
+      "family": "default",
+      "sourcePath": "tm-normal.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-normal.png",
+      "sourceSha256": "b349d5435a7b8d14c50c4f0b6e2bd9bb65b6b6d6dd6c44613e9255682702b5bc",
+      "sha256": "7c2c8a1756bcffa11d6fc1dacaae0d2d235270089e4948d47b06edbc5ee19cde"
+    },
+    {
+      "itemKey": "tm43-secret-power",
+      "status": "resolved",
+      "file": "tm43-secret-power.png",
+      "family": "default",
+      "sourcePath": "tm-normal.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-normal.png",
+      "sourceSha256": "b349d5435a7b8d14c50c4f0b6e2bd9bb65b6b6d6dd6c44613e9255682702b5bc",
+      "sha256": "7c2c8a1756bcffa11d6fc1dacaae0d2d235270089e4948d47b06edbc5ee19cde"
+    },
+    {
+      "itemKey": "tm44-rest",
+      "status": "resolved",
+      "file": "tm44-rest.png",
+      "family": "default",
+      "sourcePath": "tm-psychic.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-psychic.png",
+      "sourceSha256": "2389efbbf9db12a15d27ecae5178fe05fb364dc8e83e54416782861be9181e38",
+      "sha256": "40879d10373aa6af8c7bc2b43a125105a015355c03c931681278b743eb272530"
+    },
+    {
+      "itemKey": "tm45-attract",
+      "status": "resolved",
+      "file": "tm45-attract.png",
+      "family": "default",
+      "sourcePath": "tm-normal.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-normal.png",
+      "sourceSha256": "b349d5435a7b8d14c50c4f0b6e2bd9bb65b6b6d6dd6c44613e9255682702b5bc",
+      "sha256": "7c2c8a1756bcffa11d6fc1dacaae0d2d235270089e4948d47b06edbc5ee19cde"
+    },
+    {
+      "itemKey": "tm46-thief",
+      "status": "resolved",
+      "file": "tm46-thief.png",
+      "family": "default",
+      "sourcePath": "tm-dark.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-dark.png",
+      "sourceSha256": "6ffecdbf68d1d69870ab11038af3d7d477066f510dc21e6fc925ace9fd53c9e4",
+      "sha256": "92c5536ca8f747b06bf2d1096fad6b8cedd25d3e15253bfc60b414bb26b5fd44"
+    },
+    {
+      "itemKey": "tm47-steel-wing",
+      "status": "resolved",
+      "file": "tm47-steel-wing.png",
+      "family": "default",
+      "sourcePath": "tm-steel.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-steel.png",
+      "sourceSha256": "1cf00567c832ab6c93b6e6dff60cb1f8eef4b05150f0c254dfaa1c2400c7b010",
+      "sha256": "2546c5bc6dcc23a18f5ec758c4ad922b9a8d87c885f0220d01ee4b48fd6ab4d3"
+    },
+    {
+      "itemKey": "tm48-skill-swap",
+      "status": "resolved",
+      "file": "tm48-skill-swap.png",
+      "family": "default",
+      "sourcePath": "tm-psychic.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-psychic.png",
+      "sourceSha256": "2389efbbf9db12a15d27ecae5178fe05fb364dc8e83e54416782861be9181e38",
+      "sha256": "40879d10373aa6af8c7bc2b43a125105a015355c03c931681278b743eb272530"
+    },
+    {
+      "itemKey": "tm49-snatch",
+      "status": "resolved",
+      "file": "tm49-snatch.png",
+      "family": "default",
+      "sourcePath": "tm-dark.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-dark.png",
+      "sourceSha256": "6ffecdbf68d1d69870ab11038af3d7d477066f510dc21e6fc925ace9fd53c9e4",
+      "sha256": "92c5536ca8f747b06bf2d1096fad6b8cedd25d3e15253bfc60b414bb26b5fd44"
+    },
+    {
+      "itemKey": "tm50-overheat",
+      "status": "resolved",
+      "file": "tm50-overheat.png",
+      "family": "default",
+      "sourcePath": "tm-fire.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-fire.png",
+      "sourceSha256": "10c0559ce0777d405ed071d6288be4c4c7d378f52318c88dcc4d3054dbd73724",
+      "sha256": "7088b0393750890767e1e4c382675b6df339e89803688b3fa2b13978cbf76a48"
+    },
+    {
+      "itemKey": "hm01-cut",
+      "status": "resolved",
+      "file": "hm01-cut.png",
+      "family": "default",
+      "sourcePath": "hm-normal.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/hm-normal.png",
+      "sourceSha256": "b349d5435a7b8d14c50c4f0b6e2bd9bb65b6b6d6dd6c44613e9255682702b5bc",
+      "sha256": "7c2c8a1756bcffa11d6fc1dacaae0d2d235270089e4948d47b06edbc5ee19cde"
+    },
+    {
+      "itemKey": "hm02-fly",
+      "status": "resolved",
+      "file": "hm02-fly.png",
+      "family": "default",
+      "sourcePath": "hm-flying.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/hm-flying.png",
+      "sourceSha256": "ed3d64caa6a1597f6b8a8bd4770a925589e499370ede81360c12b5b7ea04346b",
+      "sha256": "9a5763b57fc4e815e6def6a5d54a967bcbb7a52fa2c6b725abf7f160e9a191dd"
+    },
+    {
+      "itemKey": "hm03-surf",
+      "status": "resolved",
+      "file": "hm03-surf.png",
+      "family": "default",
+      "sourcePath": "hm-water.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/hm-water.png",
+      "sourceSha256": "036c87f3e5572692d3dbf3eb70c579a5acd12e3a7c74f53c827712d8e6a6363a",
+      "sha256": "7845317d2a838488e6835b5f788ff2db5090ff9cc931574f4a6915d96062e97b"
+    },
+    {
+      "itemKey": "hm04-strength",
+      "status": "resolved",
+      "file": "hm04-strength.png",
+      "family": "default",
+      "sourcePath": "hm-normal.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/hm-normal.png",
+      "sourceSha256": "b349d5435a7b8d14c50c4f0b6e2bd9bb65b6b6d6dd6c44613e9255682702b5bc",
+      "sha256": "7c2c8a1756bcffa11d6fc1dacaae0d2d235270089e4948d47b06edbc5ee19cde"
+    },
+    {
+      "itemKey": "hm05-flash",
+      "status": "resolved",
+      "file": "hm05-flash.png",
+      "family": "default",
+      "sourcePath": "hm-normal.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/hm-normal.png",
+      "sourceSha256": "b349d5435a7b8d14c50c4f0b6e2bd9bb65b6b6d6dd6c44613e9255682702b5bc",
+      "sha256": "7c2c8a1756bcffa11d6fc1dacaae0d2d235270089e4948d47b06edbc5ee19cde"
+    },
+    {
+      "itemKey": "hm06-rock-smash",
+      "status": "resolved",
+      "file": "hm06-rock-smash.png",
+      "family": "default",
+      "sourcePath": "hm-fighting.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/hm-fighting.png",
+      "sourceSha256": "449b9561993e5d9427299c49f07ce7f882f8a7ecb8bf7a96213d385ccc854c61",
+      "sha256": "5be33ef637f39f3fa79f3af25d35fe5b354d461c436d8a7b64785da136c2ae1d"
+    },
+    {
+      "itemKey": "hm07-waterfall",
+      "status": "resolved",
+      "file": "hm07-waterfall.png",
+      "family": "default",
+      "sourcePath": "hm-water.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/hm-water.png",
+      "sourceSha256": "036c87f3e5572692d3dbf3eb70c579a5acd12e3a7c74f53c827712d8e6a6363a",
+      "sha256": "7845317d2a838488e6835b5f788ff2db5090ff9cc931574f4a6915d96062e97b"
+    },
+    {
+      "itemKey": "hm08-dive",
+      "status": "resolved",
+      "file": "hm08-dive.png",
+      "family": "default",
+      "sourcePath": "hm-water.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/hm-water.png",
+      "sourceSha256": "036c87f3e5572692d3dbf3eb70c579a5acd12e3a7c74f53c827712d8e6a6363a",
+      "sha256": "7845317d2a838488e6835b5f788ff2db5090ff9cc931574f4a6915d96062e97b"
+    },
+    {
+      "itemKey": "oaks-parcel",
+      "status": "resolved",
+      "file": "oaks-parcel.png",
+      "family": "default",
+      "sourcePath": "oaks-parcel.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/oaks-parcel.png",
+      "sourceSha256": "8ac15a98cdf7da8b29650ede0e29681d165b79cff52c39d001139312c93cd60f",
+      "sha256": "ebe11bd60a8902b704f50208b07e87fe6d86cb9080cd3374a673fa412624ee47"
+    },
+    {
+      "itemKey": "poke-flute",
+      "status": "resolved",
+      "file": "poke-flute.png",
+      "family": "default",
+      "sourcePath": "poke-flute.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/poke-flute.png",
+      "sourceSha256": "cf3111c243aa41c4ce5324bebf1ecf43a01d4e4f06bf1c0d53e9e4dc69462957",
+      "sha256": "a3bbf26df325c8aa64ff1d7e6a3efe5b235ec6bbfb65dc00f654cb208cf02cb5"
+    },
+    {
+      "itemKey": "secret-key",
+      "status": "resolved",
+      "file": "secret-key.png",
+      "family": "default",
+      "sourcePath": "secret-key.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/secret-key.png",
+      "sourceSha256": "2d928504f72ca79d170c9794a2faaa11c981d4fd8611b605425bb38ed0e0a269",
+      "sha256": "cb6e81be31d450c5b9a3be8997d6bc619d1816e999ac3eed14a38d88cd223fd8"
+    },
+    {
+      "itemKey": "bike-voucher",
+      "status": "resolved",
+      "file": "bike-voucher.png",
+      "family": "default",
+      "sourcePath": "bike-voucher.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/bike-voucher.png",
+      "sourceSha256": "3a0baf5bd720bea7e39be3082986b2a599cc97495fc55544abbf4ace11b22ebf",
+      "sha256": "f23438b1b6a38f9911e27fc97507b42b907792bc262282423d6f6810dfc5a6e8"
+    },
+    {
+      "itemKey": "gold-teeth",
+      "status": "resolved",
+      "file": "gold-teeth.png",
+      "family": "default",
+      "sourcePath": "gold-teeth.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/gold-teeth.png",
+      "sourceSha256": "97cc578c80010ff527e3c54f316737a64c1de46f23990c505a54351d0143f7d9",
+      "sha256": "1c548db906e81b59376e4d6a4f2d8f446539a34f6d40103cab09a2e720c65d40"
+    },
+    {
+      "itemKey": "old-amber",
+      "status": "resolved",
+      "file": "old-amber.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/old-amber.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/old-amber.png",
+      "sourceSha256": "7055bef7c628d33d40967e85ff38dc4f1720428954f07c7d7e6532c442e968d6",
+      "sha256": "b151efeedacf8f1e6189a84101698686846df4a0dbabc87d708c2032d41dcbe7"
+    },
+    {
+      "itemKey": "card-key",
+      "status": "resolved",
+      "file": "card-key.png",
+      "family": "default",
+      "sourcePath": "card-key.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/card-key.png",
+      "sourceSha256": "17cecedf60b38785b0008955adfb8cfaa3b38dc6617f81d50202107363081a56",
+      "sha256": "ab522512fe95c31cb258880fd952b800fe020f91740ffb59a34f7662a50d4bef"
+    },
+    {
+      "itemKey": "lift-key",
+      "status": "resolved",
+      "file": "lift-key.png",
+      "family": "default",
+      "sourcePath": "lift-key.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/lift-key.png",
+      "sourceSha256": "41ed0664c2d64e5d7c1c274a9ab4145c8ae455e58d15743af8a51881aa4df473",
+      "sha256": "30520f257784733e10b9434cbcfe5cee516ccf84610fb33b093d327a282bf5fc"
+    },
+    {
+      "itemKey": "helix-fossil",
+      "status": "resolved",
+      "file": "helix-fossil.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/helix-fossil.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/helix-fossil.png",
+      "sourceSha256": "b0d3c9978a7c5c9f714881bafe59312cc035035803fa325b07d05c592edadaf4",
+      "sha256": "6bab6e10f032808dd7ff6c6b83bd51f4711cc69bb43d848bf34931b6c05322ac"
+    },
+    {
+      "itemKey": "dome-fossil",
+      "status": "resolved",
+      "file": "dome-fossil.png",
+      "family": "dream-world",
+      "sourcePath": "dream-world/dome-fossil.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/dream-world/dome-fossil.png",
+      "sourceSha256": "b7b6aaf42f932cce8b4d2cb9ab2c0e2c6e5f30d078a1bc4a423174d103d52b02",
+      "sha256": "bb72f6b69105b63b7e98b521afdf1a093a697c0e08527feeaf5ba2a8ba574053"
+    },
+    {
+      "itemKey": "silph-scope",
+      "status": "resolved",
+      "file": "silph-scope.png",
+      "family": "default",
+      "sourcePath": "silph-scope.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/silph-scope.png",
+      "sourceSha256": "c15160745816cf34d6088be3cf6d285d2c71cc7ad05fb80be83d0abd37718da4",
+      "sha256": "194bd2b0309f53c18c328185635df7a6209e874ab6c1d471a95e225c2e52e3e4"
+    },
+    {
+      "itemKey": "bicycle",
+      "status": "resolved",
+      "file": "bicycle.png",
+      "family": "default",
+      "sourcePath": "bicycle.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/bicycle.png",
+      "sourceSha256": "4b74371617d85fcba45c7339c0de3580d4236f9d48eb0f2a0be0439bef23e3ab",
+      "sha256": "f9500de9ee6fbc1081e8cf403a75a058d93a1c115460d8759e7571b9189221f8"
+    },
+    {
+      "itemKey": "town-map",
+      "status": "resolved",
+      "file": "town-map.png",
+      "family": "default",
+      "sourcePath": "town-map.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/town-map.png",
+      "sourceSha256": "c5ae1f5e2ffdc72eaaf99b57922cd054230f76c17f90d3c643cff9b13fb0de57",
+      "sha256": "8bff375e21be22e0399ca2bf6bf027f27c193f6ff8d4969e479fbe1fd8d9cc55"
+    },
+    {
+      "itemKey": "vs-seeker",
+      "status": "resolved",
+      "file": "vs-seeker.png",
+      "family": "default",
+      "sourcePath": "vs-seeker.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/vs-seeker.png",
+      "sourceSha256": "04a751d19c694ca24596871321f45cc5dea91856e6f9bbc2c4bb8cba8479d2d9",
+      "sha256": "c64a8aee1e09d7934666c72ce434a194c3d0a05023086cb42758d9cb954d3d3e"
+    },
+    {
+      "itemKey": "fame-checker",
+      "status": "resolved",
+      "file": "fame-checker.png",
+      "family": "default",
+      "sourcePath": "fame-checker.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/fame-checker.png",
+      "sourceSha256": "fc449d441ca2829f0e472fb8d6dc5d6ca77480329933d9ebc8cd8aca7a353f7c",
+      "sha256": "dac4e1f98d6d87ee0fc75679f40f83d25f8a6bec479d37c2ae36441f1c538261"
+    },
+    {
+      "itemKey": "tm-case",
+      "status": "resolved",
+      "file": "tm-case.png",
+      "family": "default",
+      "sourcePath": "tm-case.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tm-case.png",
+      "sourceSha256": "62881204a24ae5972f1f67222fc2e6161f302334b4a56bcfd31dbca940102c95",
+      "sha256": "7dbb97922198a5379549084dc81e4ff2b359fdfd35d6ca38f866e393b350d5e8"
+    },
+    {
+      "itemKey": "berry-pouch",
+      "status": "resolved",
+      "file": "berry-pouch.png",
+      "family": "default",
+      "sourcePath": "berry-pouch.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/berry-pouch.png",
+      "sourceSha256": "56d7163f668f3899c1dbaea0c12a56ba4b215542db99de8bda49bd24fa92b879",
+      "sha256": "c1fda8985211815e76cc67ad3f3624a1cca0117c241613b8b4978938b3be210d"
+    },
+    {
+      "itemKey": "teachy-tv",
+      "status": "resolved",
+      "file": "teachy-tv.png",
+      "family": "default",
+      "sourcePath": "teachy-tv.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/teachy-tv.png",
+      "sourceSha256": "8d6d9996a06b4f6a2c775b08f741a881dac2a53a287049291e5b0100cb85d9c0",
+      "sha256": "726e135e11847cdf051b88cebe235a4f7f75e0664689b9958af0c80ef4cf44be"
+    },
+    {
+      "itemKey": "tri-pass",
+      "status": "resolved",
+      "file": "tri-pass.png",
+      "family": "default",
+      "sourcePath": "tri-pass.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tri-pass.png",
+      "sourceSha256": "6f509c1ca13d6f1bbfb4f426e3bbdaa54c085e8150b90a53cd76d13e29e9568b",
+      "sha256": "f3deb494fc9563b5e524ae8a7d6c5a4025a7e1a4e613dad6bbcc6e468a9d6a4b"
+    },
+    {
+      "itemKey": "rainbow-pass",
+      "status": "resolved",
+      "file": "rainbow-pass.png",
+      "family": "default",
+      "sourcePath": "rainbow-pass.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/rainbow-pass.png",
+      "sourceSha256": "0b4dfe54fe6502a54bed45d9e229b715e996274f57508d16a26f59924bf28109",
+      "sha256": "e7087be282462a3019e19a36ff78267648066535e314f20f0c559175817f198e"
+    },
+    {
+      "itemKey": "tea",
+      "status": "resolved",
+      "file": "tea.png",
+      "family": "default",
+      "sourcePath": "tea.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/tea.png",
+      "sourceSha256": "5e0220fdcde7785a89a788604b798d996310390446232eae117559db5b049a64",
+      "sha256": "ebd89584623201174a4afe3886ca39a124289404417eedc324b1d6aa4cba6da9"
+    },
+    {
+      "itemKey": "mystic-ticket",
+      "status": "resolved",
+      "file": "mystic-ticket.png",
+      "family": "default",
+      "sourcePath": "mysticticket.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/mysticticket.png",
+      "sourceSha256": "47201a6d28c2c1062f29c52a601d93b78c6b1abc5b7ac1c6a1234a297f051bb8",
+      "sha256": "d53148e44559013df4a88ac0127c0a2c95812150f9ac3646fcdb19357441f76f"
+    },
+    {
+      "itemKey": "aurora-ticket",
+      "status": "resolved",
+      "file": "aurora-ticket.png",
+      "family": "default",
+      "sourcePath": "auroraticket.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/auroraticket.png",
+      "sourceSha256": "592d96c8cf4d22af0f4bb7c3a8307aaac6e10016d235a5ee5dfacc2e28e8f2c1",
+      "sha256": "afbfbaf8acc91d30d561bac032dbd5f9eb44af56da6e4829ef86f3b1a3a00dd7"
+    },
+    {
+      "itemKey": "powder-jar",
+      "status": "resolved",
+      "file": "powder-jar.png",
+      "family": "default",
+      "sourcePath": "powder-jar.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/powder-jar.png",
+      "sourceSha256": "d2a7d6a95185af2e2cc82d2ad5224eb32dcdce316585fb30ab9d4575b92ac78f",
+      "sha256": "a3a1b93547a9e33572f73f2bde71f4ee4b022f33f2f71ad7d646a66bf724d076"
+    },
+    {
+      "itemKey": "ruby",
+      "status": "resolved",
+      "file": "ruby.png",
+      "family": "default",
+      "sourcePath": "ruby.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/ruby.png",
+      "sourceSha256": "ed5e4d0c4e2c277ecee0a3a8e82bf5e13c006cf63bf9a34ce03200f8f37b0567",
+      "sha256": "2c0a675dcabb42bc942d891666f731c0495aee9f474b047ad226089459cc9048"
+    },
+    {
+      "itemKey": "sapphire",
+      "status": "resolved",
+      "file": "sapphire.png",
+      "family": "default",
+      "sourcePath": "sapphire.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/sapphire.png",
+      "sourceSha256": "55e6d1750e20001ac0778aacac910bb26b392f9ae58353d56673037b91114edf",
+      "sha256": "44ae26c10d5c90151434871ea829a1caeaf999d204006d043b4265bcbc4f0e9d"
+    },
+    {
+      "itemKey": "magma-emblem",
+      "status": "resolved",
+      "file": "magma-emblem.png",
+      "family": "default",
+      "sourcePath": "magma-emblem.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/magma-emblem.png",
+      "sourceSha256": "40a33e14c5edf85185ab0a4e2779abc04c0991dd046f2d8c99f9572e1f1e8d1c",
+      "sha256": "662298cae014e7855a1797fefd29bde42aea2fccfd1ed10c838024958bd85895"
+    },
+    {
+      "itemKey": "old-sea-map",
+      "status": "resolved",
+      "file": "old-sea-map.png",
+      "family": "default",
+      "sourcePath": "old-sea-map.png",
+      "source": "https://raw.githubusercontent.com/PokeAPI/sprites/fb3512817b9c3f46952b3f89e82645e77bdcaf49/sprites/items/old-sea-map.png",
+      "sourceSha256": "be9009e9c6efce056bbc1a624f3f2b6426ea49107cd1092e5ca88d46835613ab",
+      "sha256": "bf98c8fac7d6f7c31084b592cb9353d3cd6a240627ffcabc3d5ef67838ab2235"
+    }
+  ]
+}

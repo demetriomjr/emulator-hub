@@ -1,7 +1,27 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { acquirePlayerLease, closePokemonHubSession, getCloudSave, getPokemonHubProfile, getPokemonHubProfiles, getSaveProfileLayout, loadPokemonHubSessionPane, openPokemonHubSession, putCloudSave, releasePlayerLease, syncPokemonHubSessionSnapshot } from './hub-client.js'
+import { acquirePlayerLease, closePokemonHubSession, getCloudSave, getPokemonHubProfile, getPokemonHubProfiles, getSaveProfileLayout, loadPokemonHubSessionPane, openPokemonHubSession, putCloudSave, releasePlayerLease, reorderPokemonSaveItems, transferPokemonSaveItems, syncPokemonHubSessionSnapshot } from './hub-client.js'
+
+test('posts a direct save item transfer through the loaded Hub session', async () => {
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (url, options) => { calls.push({ url, options }); return { ok: true, status: 200, json: async () => ({ itemKey: 'potion', quantity: 2 }) } }
+  const request = { source: { gameId: 'ruby', profileId: 'may', expectedSaveRevision: 3 }, destination: { gameId: 'sapphire', profileId: 'brendan', expectedSaveRevision: 5 }, area: 'items', fromSlot: 0, quantity: 2 }
+  try { assert.deepEqual(await transferPokemonSaveItems('owner', 'session-a', request), { itemKey: 'potion', quantity: 2 }) }
+  finally { globalThis.fetch = originalFetch }
+  assert.deepEqual(calls, [{ url: '/api/profiles/owner/pokemon-hub/sessions/session-a/items/transfer', options: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request) } }])
+})
+
+test('posts a session-scoped item reorder with its save revision', async () => {
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (url, options) => { calls.push({ url, options }); return { ok: true, status: 200, json: async () => ({ changed: true, itemInventory: { status: 'ready', saveRevision: 8 } }) } }
+  try {
+    assert.deepEqual(await reorderPokemonSaveItems('owner', 'session-a', { gameId: 'emerald', sourceProfileId: 'may', area: 'items', fromSlot: 0, toSlot: 2, expectedSaveRevision: 7 }), { changed: true, itemInventory: { status: 'ready', saveRevision: 8 } })
+  } finally { globalThis.fetch = originalFetch }
+  assert.deepEqual(calls, [{ url: '/api/profiles/owner/pokemon-hub/sessions/session-a/items/reorder', options: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameId: 'emerald', sourceProfileId: 'may', area: 'items', fromSlot: 0, toSlot: 2, expectedSaveRevision: 7 }) } }])
+})
 
 test('passes a pane-load deadline through each request that opens or loads a source', async () => {
   const originalFetch = globalThis.fetch
@@ -37,6 +57,21 @@ test('loads Hub profile names separately from the selected grid and card details
     assert.deepEqual((await getSaveProfileLayout('emerald', 'may')).pokemonDetailsById.one, detail)
   } finally { globalThis.fetch = originalFetch }
   assert.deepEqual(calls, ['/api/pokemon-hub/profiles', '/api/pokemon-hub/profiles/hub-a', '/api/pokemon-hub/save-profiles/emerald/may/layout'])
+})
+
+test('passes the complete item inventory through the save layout request', async () => {
+  const originalFetch = globalThis.fetch
+  const itemInventory = {
+    status: 'ready', saveRevision: 4, title: 'pokemon-emerald',
+    areas: { items: { capacity: 30, maxPerStack: 99, freeSlots: 29, slots: [{ index: 0, nativeId: 13, itemKey: 'potion', quantity: 7 }], issues: [] } },
+  }
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({ layout: {}, party: [], boxes: [], pokemonDetailsById: {}, itemInventory }),
+  })
+  try {
+    assert.deepEqual((await getSaveProfileLayout('emerald', 'may')).itemInventory, itemInventory)
+  } finally { globalThis.fetch = originalFetch }
 })
 
 test('sends player lease identity for acquire, save, and release', async () => {
