@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { getPokemonItemReorderIntent, getPokemonItemTransferIntent } from './pokemon-item-drag.mjs'
+import { getPokemonHubItemTransferIntent, getPokemonItemReorderIntent, getPokemonItemTransferIntent } from './pokemon-item-drag.mjs'
 
 const slots = Array.from({ length: 5 }, (_, index) => ({ index, nativeId: index < 3 ? index + 1 : 0, itemKey: index < 3 ? 'potion' : null }))
 const inventory = { status: 'ready', title: 'pokemon-emerald', saveRevision: 7, areas: { items: { slots, issues: [] }, berries: { slots, issues: [] } } }
@@ -41,4 +41,29 @@ test('cross-save item preview refuses a blocked trade, HM and full destination',
   assert.equal(getPokemonItemTransferIntent(source, destinationLocation, sourceLayout, destinationLayout), null)
   const hmLayout = { ...sourceLayout, itemInventory: { ...sourceLayout.itemInventory, areas: { 'tm-hm': { slots: [{ index: 0, nativeId: 339, itemKey: 'hm01-cut', quantity: 1 }], issues: [] } } } }
   assert.equal(getPokemonItemTransferIntent({ ...source, area: 'tm-hm' }, destinationLocation, hmLayout, destinationLayout), null)
+})
+
+test('Hub item preview merges by semantic key and limits only the source for Hub destinations', () => {
+  const from = { kind: 'item', gameId: 'ruby', profileId: 'red', area: 'items', slot: 0 }
+  const to = { kind: 'hub-item', hubProfileId: 'home', slot: 3 }
+  const sourceLayout = { itemInventory: { status: 'ready', title: 'pokemon-ruby', saveRevision: 4, areas: { items: { slots: [{ nativeId: 13, itemKey: 'potion', quantity: 10 }], issues: [] } } } }
+  const hubInventory = { revision: 2, slots: { 0: { itemKey: 'potion', quantity: 999 }, 3: { itemKey: 'antidote', quantity: 1 } } }
+  const preview = getPokemonHubItemTransferIntent(from, to, sourceLayout, hubInventory)
+  assert.equal(preview.maxQuantity, 10)
+  assert.equal(preview.destinationExisting, 999)
+  assert.equal(preview.itemKey, 'potion')
+  assert.equal(preview.destinationItemRevision, 2)
+  assert.equal(getPokemonHubItemTransferIntent(from, to, sourceLayout, { revision: 2,
+    slots: { 0: { itemKey: 'potion', quantity: Number.MAX_SAFE_INTEGER } } }), null)
+})
+
+test('Hub item preview respects the save stack limit and rejects blocked destinations', () => {
+  const from = { kind: 'hub-item', hubProfileId: 'home', slot: 2 }
+  const to = { kind: 'item', gameId: 'emerald', profileId: 'may', area: 'items', slot: 0 }
+  const hubInventory = { revision: 3, slots: { 2: { itemKey: 'potion', quantity: 50 } } }
+  const destinationLayout = { itemInventory: { status: 'ready', title: 'pokemon-emerald', saveRevision: 7,
+    areas: { items: { slots: [{ nativeId: 13, itemKey: 'potion', quantity: 98 }], maxPerStack: 99, issues: [] } } } }
+  assert.equal(getPokemonHubItemTransferIntent(from, to, hubInventory, destinationLayout).maxQuantity, 1)
+  assert.equal(getPokemonHubItemTransferIntent(from, to, hubInventory, { ...destinationLayout,
+    itemInventory: { ...destinationLayout.itemInventory, areas: { items: { ...destinationLayout.itemInventory.areas.items, slots: [{ nativeId: 13, itemKey: 'potion', quantity: 99 }] } } } }), null)
 })

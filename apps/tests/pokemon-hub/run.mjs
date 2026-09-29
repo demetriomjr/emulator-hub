@@ -80,6 +80,8 @@ try {
     ['ruby-pc-capacity-source', 'ruby', {}],
     ['sapphire-bag-capacity-source', 'sapphire', {}],
     ['ruby-stack-capacity-source', 'ruby', {}],
+    ['ruby-hub-items-source', 'ruby', {}],
+    ['sapphire-hub-items-target', 'sapphire', {}],
   ]) {
     const itemEntry = itemEntries[game]
     const profile = await profileStore.create(itemEntry.id, name)

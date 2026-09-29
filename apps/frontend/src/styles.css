@@ -314,6 +314,7 @@ button { font: inherit; }
 .pokemon-item-area-nav { box-sizing: border-box; width: min(100%, var(--pokemon-save-box-row-width)); height: 38px; min-height: 38px; margin-bottom: 0; padding: 2px 4px; }
 .pokemon-item-area-nav .ant-btn { width: 32px; height: 32px; }
 .pokemon-item-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--pokemon-slot-size), 1fr)); align-content: start; gap: var(--pokemon-slot-gap); box-sizing: border-box; width: min(100%, var(--pokemon-save-box-row-width)); margin: 0 auto; }
+.pokemon-hub-item-inventory { margin: 0 auto; }
 .pokemon-item-slot { cursor: default; }
 .pokemon-item-slot:hover { border-color: #d5dfda; background: #fff; }
 .pokemon-item-slot.reorderable { cursor: grab; touch-action: none; }

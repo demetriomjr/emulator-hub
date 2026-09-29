@@ -34,6 +34,8 @@ import { createPokemonSaveAdapterRegistry } from '../packages/pokemon-save-adapt
 import { pokemonGen3Adapter } from '../packages/pokemon-gen3-adapter.mjs'
 import { readPokemonItemInventory } from '../packages/pokemon-item-inventory.mjs'
 import { createPokemonItemReorderService } from '../packages/pokemon-item-reorder-service.mjs'
+import { createPokemonHubItemTransferService } from '../packages/pokemon-hub-item-transfer-service.mjs'
+import { decodeHubItemLedger, emptyHubItemLedger, hubItemLedgerGameId } from '../packages/pokemon-hub-item-ledger.mjs'
 import { getPokemonSaveLayout, getPokemonSaveMetadataForTitle } from '../packages/pokemon-save-layouts.mjs'
 import { pokemonHubLocationKey } from '../packages/pokemon-hub-location-key.mjs'
 import { createRomDiscovery } from '../packages/rom-discovery.mjs'
@@ -166,6 +168,13 @@ export function createHubServer(options = {}) {
       saveFlush: config.pokemonHubSaveFlush, snapshotCoordinator: config.pokemonHubSnapshotCoordinator, snapshotStore: config.snapshotStore,
       resolveSaveSource: request => resolvePokemonHubSaveSource(config, request),
     }) : null)
+  config.pokemonHubItemTransferService = options.pokemonHubItemTransferService ?? (config.pokemonItemReorderService
+    && typeof config.pokemonHubSessionService?.withLoadedSources === 'function'
+    && typeof config.saveStore?.putPair === 'function'
+    ? createPokemonHubItemTransferService({ sessions: config.pokemonHubSessionService, gameSaveLeases: config.gameSaveLeases,
+      saveStore: config.saveStore, saveFlush: config.pokemonHubSaveFlush, snapshotCoordinator: config.pokemonHubSnapshotCoordinator,
+      snapshotStore: config.snapshotStore, hubProfileStore: config.pokemonHubProfileStore,
+      resolveSaveSource: request => resolvePokemonHubSaveSource(config, request) }) : null)
   config.pokemonHubService = options.pokemonHubService ?? createPokemonHubService({
     profileStore: config.profileStore,
     saveStore: config.saveStore,
@@ -1129,16 +1138,19 @@ async function handlePokemonHubSession(request, response, config, route, logger 
       return
     }
     if (route.kind === 'item-reorder') {
-      if (!config.pokemonItemReorderService) throw serverError('SAVE_ITEM_REORDER_UNAVAILABLE', 'Item reordering is unavailable.')
-      json(response, 200, await config.pokemonItemReorderService.reorder({
+      const hub = typeof body.hubProfileId === 'string'
+      if (hub ? !config.pokemonHubItemTransferService : !config.pokemonItemReorderService) throw serverError('SAVE_ITEM_REORDER_UNAVAILABLE', 'Item reordering is unavailable.')
+      json(response, 200, await (hub ? config.pokemonHubItemTransferService : config.pokemonItemReorderService).reorder({
         profileId: route.profileId, sessionId: route.sessionId, gameId: body.gameId, sourceProfileId: body.sourceProfileId,
         area: body.area, fromSlot: body.fromSlot, toSlot: body.toSlot, expectedSaveRevision: body.expectedSaveRevision,
+        ...(hub ? { hubProfileId: body.hubProfileId, expectedItemRevision: body.expectedItemRevision } : {}),
       }))
       return
     }
     if (route.kind === 'item-transfer') {
-      if (!config.pokemonItemReorderService) throw serverError('SAVE_ITEM_TRANSFER_UNAVAILABLE', 'Item transfer is unavailable.')
-      json(response, 200, await config.pokemonItemReorderService.transfer({ profileId: route.profileId, sessionId: route.sessionId,
+      const hub = body.source?.hubProfileId || body.destination?.hubProfileId
+      if (hub ? !config.pokemonHubItemTransferService : !config.pokemonItemReorderService) throw serverError('SAVE_ITEM_TRANSFER_UNAVAILABLE', 'Item transfer is unavailable.')
+      json(response, 200, await (hub ? config.pokemonHubItemTransferService : config.pokemonItemReorderService).transfer({ profileId: route.profileId, sessionId: route.sessionId,
         source: body.source, destination: body.destination, area: body.area, fromSlot: body.fromSlot,
         ...(body.toSlot === undefined ? {} : { toSlot: body.toSlot }), quantity: body.quantity }))
       return
@@ -1281,7 +1293,16 @@ async function handlePokemonHubProfile(request, response, config, route, searchP
   }
   if (request.method === 'DELETE') {
     try {
-      json(response, 200, await config.pokemonHubProfileStore.delete(route.hubProfileId, { discardOccupied: searchParams.get('discardOccupied') === 'true' }))
+      const profile = (await config.pokemonHubProfileStore.list()).find(candidate => candidate.hubProfileId === route.hubProfileId)
+      if (!profile) throw serverError('POKEMON_HUB_PROFILE_NOT_FOUND', 'Pokémon Hub profile was not found.')
+      const itemKey = hubItemLedgerGameId(route.hubProfileId)
+      const savedItems = profile.ownerProfileId ? await config.saveStore.get(profile.ownerProfileId, itemKey) : null
+      const itemCount = savedItems ? Object.keys(decodeHubItemLedger(savedItems.bytes).slots).length : 0
+      const discardOccupied = searchParams.get('discardOccupied') === 'true'
+      if (itemCount && !discardOccupied) throw serverError('POKEMON_HUB_PROFILE_NOT_EMPTY', 'Pokémon Hub profile contains items and requires discard confirmation.')
+      const result = await config.pokemonHubProfileStore.delete(route.hubProfileId, { discardOccupied })
+      if (savedItems) await config.saveStore.removeHubItemLedger(profile.ownerProfileId, itemKey, savedItems.revision)
+      json(response, 200, { ...result, discardedItemCount: itemCount })
     } catch (error) { jsonPokemonHubProfileError(response, error) }
     return
   }
@@ -1995,7 +2016,9 @@ function empty(response, status) {
 }
 
 async function readProjectedPokemonHubProfile(config, profile) {
-  if (!profile.ownerProfileId || typeof config.pokemonHubSnapshotCoordinator.getSnapshot !== 'function') return { profile, pokemonDetailsById: {} }
+  const savedItems = profile.ownerProfileId ? await config.saveStore.get(profile.ownerProfileId, hubItemLedgerGameId(profile.hubProfileId)) : null
+  const itemInventory = { revision: savedItems?.revision ?? 0, ...(savedItems ? decodeHubItemLedger(savedItems.bytes) : emptyHubItemLedger()) }
+  if (!profile.ownerProfileId || typeof config.pokemonHubSnapshotCoordinator.getSnapshot !== 'function') return { profile: { ...profile, itemInventory }, pokemonDetailsById: {} }
   try {
     const snapshot = await config.pokemonHubSnapshotCoordinator.getSnapshot({ profileId: profile.ownerProfileId, sourceKey: `hub:${profile.hubProfileId}` })
     const pokemonDetailsById = await readPokemonHubCardDetails(config, { profileId: profile.ownerProfileId, sourceKey: `hub:${profile.hubProfileId}`, snapshot })
@@ -2003,9 +2026,9 @@ async function readProjectedPokemonHubProfile(config, profile) {
       if (!placement.pokemonInstanceId) return []
       return [[String(placement.location.slot), { pokemonInstanceId: placement.pokemonInstanceId, ...(snapshot.pokemonDisplay?.[placement.pokemonInstanceId] ?? {}) }]]
     }))
-    return { profile: { ...profile, grid: { entries } }, pokemonDetailsById }
+    return { profile: { ...profile, grid: { entries }, itemInventory }, pokemonDetailsById }
   } catch (error) {
-    if (error.code === 'SOURCE_NOT_ADOPTED') return { profile, pokemonDetailsById: {} }
+    if (error.code === 'SOURCE_NOT_ADOPTED') return { profile: { ...profile, itemInventory }, pokemonDetailsById: {} }
     throw error
   }
 }

@@ -89,15 +89,15 @@ test('subtracts only requested units from Emerald XOR slot and preserves the sou
   assert.equal(selectUnambiguousPokemonGen3SaveCopy(saveBytes).copyOffset, 0xe000)
 })
 
-test('removes a whole PC stack and increases free slots without touching another item', () => {
+test('removes a whole PC stack, compacts the next item and increases free slots', () => {
   const save = fixture('pokemon-ruby', 0)
   writeItem(save, 'pokemon-ruby', 'pc', 0, 13, 1, 0)
   writeItem(save, 'pokemon-ruby', 'pc', 1, 4, 2, 0)
   refresh(save, 0xe000)
   const { saveBytes } = inventory.removePokemonItemFromSave(save, 'pokemon-ruby', { area: 'pc', slot: 0, quantity: 1 })
   const pc = inventory.readPokemonItemInventory(saveBytes, 'pokemon-ruby').areas.pc
-  assert.deepEqual(pc.slots[0], { index: 0, nativeId: 0, itemKey: null, quantity: 0 })
-  assert.deepEqual(pc.slots[1], { index: 1, nativeId: 4, itemKey: 'poke-ball', quantity: 2 })
+  assert.deepEqual(pc.slots[0], { index: 0, nativeId: 4, itemKey: 'poke-ball', quantity: 2 })
+  assert.deepEqual(pc.slots[1], { index: 1, nativeId: 0, itemKey: null, quantity: 0 })
   assert.equal(pc.freeSlots, 49)
 })
 
@@ -214,6 +214,42 @@ test('transfers a partial stack across RSE saves and honors the destination stac
   assert.deepEqual(inventory.readPokemonItemInventory(result.destinationSaveBytes, 'pokemon-sapphire').areas.items.slots[0].quantity, 99)
   assert.throws(() => inventory.transferPokemonItemsBetweenSaves(ruby, 'pokemon-ruby', sapphire, 'pokemon-sapphire', { area: 'items', fromSlot: 0, quantity: 10 }))
   assert.deepEqual(inventory.readPokemonItemInventory(ruby, 'pokemon-ruby').areas.items.slots[0].quantity, 10)
+})
+
+test('adds a Hub item to the matching Emerald stack using its semantic key and native quantity encoding', () => {
+  const save = fixture('pokemon-emerald', 0xc3d4)
+  writeItem(save, 'pokemon-emerald', 'items', 0, 13, 98, 0xc3d4)
+  refresh(save, 0xe000)
+  const before = Buffer.from(save)
+  const result = inventory.addPokemonItemToSave(save, 'pokemon-emerald', { area: 'items', itemKey: 'potion', quantity: 1, toSlot: 1 })
+  assert.equal(inventory.readPokemonItemInventory(result.saveBytes, 'pokemon-emerald').areas.items.slots[0].quantity, 99)
+  assert.deepEqual(save, before)
+  assert.throws(() => inventory.addPokemonItemToSave(save, 'pokemon-emerald', { area: 'items', itemKey: 'potion', quantity: 2 }))
+})
+
+test('adds a Hub item in a free Ruby Bag slot and rejects full areas and blocked items', () => {
+  const save = fixture('pokemon-ruby', 0)
+  writeItem(save, 'pokemon-ruby', 'items', 0, 14, 1, 0)
+  refresh(save, 0xe000)
+  const inserted = inventory.addPokemonItemToSave(save, 'pokemon-ruby', { area: 'items', itemKey: 'potion', quantity: 3, toSlot: 0 })
+  assert.deepEqual(inventory.readPokemonItemInventory(inserted.saveBytes, 'pokemon-ruby').areas.items.slots.slice(0, 3).map(slot => slot.itemKey), ['potion', 'antidote', null])
+  assert.throws(() => inventory.addPokemonItemToSave(save, 'pokemon-ruby', { area: 'key-items', itemKey: 'mach-bike', quantity: 1 }))
+  assert.throws(() => inventory.addPokemonItemToSave(save, 'pokemon-ruby', { area: 'items', itemKey: 'tm01-focus-punch', quantity: 1 }))
+  assert.throws(() => inventory.addPokemonItemToSave(save, 'pokemon-ruby', { area: 'items', itemKey: 'poke-ball', quantity: 1 }))
+  const full = fixture('pokemon-ruby', 0)
+  for (let slot = 0; slot < 20; slot++) writeItem(full, 'pokemon-ruby', 'items', slot, 14 + slot, 1, 0)
+  refresh(full, 0xe000)
+  assert.throws(() => inventory.addPokemonItemToSave(full, 'pokemon-ruby', { area: 'items', itemKey: 'potion', quantity: 1 }))
+})
+
+test('whole save-to-Hub withdrawal compacts the source area without changing other items', () => {
+  const save = fixture('pokemon-ruby', 0)
+  writeItem(save, 'pokemon-ruby', 'items', 0, 13, 1, 0)
+  writeItem(save, 'pokemon-ruby', 'items', 1, 14, 4, 0)
+  refresh(save, 0xe000)
+  const result = inventory.removePokemonItemFromSave(save, 'pokemon-ruby', { area: 'items', slot: 0, quantity: 1 })
+  assert.deepEqual(inventory.readPokemonItemInventory(result.saveBytes, 'pokemon-ruby').areas.items.slots.slice(0, 3).map(slot => slot.itemKey), ['antidote', null, null])
+  assert.equal(inventory.readPokemonItemInventory(result.saveBytes, 'pokemon-ruby').areas.items.slots[0].quantity, 4)
 })
 
 test('whole-stack transfer compacts the source and appends to the destination without gaps', () => {

@@ -5,8 +5,8 @@ import { getPokemonItemPolicy } from './pokemon-item-policy.mjs'
 
 test('Ruby, Sapphire and Emerald share explicit transfer and ordering rules', () => {
   for (const title of ['pokemon-ruby', 'pokemon-sapphire', 'pokemon-emerald']) {
-    for (const area of ['pc', 'items', 'poke-balls']) {
-      assert.deepEqual(getPokemonItemPolicy(title, area, 'potion'), {
+    for (const [area, itemKey] of [['pc', 'potion'], ['items', 'potion'], ['poke-balls', 'poke-ball']]) {
+      assert.deepEqual(getPokemonItemPolicy(title, area, itemKey), {
         canTransfer: true, canReorder: true, showQuantity: true,
       }, `${title}/${area}`)
     }

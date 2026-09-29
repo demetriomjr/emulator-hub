@@ -28,7 +28,7 @@ export function createBackendStateBackup({ persistence, saveStore, backupsPath, 
       else if (type === 'zset') records.push({ key, type, value: await persistence.rangeWithScores(key) })
       else if (type !== 'none') throw new Error(`Cannot back up Redis key type: ${type}`)
     }
-    const saves = (await saveStore.listAll()).map(save => ({
+    const saves = (await saveStore.listAll({ includeInternal: true })).map(save => ({
       profileId: save.profileId,
       gameId: save.gameId,
       revision: save.revision,

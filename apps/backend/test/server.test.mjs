@@ -1751,7 +1751,7 @@ describe('hub backend HTTP contract', () => {
 
     const deletedResponse = await fetch(`${baseUrl}/api/pokemon-hub/profiles/${created.hubProfileId}`, { method: 'DELETE' })
     assert.equal(deletedResponse.status, 200)
-    assert.deepEqual(await jsonResponse(deletedResponse), { hubProfileId: created.hubProfileId, discardedPokemonCount: 0 })
+    assert.deepEqual(await jsonResponse(deletedResponse), { hubProfileId: created.hubProfileId, discardedPokemonCount: 0, discardedItemCount: 0 })
   })
 
   test('returns a profile-scoped Pokémon Hub inventory', async () => {

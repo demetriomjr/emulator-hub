@@ -32,6 +32,8 @@ export function removePokemonItemFromSave(saveBytes, title, request) {
 
   const current = readArea(state, area)
   if (current.issues.length) throw invalidInventory('The source item area is invalid or contains unknown items.')
+  const occupiedCount = occupiedPrefixLength(current.slots)
+  if (occupiedCount < 0) throw invalidInventory('The source item area contains gaps.')
   const slot = current.slots[request.slot]
   if (!slot.nativeId || request.quantity > slot.quantity) throw invalidInventory('The source item quantity is unavailable.')
   if (!getPokemonItemPolicy(title, area.id, slot.itemKey)?.canTransfer) throw invalidInventory('The item transfer is blocked by policy.')
@@ -41,14 +43,71 @@ export function removePokemonItemFromSave(saveBytes, title, request) {
   const physicalOffset = state.format.offset(state.save, area.block, logicalOffset)
   const remaining = slot.quantity - request.quantity
   const view = new DataView(edited.buffer, edited.byteOffset, edited.byteLength)
-  view.setUint16(physicalOffset, remaining ? slot.nativeId : 0, true)
-  view.setUint16(physicalOffset + 2, remaining ? remaining ^ quantityMask(state, area) : 0, true)
-  state.format.refresh(edited, state.save, new Set([state.format.sectionOf(area.block, logicalOffset)]))
+  if (remaining) {
+    view.setUint16(physicalOffset, slot.nativeId, true)
+    view.setUint16(physicalOffset + 2, remaining ^ quantityMask(state, area), true)
+  } else {
+    for (let index = request.slot; index < occupiedCount - 1; index++) {
+      const target = state.format.offset(state.save, area.block, area.logicalOffset + index * 4)
+      const next = state.format.offset(state.save, area.block, area.logicalOffset + (index + 1) * 4)
+      saveBytes.copy(edited, target, next, next + 4)
+    }
+    const last = state.format.offset(state.save, area.block, area.logicalOffset + (occupiedCount - 1) * 4)
+    edited.writeUInt32LE(0, last)
+  }
+  const sections = new Set()
+  for (let index = request.slot; index < (remaining ? request.slot + 1 : occupiedCount); index++) sections.add(state.format.sectionOf(area.block, area.logicalOffset + index * 4))
+  state.format.refresh(edited, state.save, sections)
 
   return {
     saveBytes: edited,
     removed: { itemKey: slot.itemKey, nativeId: slot.nativeId, quantity: request.quantity, area: area.id, slot: request.slot },
   }
+}
+
+export function addPokemonItemToSave(saveBytes, title, request) {
+  if (!request || !Number.isSafeInteger(request.quantity) || request.quantity < 1
+    || request.toSlot !== undefined && (!Number.isInteger(request.toSlot) || request.toSlot < 0)) throw invalidInventory('The item addition request is invalid.')
+  const state = openInventory(saveBytes, title)
+  const area = state.profile.areas.find(candidate => candidate.id === request.area)
+  if (!area || request.toSlot !== undefined && request.toSlot >= area.slots) throw invalidInventory('The destination item area is invalid.')
+  if (!getPokemonItemPolicy(title, area.id, request.itemKey)?.canTransfer) throw invalidInventory('The item transfer is blocked by policy.')
+  const nativeId = state.itemKeys.indexOf(request.itemKey)
+  if (nativeId < 1 || nativeId > state.maxNativeId) throw invalidInventory('The destination game does not recognize this item.')
+  const current = readArea(state, area)
+  if (current.issues.length) throw invalidInventory('The destination item area is invalid or contains unknown items.')
+  const count = occupiedPrefixLength(current.slots)
+  if (count < 0) throw invalidInventory('The destination item area contains gaps.')
+  const matching = current.slots.slice(0, count).filter(slot => slot.itemKey === request.itemKey)
+  if (matching.length > 1) throw invalidInventory('The destination contains multiple stacks of this item.')
+  const existing = matching[0]
+  const maxQuantity = existing ? area.maxPerStack - existing.quantity : count < area.slots ? area.maxPerStack : 0
+  if (request.quantity > maxQuantity) throw invalidInventory('The destination stack or item area is full.')
+  const edited = Buffer.from(saveBytes)
+  const sections = new Set()
+  const offset = index => area.logicalOffset + index * 4
+  const write = (index, id, quantity) => {
+    const logical = offset(index)
+    const physical = state.format.offset(state.save, area.block, logical)
+    edited.writeUInt16LE(id, physical)
+    edited.writeUInt16LE(quantity ^ quantityMask(state, area), physical + 2)
+    sections.add(state.format.sectionOf(area.block, logical))
+  }
+  if (existing) write(existing.index, nativeId, existing.quantity + request.quantity)
+  else {
+    const sorted = area.id === 'tm-hm' || area.id === 'berries'
+    const sortedSlot = sorted ? current.slots.slice(0, count).findIndex(slot => slot.nativeId > nativeId) : -1
+    const target = sorted ? sortedSlot < 0 ? count : sortedSlot : Math.min(request.toSlot ?? count, count)
+    for (let index = count; index > target; index--) {
+      const physical = state.format.offset(state.save, area.block, offset(index))
+      const previous = state.format.offset(state.save, area.block, offset(index - 1))
+      saveBytes.copy(edited, physical, previous, previous + 4)
+      sections.add(state.format.sectionOf(area.block, offset(index)))
+    }
+    write(target, nativeId, request.quantity)
+  }
+  state.format.refresh(edited, state.save, sections)
+  return { saveBytes: edited, itemKey: request.itemKey, quantity: request.quantity, maxQuantity }
 }
 
 export function reorderPokemonItemsInSave(saveBytes, title, request) {
@@ -104,75 +163,14 @@ export function transferPokemonItemsBetweenSaves(sourceBytes, sourceTitle, desti
     || request.toSlot !== undefined && (!Number.isInteger(request.toSlot) || request.toSlot < 0)) {
     throw invalidInventory('The item transfer request is invalid.')
   }
-  const source = openInventory(sourceBytes, sourceTitle)
-  const destination = openInventory(destinationBytes, destinationTitle)
-  const sourceArea = source.profile.areas.find(area => area.id === request.area)
-  const destinationArea = destination.profile.areas.find(area => area.id === request.area)
-  if (!sourceArea || !destinationArea) throw invalidInventory('The item area is unavailable in one of the saves.')
-  if (request.toSlot !== undefined && request.toSlot >= destinationArea.slots) throw invalidInventory('The destination item slot is invalid.')
-  const from = readArea(source, sourceArea)
-  const to = readArea(destination, destinationArea)
-  if (from.issues.length || to.issues.length) throw invalidInventory('An item area contains invalid or unknown items.')
-  const sourceCount = occupiedPrefixLength(from.slots)
-  const destinationCount = occupiedPrefixLength(to.slots)
-  if (sourceCount < 0 || destinationCount < 0 || request.fromSlot < 0 || request.fromSlot >= sourceCount) {
-    throw invalidInventory('An item area has a gap or the source slot is empty.')
-  }
-  const item = from.slots[request.fromSlot]
-  if (!getPokemonItemPolicy(sourceTitle, request.area, item.itemKey)?.canTransfer
-    || !getPokemonItemPolicy(destinationTitle, request.area, item.itemKey)?.canTransfer) {
-    throw invalidInventory('The item transfer is blocked by policy.')
-  }
-  const destinationNativeId = destination.itemKeys.indexOf(item.itemKey)
-  if (destinationNativeId < 1 || destinationNativeId > destination.maxNativeId) throw invalidInventory('The destination game does not recognize this item.')
-  const matching = to.slots.slice(0, destinationCount).filter(slot => slot.itemKey === item.itemKey)
-  if (matching.length > 1) throw invalidInventory('The destination contains multiple stacks of this item.')
-  const existing = matching[0] ?? null
-  const maxQuantity = Math.min(item.quantity, existing ? to.maxPerStack - existing.quantity : destinationCount < to.capacity ? to.maxPerStack : 0)
-  if (request.quantity > maxQuantity) throw invalidInventory('The destination stack or item area is full.')
-
-  const sourceSaveBytes = Buffer.from(sourceBytes)
-  const destinationSaveBytes = Buffer.from(destinationBytes)
-  const sourceSections = new Set()
-  const destinationSections = new Set()
-  const sourceOffset = index => sourceArea.logicalOffset + index * 4
-  const destinationOffset = index => destinationArea.logicalOffset + index * 4
-  const edit = (state, bytes, area, logicalOffset, sections, nativeId, quantity) => {
-    const physical = state.format.offset(state.save, area.block, logicalOffset)
-    bytes.writeUInt16LE(nativeId, physical)
-    bytes.writeUInt16LE(nativeId ? quantity ^ quantityMask(state, area) : 0, physical + 2)
-    sections.add(state.format.sectionOf(area.block, logicalOffset))
-  }
-  if (request.quantity < item.quantity) {
-    edit(source, sourceSaveBytes, sourceArea, sourceOffset(request.fromSlot), sourceSections, item.nativeId, item.quantity - request.quantity)
-  } else {
-    for (let index = request.fromSlot; index < sourceCount - 1; index++) {
-      const targetOffset = source.format.offset(source.save, sourceArea.block, sourceOffset(index))
-      const nextOffset = source.format.offset(source.save, sourceArea.block, sourceOffset(index + 1))
-      sourceBytes.copy(sourceSaveBytes, targetOffset, nextOffset, nextOffset + 4)
-      sourceSections.add(source.format.sectionOf(sourceArea.block, sourceOffset(index)))
-    }
-    edit(source, sourceSaveBytes, sourceArea, sourceOffset(sourceCount - 1), sourceSections, 0, 0)
-  }
-
-  if (existing) {
-    edit(destination, destinationSaveBytes, destinationArea, destinationOffset(existing.index), destinationSections, destinationNativeId, existing.quantity + request.quantity)
-  } else {
-    const sorted = request.area === 'tm-hm' || request.area === 'berries'
-    const insertAt = sorted ? to.slots.slice(0, destinationCount).findIndex(slot => slot.nativeId > destinationNativeId) : -1
-    const targetSlot = sorted ? insertAt < 0 ? destinationCount : insertAt
-      : Math.min(request.toSlot ?? destinationCount, destinationCount)
-    for (let index = destinationCount; index > targetSlot; index--) {
-      const targetOffset = destination.format.offset(destination.save, destinationArea.block, destinationOffset(index))
-      const previousOffset = destination.format.offset(destination.save, destinationArea.block, destinationOffset(index - 1))
-      destinationBytes.copy(destinationSaveBytes, targetOffset, previousOffset, previousOffset + 4)
-      destinationSections.add(destination.format.sectionOf(destinationArea.block, destinationOffset(index)))
-    }
-    edit(destination, destinationSaveBytes, destinationArea, destinationOffset(targetSlot), destinationSections, destinationNativeId, request.quantity)
-  }
-  source.format.refresh(sourceSaveBytes, source.save, sourceSections)
-  destination.format.refresh(destinationSaveBytes, destination.save, destinationSections)
-  return { sourceSaveBytes, destinationSaveBytes, itemKey: item.itemKey, quantity: request.quantity, maxQuantity }
+  const source = readPokemonItemInventory(sourceBytes, sourceTitle).areas[request.area]
+  const sourceQuantity = source?.slots?.[request.fromSlot]?.quantity
+  const removed = removePokemonItemFromSave(sourceBytes, sourceTitle, { area: request.area, slot: request.fromSlot, quantity: request.quantity })
+  const added = addPokemonItemToSave(destinationBytes, destinationTitle, {
+    area: request.area, itemKey: removed.removed.itemKey, quantity: request.quantity, toSlot: request.toSlot,
+  })
+  return { sourceSaveBytes: removed.saveBytes, destinationSaveBytes: added.saveBytes,
+    itemKey: removed.removed.itemKey, quantity: request.quantity, maxQuantity: Math.min(sourceQuantity, added.maxQuantity) }
 }
 
 function occupiedPrefixLength(slots) {

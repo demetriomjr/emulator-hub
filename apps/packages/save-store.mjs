@@ -14,7 +14,21 @@ export function createSaveStore({ dataPath, eventBackupsPath = null, afterEventS
   return {
     get,
     putPair,
-    async listAll() {
+    async removeHubItemLedger(profileId, gameId, expectedRevision) {
+      if (typeof gameId !== 'string' || !/^\.hub-items-[0-9a-f-]{36}$/i.test(gameId)
+        || !Number.isSafeInteger(expectedRevision) || expectedRevision < 1) throw saveError('SAVE_ITEM_LEDGER_INVALID', 'Hub item ledger removal is invalid.')
+      await recoverPairJournals()
+      return serialize(saveKey(profileId, gameId), () => {
+        const paths = savePaths(dataPath, profileId, gameId)
+        return withSaveLock(paths, async () => {
+          const current = await readCurrent(paths)
+          if (!current || current.revision !== expectedRevision) throw saveError('SAVE_REVISION_CONFLICT', 'Hub item ledger revision has changed.')
+          await unlink(paths.bytes)
+          await unlink(paths.metadata)
+        }, lockOptions)
+      })
+    },
+    async listAll({ includeInternal = false } = {}) {
       let profiles
       try { profiles = await readdir(dataPath, { withFileTypes: true }) } catch (error) { if (error.code === 'ENOENT') return []; throw error }
       const saves = []
@@ -23,7 +37,7 @@ export function createSaveStore({ dataPath, eventBackupsPath = null, afterEventS
         let files
         try { files = await readdir(join(dataPath, profileEntry.name)) } catch (error) { if (error.code === 'ENOENT') continue; throw error }
         for (const file of files) {
-          if (!file.endsWith('.sav')) continue
+          if (!file.endsWith('.sav') || !includeInternal && file.startsWith('.hub-items-')) continue
           const gameId = file.slice(0, -'.sav'.length)
           const saved = await get(profileEntry.name, gameId)
           if (saved !== null) saves.push({ profileId: profileEntry.name, gameId, ...saved })
