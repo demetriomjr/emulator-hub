@@ -324,6 +324,7 @@ function App() {
   const [huntConfig, setHuntConfig] = useState({ resetMode: 'soft-reset', startMode: 'interact-a', stopMode: 'first-shiny' })
   const huntControllerRef = useRef(null)
   const huntActiveRef = useRef(false)
+  const [huntHeaderStopRequested, setHuntHeaderStopRequested] = useState(false)
   const huntParticipantsRef = useRef('')
   const [fastForwardSpeed, setFastForwardSpeed] = useState(() => readFastForwardSpeed(document.cookie))
   const [l2TriggerAction, setL2TriggerAction] = useState('none')
@@ -946,7 +947,9 @@ function App() {
     if (!sessions.length || activeSessionsRef.current.map(session => session.sessionId).join('|') !== participantKey) return
     const huntId = crypto.randomUUID()
     huntParticipantsRef.current = participantKey
+    setHuntHeaderStopRequested(false)
     huntActiveRef.current = true
+    setHuntModalOpen(false)
     globalGamepadGateRef.current.lock()
     const frameFor = session => [...document.querySelectorAll('.player-grid iframe')]
       .find(frame => frame.closest('.player-cell')?.dataset.sessionId === session.sessionId)
@@ -1035,6 +1038,15 @@ function App() {
 
   function stopShinyHunt() {
     huntControllerRef.current?.stop()
+  }
+
+  function handleHuntButtonClick() {
+    if ((huntActiveRef.current || huntStatus.running) && !huntHeaderStopRequested) {
+      setHuntHeaderStopRequested(true)
+      stopShinyHunt()
+      return
+    }
+    setHuntModalOpen(true)
   }
 
   function toggleMute() {
@@ -1642,6 +1654,7 @@ function App() {
 
   const activeProfileIds = new Set(activeSessions.map(session => `${session.gameId}:${session.profileId}`))
   const huntRunning = huntStatus.running === true || huntActiveRef.current
+  const huntHeaderStops = huntRunning && !huntHeaderStopRequested
   const huntFoundSession = activeSessions.find(session => session.sessionId === huntStatus.foundSessionId)
   const huntCount = huntStatus.attemptCount ?? huntStatus.resetCount ?? 0
   const gameSections = groupGamesByLayout(games, hubLayout)
@@ -1920,7 +1933,7 @@ function App() {
               <path d="M7.3 11.15v3.1M5.75 12.7h3.1M16.35 11.8h.01M18.25 13.65h.01" />
             </svg>} aria-label="Configurar controles" title="Configurar controles" disabled={huntRunning} onClick={openControlPanel} />
             <Button className={`player-control-button${oddsManipulatorEnabled ? ' is-active' : ''}`} htmlType="button" icon={<NumberOutlined />} aria-label="Manipulador de odds" title="Manipulador de odds" aria-pressed={oddsManipulatorEnabled} disabled={huntRunning} onClick={toggleOddsManipulator} />
-            <Button className={`player-control-button hunt-button${huntRunning ? ' is-active' : ''}`} htmlType="button" icon={<SearchOutlined />} aria-label={`Configurar caça shiny, ${huntCount} tentativas${huntRunning ? ', em andamento' : ''}`} title={huntStatus.phase === 'error' ? `Caça interrompida: ${huntErrorMessages[huntStatus.error] ?? huntStatus.error}` : huntStatus.phase === 'found' ? huntStatus.foundSessionId ? `Shiny em ${huntFoundSession?.profileName ?? huntStatus.foundSessionId}` : 'Todos os shinies encontrados' : 'Configurar caça shiny'} aria-haspopup="dialog" aria-expanded={huntModalOpen} onClick={() => setHuntModalOpen(true)}>{huntCount}</Button>
+            <Button className={`player-control-button hunt-button${huntRunning ? ' is-active' : ''}`} htmlType="button" icon={<SearchOutlined />} aria-label={huntHeaderStops ? `Parar caça shiny, ${huntCount} tentativas` : `Configurar caça shiny, ${huntCount} tentativas`} title={huntHeaderStops ? 'Parar caça shiny' : huntStatus.phase === 'error' ? `Caça interrompida: ${huntErrorMessages[huntStatus.error] ?? huntStatus.error}` : huntStatus.phase === 'found' ? huntStatus.foundSessionId ? `Shiny em ${huntFoundSession?.profileName ?? huntStatus.foundSessionId}` : 'Todos os shinies encontrados' : 'Configurar caça shiny'} aria-haspopup={huntHeaderStops ? undefined : 'dialog'} aria-expanded={huntHeaderStops ? undefined : huntModalOpen} onClick={handleHuntButtonClick}>{huntCount}</Button>
             <Button className={`player-control-button${macroRunState.runId ? ' is-active' : ''}`} htmlType="button" icon={<ThunderboltOutlined />} aria-label={macroRunState.runId ? 'Parar macro em execução' : 'Macros'} title={macroRunState.phase === 'stopping' ? 'Parando macro' : macroRunState.runId ? 'Parar macro em execução' : 'Macros'} aria-expanded={macroModalOpen} onClick={handleMacroButtonClick} />
           </div>
           <div className="player-actions">

@@ -7,6 +7,7 @@ import { createPlayerInteractionLock } from './player-interaction-lock.mjs'
 import { createPlayerMacroController } from './player-macro-controller.mjs'
 import { INPUT_CORE_IDS, addItem, createMacro, macroUsesKeyboardKey, normalizeKeyboardKey } from './input-macro-simulator.mjs'
 import { selectPlayerThreadMode } from './player-thread-policy.mjs'
+import { isEmulatorPlaying } from './player-playback.mjs'
 
 const pad = (buttons = [], axes = [], index = 0) => ({ index, buttons: buttons.map(value => ({ pressed: value === 1, value })), axes })
 
@@ -131,6 +132,7 @@ test('player boot keeps backend controls authoritative and applies pre-start par
     clearTimeout,
     matchMedia: () => ({ matches: false }),
     EJS_emulator: {
+      paused: false,
       gamepad: { terminate: () => calls.push('stop') },
       gameManager: { simulateInput: (...args) => calls.push(args) },
     },
@@ -172,6 +174,7 @@ test('player boot keeps backend controls authoritative and applies pre-start par
     normalizeKeyboardKey,
     createPlayerInteractionLock,
     selectPlayerThreadMode,
+    isEmulatorPlaying,
     createEmulatorAudioMute: () => ({ attach() {}, apply() {} }),
   })
   await Promise.race([loaderAdded, new Promise((_, reject) => setTimeout(() => reject(new Error(`Player loader not attached: ${JSON.stringify(startupErrors)}`)), 100))])

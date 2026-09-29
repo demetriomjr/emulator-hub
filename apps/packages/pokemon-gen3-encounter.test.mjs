@@ -12,11 +12,11 @@ function stateOffset(address) {
     : 0x10 + 0x21000 + (address - 0x02000000)
 }
 
-function makeState() {
+function makeState(gameCode = 'AXVE') {
   const state = new Uint8Array(528472)
   state.set([82, 65, 83, 84, 65, 84, 69, 1], 0)
   new DataView(state.buffer).setUint32(0x10, 0x01000007, true)
-  state.set([65, 88, 86, 69], 0x2c)
+  state.set(Buffer.from(gameCode), 0x2c)
   return state
 }
 
@@ -87,6 +87,36 @@ test('finds enemy and player addresses by the verified ROM identity', () => {
   assert.deepEqual(findGen3EncounterLayout({ romSha256: '0fdd36e92b75bed65d09df4635ab0b707b288c2bf1dc4c6e7a4a4f0eebe9d64c', core: 'gba', runtimeId: 'emulatorjs-4.2.3' }), { ...layout, battleFlag: { main: 0x03001770, inBattleOffset: 0x43d } })
   assert.equal(findGen3EncounterLayout({ romSha256: 'unknown', core: 'gba', runtimeId: 'emulatorjs-4.2.3' }), null)
 })
+
+const kantoRevisions = [
+  ['FireRed rev1', '729041b940afe031302d630fdbe57c0c145f3f7b6d9b8eca5e98678d0ca4d059', 'BPRE'],
+  ['LeafGreen rev1', '2f978f635b9593f6ca26ec42481c53a6b39f6cddd894ad5c062c1419fac58825', 'BPGE'],
+]
+
+for (const [title, romSha256, gameCode] of kantoRevisions) {
+  test(`${title} uses its verified ROM identity and reads the enemy in battle`, () => {
+    const identity = { romSha256, core: 'gba', runtimeId: 'emulatorjs-4.2.3' }
+    const selected = findGen3EncounterLayout(identity)
+    const expected = { playerAddress: 0x02024284, enemyAddress: 0x0202402c, gameCode, battleFlag: { main: 0x030030f0, inBattleOffset: 0x439 } }
+    assert.deepEqual(selected, expected)
+    assert.equal(findGen3EncounterLayout({ ...identity, patchSha256: 'a'.repeat(64) }), null)
+    assert.equal(findGen3EncounterLayout({ ...identity, runtimeId: 'another-runtime' }), null)
+
+    const state = makeState(gameCode)
+    writeMon(state, selected.playerAddress, { pid: 1, species: 25 })
+    writeMon(state, selected.enemyAddress, { pid: 8, species: 145 })
+    assert.deepEqual(inspectGen3Encounter(state, selected), { status: 'pending' })
+    assert.deepEqual(inspectGen3BattlePhase(state, selected), { status: 'map' })
+
+    state[stateOffset(selected.battleFlag.main + selected.battleFlag.inBattleOffset)] = 2
+    assert.deepEqual(inspectGen3BattlePhase(state, selected), { status: 'battle' })
+    assert.deepEqual(inspectGen3Encounter(state, selected), { status: 'normal', species: 145, pid: 8, otid: 0 })
+    writeMon(state, selected.enemyAddress, { pid: 1, species: 145 })
+    assert.deepEqual(inspectGen3Encounter(state, selected), { status: 'shiny', species: 145, pid: 1, otid: 0 })
+    state.set(Buffer.from(gameCode === 'BPRE' ? 'BPGE' : 'BPRE'), 0x2c)
+    assert.deepEqual(inspectGen3Encounter(state, selected), { status: 'error', reason: 'state-mismatch' })
+  })
+}
 
 test('Ruby waits for a battle even if an enemy record changes on the map', () => {
   const ruby = findGen3EncounterLayout({ romSha256: '0fdd36e92b75bed65d09df4635ab0b707b288c2bf1dc4c6e7a4a4f0eebe9d64c', core: 'gba', runtimeId: 'emulatorjs-4.2.3' })

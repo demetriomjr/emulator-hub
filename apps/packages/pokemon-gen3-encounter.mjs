@@ -4,6 +4,8 @@ const layouts = new Map([
   ['0fdd36e92b75bed65d09df4635ab0b707b288c2bf1dc4c6e7a4a4f0eebe9d64c', { playerAddress: 0x03004360, enemyAddress: 0x030045c0, gameCode: 'AXVE', battleFlag: { main: 0x03001770, inBattleOffset: 0x43d } }],
   ['02ca41513580a8b780989dee428df747b52a0b1a55bec617886b4059eb1152fb', { playerAddress: 0x03004360, enemyAddress: 0x030045c0, gameCode: 'AXPE', battleFlag: { main: 0x03001770, inBattleOffset: 0x43d } }],
   ['a9dec84dfe7f62ab2220bafaef7479da0929d066ece16a6885f6226db19085af', { playerAddress: 0x020244ec, enemyAddress: 0x02024744, gameCode: 'BPEE', battle: { main: 0x030022c0, controllers: 0x03005d60, positions: 0x02024076, cursor: 0x020244ac, outcome: 0x0202433a, chooseAction: 0x08057588, overworld: 0x08085e5c } }],
+  ['729041b940afe031302d630fdbe57c0c145f3f7b6d9b8eca5e98678d0ca4d059', { playerAddress: 0x02024284, enemyAddress: 0x0202402c, gameCode: 'BPRE', battleFlag: { main: 0x030030f0, inBattleOffset: 0x439 } }],
+  ['2f978f635b9593f6ca26ec42481c53a6b39f6cddd894ad5c062c1419fac58825', { playerAddress: 0x02024284, enemyAddress: 0x0202402c, gameCode: 'BPGE', battleFlag: { main: 0x030030f0, inBattleOffset: 0x439 } }],
 ])
 
 const knownEmeraldPatch = 'e12480bad322c9bbb20ebba943ab5d1987001657e0f69d74f5cd94d6ba20a6b3'
