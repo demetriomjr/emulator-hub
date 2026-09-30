@@ -1722,3 +1722,42 @@ Limites explícitos:
 - Produção foi somente lida. Não houve build, commit, deploy, alteração de progressão
   Emerald da spec 085 nem mudança de arquitetura/infraestrutura nesta etapa. Um
   eventual corte em produção continua dependendo de solicitação específica.
+
+## 26. Disponibilidade imediata de perfis durante carregamento de pane
+
+Após o deploy, o usuário apontou que um perfil escolhido só desaparece dos
+seletores dos outros blocos depois da resposta da API. O carregamento já registra
+a origem pendente e reserva a escolha contra seleções concorrentes, mas os
+dropdowns recebem apenas as origens confirmadas (`pokemonHubPanes`); o estado
+pendente alimenta o indicador de processamento e não participa do filtro visual.
+
+Contrato desta correção limitada à apresentação e à regra de disponibilidade:
+
+- Ao escolher uma origem completa, Hub ou Save, reservar sua identidade nos
+  seletores dos outros blocos no próximo render, antes da resposta da API.
+- O perfil ainda carregado no bloco que está trocando continua indisponível aos
+  outros até a troca terminar; a seleção nova também fica indisponível nesse
+  intervalo. A própria seleção do bloco não é tratada como duplicata.
+- Se a troca for confirmada, o novo perfil permanece indisponível e o anterior
+  é liberado. Se falhar, a reserva nova é retirada e o perfil anterior continua
+  indisponível, sem alterar o snapshot confirmado.
+- A regra vale para opções Hub, perfis Save e a lista de ROMs quando todos os
+  seus perfis estão reservados. Não muda a API, o modelo de sessão, a persistência
+  nem o processamento independente dos blocos.
+
+A verificação precisa suspender uma resposta de carregamento e inspecionar o
+dropdown de outro bloco antes de liberá-la; depois conferir confirmação e erro
+separadamente. Testar apenas o estado final deixaria esta regressão passar.
+
+Implementação: os seletores recebem as origens pendentes dos blocos e filtram
+por elas e pelas origens confirmadas. A reserva pendente é liberada ao concluir
+ou falhar o carregamento. A validação de uma nova escolha também considera
+ambas, impedindo que uma seleção simultânea ocupe a origem ainda aberta em um
+bloco que está trocando de perfil.
+
+Regressões observadas falhando antes e passando após a correção. Verificação
+final: suíte de ciclo de vida E2E com 9 testes aprovados; testes de packages
+com 723 executados, 721 aprovados e 2 ignorados; lint do frontend aprovado;
+`git diff --check` sem erros. O cenário de erro injeta uma resposta HTTP 503
+no teste e confirma que o Save volta a ficar disponível. Não houve mudança no
+backend, migração de dados ou deploy nesta correção.

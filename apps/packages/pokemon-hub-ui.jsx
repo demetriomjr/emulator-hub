@@ -611,13 +611,11 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
 
   function selectPokemonHubPane(index, source, { allowBusy = false } = {}) {
     if ((!allowBusy && pokemonHubBusy) || pokemonHubClosingRef.current || Object.hasOwn(pokemonHubPendingSourcesRef.current, index)) return
-    const reservedPanes = pokemonHubPanesRef.current.map((pane, candidate) =>
-      Object.hasOwn(pokemonHubPendingSourcesRef.current, candidate) ? pokemonHubPendingSourcesRef.current[candidate] : pane)
-    const result = choosePaneSource(reservedPanes, index, source || null)
+    const result = choosePaneSource(pokemonHubPanesRef.current, index, source || null, pokemonHubPendingSourcesRef.current)
     if (result.error) { setPokemonHubError(result.error); return }
     if (source && !isCompletePaneSource(source)) return
     pokemonHubPendingSourcesRef.current[index] = source || null
-    setPokemonHubPendingPanes(current => ({ ...current, [index]: true }))
+    setPokemonHubPendingPanes(current => ({ ...current, [index]: source || null }))
     const load = async () => {
       try {
         if (pokemonHubClosingRef.current) return
@@ -765,7 +763,7 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
         <Button className="dialog-close" type="text" aria-label="Fechar Pokémon Hub" icon={<CloseOutlined />} onClick={() => void closePokemonHub()} />
       </header>
       <div className={`pokemon-workspace-body pokemon-workspace-body-${pokemonHubPanes.length}`}>
-        {pokemonHubPanes.map((source, index) => <PokemonHubPane key={index} side={index} panes={pokemonHubPanes} paneCount={pokemonHubPanes.length} source={source} activeDrag={pokemonHubActiveDrag} transferDraft={pokemonItemTransferDraft} onTransferQuantityChange={quantity => setPokemonItemTransferDraft(current => current ? { ...current, quantity } : null)} onTransferConfirm={confirmPokemonItemTransfer} onTransferCancel={() => setPokemonItemTransferDraft(null)} data={pokemonHubData} hubProfiles={projectedItems.profiles} profilesLoading={pokemonHubProfilesLoading} saveProfileGames={saveProfileGames} saveProfileGamesLoading={catalogLoading} saveProfileGamesError={catalogError} saveProfilesByGame={saveProfilesByGame} saveLayoutsBySource={projectedItems.layouts} selected={pokemonHubSelection} cardSelection={pokemonCardSelection[index]} pokemonDetailsById={pokemonDetailsById} onCardClose={() => closePokemonCard(index)} selectedBox={pokemonHubBoxes[saveSourceKey(source?.gameId, source?.profileId)]} busy={pokemonHubBusy || pokemonItemPendingTransfers.length > 0} loading={Boolean(pokemonHubPendingPanes[index])} structureBusy={Object.keys(pokemonHubPendingPanes).length > 0} onSourceChange={nextSource => selectPokemonHubPane(index, nextSource)} onCreate={() => openPokemonHubProfileCreator(index)} onAddPane={addPokemonHubPane} onClosePane={() => closePokemonHubPane(index)} onBoxChange={(gameId, profileId, box) => setPokemonHubBoxes(current => ({ ...current, [saveSourceKey(gameId, profileId)]: box }))} onSlotSelect={selectPokemonHubLocation} onRename={openPokemonHubProfileRenamer} onDelete={deleteHubProfile} />)}
+        {pokemonHubPanes.map((source, index) => <PokemonHubPane key={index} side={index} panes={pokemonHubPanes} pendingSources={pokemonHubPendingPanes} paneCount={pokemonHubPanes.length} source={source} activeDrag={pokemonHubActiveDrag} transferDraft={pokemonItemTransferDraft} onTransferQuantityChange={quantity => setPokemonItemTransferDraft(current => current ? { ...current, quantity } : null)} onTransferConfirm={confirmPokemonItemTransfer} onTransferCancel={() => setPokemonItemTransferDraft(null)} data={pokemonHubData} hubProfiles={projectedItems.profiles} profilesLoading={pokemonHubProfilesLoading} saveProfileGames={saveProfileGames} saveProfileGamesLoading={catalogLoading} saveProfileGamesError={catalogError} saveProfilesByGame={saveProfilesByGame} saveLayoutsBySource={projectedItems.layouts} selected={pokemonHubSelection} cardSelection={pokemonCardSelection[index]} pokemonDetailsById={pokemonDetailsById} onCardClose={() => closePokemonCard(index)} selectedBox={pokemonHubBoxes[saveSourceKey(source?.gameId, source?.profileId)]} busy={pokemonHubBusy || pokemonItemPendingTransfers.length > 0} loading={Object.hasOwn(pokemonHubPendingPanes, index)} structureBusy={Object.keys(pokemonHubPendingPanes).length > 0} onSourceChange={nextSource => selectPokemonHubPane(index, nextSource)} onCreate={() => openPokemonHubProfileCreator(index)} onAddPane={addPokemonHubPane} onClosePane={() => closePokemonHubPane(index)} onBoxChange={(gameId, profileId, box) => setPokemonHubBoxes(current => ({ ...current, [saveSourceKey(gameId, profileId)]: box }))} onSlotSelect={selectPokemonHubLocation} onRename={openPokemonHubProfileRenamer} onDelete={deleteHubProfile} />)}
       </div>
     </div><PokemonHubDragOverlay drag={pokemonHubActiveDrag} /></DragDropProvider>
     <Modal
@@ -807,17 +805,17 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
   </>
 }
 
-function PokemonHubPaneControls({ side, panes, source, hubProfiles, profilesLoading, saveProfileGames, saveProfileGamesLoading, saveProfileGamesError, saveProfilesByGame, busy, onSourceChange, onCreate, onDelete }) {
+function PokemonHubPaneControls({ side, panes, pendingSources, source, hubProfiles, profilesLoading, saveProfileGames, saveProfileGamesLoading, saveProfileGamesError, saveProfilesByGame, busy, onSourceChange, onCreate, onDelete }) {
   const [selectionDraft, setSelectionDraft] = useState(null)
   useEffect(() => { setSelectionDraft(null) }, [source?.gameId, source?.hubProfileId, source?.kind, source?.profileId])
-  const availableHubProfiles = hubProfiles.filter(profile => isPaneSourceAvailable(panes, side, { kind: 'hub', hubProfileId: profile.hubProfileId }))
+  const availableHubProfiles = hubProfiles.filter(profile => isPaneSourceAvailable(panes, side, { kind: 'hub', hubProfileId: profile.hubProfileId }, pendingSources))
   const { activeSourceKind, selectedSaveSource, selectedHubSource } = paneControlSources(source, selectionDraft)
   const selectedHubProfile = source?.kind === 'hub' && selectedHubSource?.hubProfileId === source.hubProfileId
     ? hubProfiles.find(profile => profile.hubProfileId === source.hubProfileId) : null
   const selectedGameId = selectedSaveSource?.gameId ?? null
   const saveProfiles = selectedGameId ? saveProfilesByGame[selectedGameId] ?? [] : []
   const allSaveProfiles = saveProfileGames.find(game => game.id === selectedGameId)?.profiles ?? []
-  const availableSaveProfileGames = saveProfileGames.filter(game => hasAvailableSaveProfile(panes, side, game.id, saveProfilesByGame[game.id]))
+  const availableSaveProfileGames = saveProfileGames.filter(game => hasAvailableSaveProfile(panes, side, game.id, saveProfilesByGame[game.id], pendingSources))
   return <div className="pokemon-pane-controls">
     <div className="pokemon-pane-source-toggle" role="group" aria-label="Tipo de perfil">
       <Button className={`pokemon-pane-source-button${activeSourceKind === 'hub' ? ' is-active' : ''}`} type="default" aria-label="Perfil do Hub" title="Perfil do Hub" icon={<CodeSandboxOutlined />} disabled={busy || profilesLoading} onClick={() => setSelectionDraft({ kind: 'hub' })} />
@@ -829,7 +827,7 @@ function PokemonHubPaneControls({ side, panes, source, hubProfiles, profilesLoad
         if (!profileId) { setSelectionDraft({ kind: 'game', gameId: selectedGameId }); return }
         setSelectionDraft(null)
         onSourceChange({ kind: 'game', gameId: selectedGameId, profileId })
-      }} options={saveProfiles.filter(profile => isPaneSourceAvailable(panes, side, { kind: 'game', gameId: selectedGameId, profileId: profile.id })).map(profile => ({ value: profile.id, label: formatGameProfileLabel(profile, allSaveProfiles) }))} />
+      }} options={saveProfiles.filter(profile => isPaneSourceAvailable(panes, side, { kind: 'game', gameId: selectedGameId, profileId: profile.id }, pendingSources)).map(profile => ({ value: profile.id, label: formatGameProfileLabel(profile, allSaveProfiles) }))} />
       {saveProfileGamesError && <p className="pokemon-pane-note" role="alert">{saveProfileGamesError}</p>}
     </>}
     {activeSourceKind === 'hub' && <><Select className="pokemon-pane-profile" classNames={{ popup: { root: 'pokemon-hub-select-popup' } }} aria-label="Perfil do Hub" value={selectedHubSource?.hubProfileId} placeholder={profilesLoading ? 'Carregando perfis…' : 'Escolher perfil…'} loading={profilesLoading} disabled={busy} allowClear showSearch optionFilterProp="label" onClear={() => setSelectionDraft({ kind: 'hub' })} onChange={value => {
@@ -935,7 +933,7 @@ function PokemonHubProfileDelete({ profile, busy, onDelete }) {
   </Popconfirm>
 }
 
-function PokemonHubPane({ side, panes, paneCount, source, activeDrag, transferDraft, onTransferQuantityChange, onTransferConfirm, onTransferCancel, data, hubProfiles, profilesLoading, saveProfileGames, saveProfileGamesLoading, saveProfileGamesError, saveProfilesByGame, saveLayoutsBySource, selected, cardSelection, pokemonDetailsById, onCardClose, selectedBox, busy, loading, structureBusy, onSourceChange, onCreate, onAddPane, onClosePane, onBoxChange, onSlotSelect, onRename, onDelete }) {
+function PokemonHubPane({ side, panes, pendingSources, paneCount, source, activeDrag, transferDraft, onTransferQuantityChange, onTransferConfirm, onTransferCancel, data, hubProfiles, profilesLoading, saveProfileGames, saveProfileGamesLoading, saveProfileGamesError, saveProfilesByGame, saveLayoutsBySource, selected, cardSelection, pokemonDetailsById, onCardClose, selectedBox, busy, loading, structureBusy, onSourceChange, onCreate, onAddPane, onClosePane, onBoxChange, onSlotSelect, onRename, onDelete }) {
   const [activeTab, setActiveTab] = useState('pokemon')
   const [itemAreaId, setItemAreaId] = useState('pc')
   useEffect(() => { setActiveTab('pokemon'); setItemAreaId('pc') }, [source?.gameId, source?.profileId, source?.hubProfileId, source?.kind])
@@ -991,7 +989,7 @@ function PokemonHubPane({ side, panes, paneCount, source, activeDrag, transferDr
   </div>)
   return <section className="pokemon-workspace-pane" aria-label={`Painel ${side + 1} do Pokémon Hub`}>
     <header className="pokemon-pane-header" inert={cardOpen}>
-      <PokemonHubPaneControls side={side} panes={panes} source={source} hubProfiles={hubProfiles} profilesLoading={profilesLoading} saveProfileGames={saveProfileGames} saveProfileGamesLoading={saveProfileGamesLoading} saveProfileGamesError={saveProfileGamesError} saveProfilesByGame={saveProfilesByGame} busy={busy} onSourceChange={onSourceChange} onCreate={onCreate} onDelete={onDelete} />
+      <PokemonHubPaneControls side={side} panes={panes} pendingSources={pendingSources} source={source} hubProfiles={hubProfiles} profilesLoading={profilesLoading} saveProfileGames={saveProfileGames} saveProfileGamesLoading={saveProfileGamesLoading} saveProfileGamesError={saveProfileGamesError} saveProfilesByGame={saveProfilesByGame} busy={busy} onSourceChange={onSourceChange} onCreate={onCreate} onDelete={onDelete} />
       <div className="pokemon-pane-actions">
         {canClose && <Button className="pokemon-pane-action pokemon-pane-close" type="default" aria-label="Fechar container" title="Fechar container" icon={<CloseOutlined />} disabled={busy || structureBusy} onClick={onClosePane} />}
         {canAdd && <Button className="pokemon-pane-action pokemon-pane-add" type="primary" aria-label="Abrir novo container" title="Abrir novo container" icon={<PlusOutlined />} disabled={busy} onClick={onAddPane} />}

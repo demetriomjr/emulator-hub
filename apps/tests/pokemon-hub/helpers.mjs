@@ -113,7 +113,7 @@ export function pane(page, index) {
   return page.getByRole('region', { name: `Painel ${index + 1} do Pokémon Hub` })
 }
 
-export async function selectSave(page, index, profileName) {
+export async function selectSave(page, index, profileName, { waitForLoad = true } = {}) {
   const panel = pane(page, index)
   await panel.getByRole('button', { name: 'Perfil de Save' }).click()
   const rom = panel.getByRole('combobox', { name: 'ROM com perfil' })
@@ -146,6 +146,7 @@ export async function selectSave(page, index, profileName) {
   }
   await expect(activeOption).toHaveAttribute('title', expectedTitle)
   await saveProfile.press('Enter')
+  if (!waitForLoad) return
   await expect(panel.getByTitle(new RegExp(`^#\\d+ ${escapeRegExp(profileName)}$`))).toBeVisible()
   selected.delete(names.get(index))
   names.set(index, profileName)

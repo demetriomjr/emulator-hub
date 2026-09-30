@@ -7,6 +7,84 @@ const audits = new WeakMap()
 test.beforeEach(async ({ page }) => { audits.set(page, await watchSnapshots(page)) })
 test.afterEach(async ({ page }, testInfo) => { await audits.get(page)(testInfo) })
 
+test('reserva imediatamente o Hub escolhido e libera o anterior só após confirmar', async ({ page }) => {
+  const first = await createHubProfile('E2E Reserva Hub A')
+  const second = await createHubProfile('E2E Reserva Hub B')
+  await openWorkspace(page)
+  await selectHub(page, 0, first)
+  await addPane(page)
+
+  let release, started
+  const hold = new Promise(resolve => { release = resolve })
+  const requested = new Promise(resolve => { started = resolve })
+  await page.route('**/pokemon-hub/sessions/*/panes/0', async route => {
+    if (route.request().method() !== 'POST') return route.continue()
+    const response = await route.fetch()
+    started()
+    await hold
+    await route.fulfill({ response })
+  })
+
+  const firstSelector = pane(page, 0).getByRole('combobox', { name: 'Perfil do Hub' })
+  await firstSelector.click()
+  await firstSelector.fill(second.name)
+  await firstSelector.press('Enter')
+  try {
+    await requested
+    const secondPane = pane(page, 1)
+    await secondPane.getByRole('button', { name: 'Perfil do Hub', exact: true }).click()
+    const otherSelector = secondPane.getByRole('combobox', { name: 'Perfil do Hub' })
+    await otherSelector.click()
+    await otherSelector.fill(second.name)
+    await expect(page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: second.name })).toHaveCount(0)
+    await otherSelector.fill(first.name)
+    await expect(page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: first.name })).toHaveCount(0)
+  } finally { release() }
+
+  await expect(pane(page, 0).getByRole('heading', { name: second.name })).toBeVisible()
+  const otherSelector = pane(page, 1).getByRole('combobox', { name: 'Perfil do Hub' })
+  if (await otherSelector.getAttribute('aria-expanded') !== 'true') await otherSelector.click()
+  await otherSelector.fill(first.name)
+  await expect(page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: first.name })).toBeVisible()
+  await otherSelector.fill(second.name)
+  await expect(page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: second.name })).toHaveCount(0)
+  await closeWorkspace(page)
+})
+
+test('devolve o Save ao seletor dos outros blocos quando o carregamento falha', async ({ page }) => {
+  await openWorkspace(page)
+  await selectSave(page, 0, 'isolated-a')
+  await addPane(page)
+  const currentSelector = pane(page, 0).getByRole('combobox', { name: 'Perfil de Save' })
+  await currentSelector.click()
+  await expect(page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'isolated-b' })).toBeVisible()
+  await currentSelector.press('Escape')
+
+  let release, started
+  const hold = new Promise(resolve => { release = resolve })
+  const requested = new Promise(resolve => { started = resolve })
+  await page.route('**/pokemon-hub/sessions/*/panes/1', async route => {
+    if (route.request().method() !== 'POST') return route.continue()
+    started()
+    await hold
+    await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Falha de carregamento simulada' }) })
+  })
+
+  await selectSave(page, 1, 'isolated-b', { waitForLoad: false })
+  try {
+    await requested
+    const selector = pane(page, 0).getByRole('combobox', { name: 'Perfil de Save' })
+    await selector.click()
+    await expect(page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'isolated-b' })).toHaveCount(0)
+  } finally { release() }
+
+  await expect(pane(page, 1).getByRole('status', { name: 'Processando painel 2' })).toHaveCount(0)
+  const selector = pane(page, 0).getByRole('combobox', { name: 'Perfil de Save' })
+  if (await selector.getAttribute('aria-expanded') !== 'true') await selector.click()
+  await expect(page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'isolated-b' })).toBeVisible()
+  await closeWorkspace(page)
+})
+
 test('um movimento nos Saves durante a troca do terceiro pane permanece após a resposta atrasada', async ({ page }) => {
  test.setTimeout(90_000)
  const hubA=await createHubProfile('E2E Peer Race A'), hubB=await createHubProfile('E2E Peer Race B')

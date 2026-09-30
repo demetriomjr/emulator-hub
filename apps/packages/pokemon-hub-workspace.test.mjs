@@ -19,6 +19,22 @@ test('rejects selecting the same game save in two workspace panes', () => {
   assert.deepEqual(result, { panes: [{ kind: 'game', profileId: 'may', gameId: 'pokemon-emerald' }, null], error: 'This game save is already open.' })
 })
 
+test('keeps the loaded source and its replacement reserved until the pane load finishes', () => {
+  const first = { kind: 'hub', hubProfileId: 'general' }
+  const next = { kind: 'hub', hubProfileId: 'shiny' }
+  const panes = [first, null]
+  const pending = { 0: next }
+
+  assert.equal(isPaneSourceAvailable(panes, 1, first, pending), false)
+  assert.equal(isPaneSourceAvailable(panes, 1, next, pending), false)
+  assert.equal(isPaneSourceAvailable(panes, 0, next, pending), true)
+  assert.equal(choosePaneSource(panes, 1, next, pending).error, 'This Hub profile is already open.')
+  assert.equal(isPaneSourceAvailable(panes, 1, next), true)
+
+  const save = { kind: 'game', gameId: 'ruby', profileId: 'two' }
+  assert.equal(hasAvailableSaveProfile([{ kind: 'game', gameId: 'ruby', profileId: 'one' }, null], 1, 'ruby', [{ id: 'one' }, { id: 'two' }], { 0: save }), false)
+})
+
 test('reserves only a complete game and save-profile pair', () => {
   const emeraldMay = { kind: 'game', gameId: 'pokemon-emerald', profileId: 'may' }
   const emeraldDawn = { kind: 'game', gameId: 'pokemon-emerald', profileId: 'dawn' }

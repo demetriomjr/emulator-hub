@@ -35,7 +35,7 @@ test('queues pane loads while blocking only the pane being loaded', async () => 
 
   assert.match(packageSource, /pokemonHubPaneQueueRef/)
   assert.match(packageSource, /pokemonHubPendingPanes/)
-  assert.match(packageSource, /loading=\{Boolean\(pokemonHubPendingPanes\[index\]\)\}/)
+  assert.match(packageSource, /loading=\{Object\.hasOwn\(pokemonHubPendingPanes, index\)\}/)
   assert.match(packageSource, /className="pokemon-workspace-pane-stale"/)
   assert.match(stylesheet, /\.pokemon-workspace-pane-stale\s*\{[^}]*inset:\s*0/)
 })

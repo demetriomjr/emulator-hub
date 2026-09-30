@@ -2,14 +2,15 @@ export function createPokemonHubWorkspaceState() {
   return { panes: [null], boxes: {} }
 }
 
-export function choosePaneSource(panes, index, nextSource) {
-  const duplicate = !isPaneSourceAvailable(panes, index, nextSource)
+export function choosePaneSource(panes, index, nextSource, pendingSources = {}) {
+  const duplicate = !isPaneSourceAvailable(panes, index, nextSource, pendingSources)
   if (duplicate) return { panes, error: nextSource.kind === 'hub' ? 'This Hub profile is already open.' : 'This game save is already open.' }
   return { panes: panes.map((source, candidate) => candidate === index ? nextSource : source), error: '' }
 }
 
-export function isPaneSourceAvailable(panes, index, nextSource) {
+export function isPaneSourceAvailable(panes, index, nextSource, pendingSources = {}) {
   return !panes.some((source, candidate) => candidate !== index && sameSource(source, nextSource))
+    && !Object.entries(pendingSources).some(([candidate, source]) => Number(candidate) !== index && sameSource(source, nextSource))
 }
 
 export function isCompletePaneSource(source) {
@@ -19,10 +20,10 @@ export function isCompletePaneSource(source) {
     && typeof source.profileId === 'string' && source.profileId.length > 0
 }
 
-export function hasAvailableSaveProfile(panes, index, gameId, profiles) {
+export function hasAvailableSaveProfile(panes, index, gameId, profiles, pendingSources = {}) {
   return Array.isArray(profiles) && profiles.some(profile => (
     profile && typeof profile.id === 'string'
-      && isPaneSourceAvailable(panes, index, { kind: 'game', gameId, profileId: profile.id })
+      && isPaneSourceAvailable(panes, index, { kind: 'game', gameId, profileId: profile.id }, pendingSources)
   ))
 }
 
