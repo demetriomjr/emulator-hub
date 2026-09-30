@@ -10,10 +10,52 @@ import { inspectPokemonGen3Inventory } from './pokemon-gen3-inventory.mjs'
 import { editPokemonGen3Flags, readPokemonGen3Flags } from './pokemon-gen3-event-flags.mjs'
 import { inspectPokemonGen3EventEligibility } from './pokemon-gen3-event-eligibility.mjs'
 import { materializePokemonGen3EventGrant } from './pokemon-gen3-event-grant.mjs'
+import { pokemonGen3SaveByteOffset, refreshPokemonGen3SaveSectionChecksums, selectUnambiguousPokemonGen3SaveCopy } from './pokemon-gen3-save-validation.mjs'
+import { stopPokemonGen3GabbyTy, validatePokemonGen3GabbyTyCandidate } from './pokemon-gen3-gabby-ty.mjs'
 
 const profileId = 'profile-1'
 const gameId = 'firered-1'
 const romSha256 = 'a'.repeat(64)
+
+test('leaves Gabby and Ty unchanged before Ruby League completion, then pins them once', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'emulator-hub-gabby-ty-'))
+  try {
+    const saveStore = createSaveStore({ dataPath: join(root, 'saves'), eventBackupsPath: join(root, 'event-backups') })
+    const original = rubySave({ league: false })
+    await saveStore.put(profileId, 'ruby-early', original, null)
+    const service = createPokemonGen3EventDeliveryService({
+      saveStore,
+      gameSaveLeases: { async get() { return null } },
+      resolveGame: async () => ({ title: 'pokemon-ruby', romSha256 }),
+    })
+
+    assert.deepEqual(await service.attempt({ profileId, gameId: 'ruby-early' }), { status: 'pending-progression' })
+    const beforeLeague = await saveStore.get(profileId, 'ruby-early')
+    assert.equal(beforeLeague.revision, 1)
+    assert.deepEqual(beforeLeague.bytes, original)
+    assert.equal(beforeLeague.eventGrantReceipt, undefined)
+    await assert.rejects(() => readdir(join(root, 'event-backups')), { code: 'ENOENT' })
+    await saveStore.put(profileId, 'ruby-early', editPokemonGen3Flags(beforeLeague.bytes, 'pokemon-ruby', [{ flagId: 0x804, value: true }]), 1)
+    assert.deepEqual(await service.attempt({ profileId, gameId: 'ruby-early' }), { status: 'delivered', revision: 3 })
+    const stored = await saveStore.get(profileId, 'ruby-early')
+    const copy = selectUnambiguousPokemonGen3SaveCopy(stored.bytes)
+    assert.equal(stored.bytes[pokemonGen3SaveByteOffset(copy, 'large', 0x2b19)], 0xff)
+    assert.deepEqual(readPokemonGen3Flags(stored.bytes, 'pokemon-ruby', [0x31c, 0x31d, 0x31e, 0x31f, 0x385, 0x386, 0x387, 0x388]), [true, true, true, true, true, true, false, true])
+    assert.deepEqual(stored.eventGrantReceipt.eventIds, ['southern-island'])
+    assert.deepEqual(stored.eventGrantReceipt.adjustmentIds, ['gabby-ty-route111'])
+    assert.equal(stored.runtimeStateInvalidatedAtRevision, 3)
+    assert.equal((await readdir(join(root, 'event-backups'))).length, 1)
+    assert.deepEqual(await service.attempt({ profileId, gameId: 'ruby-early' }), { status: 'already-delivered', revision: 3 })
+    const later = Buffer.from(stored.bytes)
+    later[pokemonGen3SaveByteOffset(copy, 'large', 0x2b19)] = 0
+    refreshPokemonGen3SaveSectionChecksums(later, copy, new Set([1 + Math.floor(0x2b19 / 0xf80)]))
+    await saveStore.put(profileId, 'ruby-early', later, 3)
+    assert.deepEqual(await service.attempt({ profileId, gameId: 'ruby-early' }), { status: 'already-delivered', revision: 4 })
+    assert.equal((await saveStore.get(profileId, 'ruby-early')).revision, 4)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
 
 test('delivers FireRed tickets after release with a backup, readback, and durable receipt', async () => {
   const root = await mkdtemp(join(tmpdir(), 'emulator-hub-event-delivery-'))
@@ -64,9 +106,33 @@ test('delivers Ruby National Dex and Eon Ticket in one backed-up save revision',
     assert.equal(inspectPokemonGen3EventEligibility(stored.bytes, 'pokemon-ruby').nationalDexUnlocked, true)
     assert.equal(inspectPokemonGen3Inventory(stored.bytes, 'pokemon-ruby').keyItems.slots[0].itemId, 275)
     assert.deepEqual(stored.eventGrantReceipt.eventIds, ['southern-island'])
+    assert.deepEqual(stored.eventGrantReceipt.adjustmentIds, ['gabby-ty-route111'])
     assert.equal((await readdir(join(root, 'event-backups'))).length, 1)
     assert.deepEqual(original, rubySave({ league: true }))
     assert.deepEqual(await service.attempt({ profileId, gameId: 'ruby-1' }), { status: 'already-delivered', revision: 2 })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('pins Emerald Gabby and Ty after the League while National Dex events remain pending', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'emulator-hub-gabby-ty-progression-'))
+  try {
+    const saveStore = createSaveStore({ dataPath: join(root, 'saves'), eventBackupsPath: join(root, 'event-backups') })
+    await saveStore.put(profileId, 'emerald-later', editPokemonGen3Flags(emeraldSave(), 'pokemon-emerald', [{ flagId: 0x896, value: false }]), null)
+    const service = createPokemonGen3EventDeliveryService({ saveStore, gameSaveLeases: { async get() { return null } }, resolveGame: async () => ({ title: 'pokemon-emerald', romSha256 }) })
+    assert.deepEqual(await service.attempt({ profileId, gameId: 'emerald-later' }), { status: 'adjusted', revision: 2 })
+    const adjusted = await saveStore.get(profileId, 'emerald-later')
+    assert.deepEqual(adjusted.eventGrantReceipt.eventIds, [])
+    assert.deepEqual(adjusted.eventGrantReceipt.adjustmentIds, ['gabby-ty-route111'])
+    assert.deepEqual(await service.attempt({ profileId, gameId: 'emerald-later' }), { status: 'pending-progression' })
+    await saveStore.put(profileId, 'emerald-later', editPokemonGen3Flags(adjusted.bytes, 'pokemon-emerald', [{ flagId: 0x896, value: true }]), adjusted.revision)
+    assert.deepEqual(await service.attempt({ profileId, gameId: 'emerald-later' }), { status: 'delivered', revision: 4 })
+    const delivered = await saveStore.get(profileId, 'emerald-later')
+    assert.deepEqual(delivered.eventGrantReceipt.eventIds, ['southern-island', 'faraway-island', 'navel-rock', 'birth-island'])
+    assert.deepEqual(delivered.eventGrantReceipt.adjustmentIds, ['gabby-ty-route111'])
+    assert.equal(inspectPokemonGen3Inventory(delivered.bytes, 'pokemon-emerald').keyItems.slots[0].itemId, 275)
+    assert.deepEqual(await service.attempt({ profileId, gameId: 'emerald-later' }), { status: 'already-delivered', revision: 4 })
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -97,7 +163,8 @@ test('upgrades an existing Emerald event receipt and backs up the Match Call cha
     assert.deepEqual(await service.attempt({ profileId, gameId: 'emerald-1' }), { status: 'delivered', revision: 3 })
     const stored = await saveStore.get(profileId, 'emerald-1')
     assert.deepEqual(readPokemonGen3Flags(stored.bytes, 'pokemon-emerald', [0x12f, 0x8ac, 0x8db]), [false, true, true])
-    assert.equal(stored.eventGrantReceipt.recipeVersion, 2)
+    assert.equal(stored.eventGrantReceipt.recipeVersion, 3)
+    assert.deepEqual(stored.eventGrantReceipt.adjustmentIds, ['gabby-ty-route111'])
     assert.deepEqual(changes[0].clearedFlagIds, [0x12f])
     assert.equal((await readdir(join(root, 'event-backups'))).length, 2)
     assert.deepEqual(await service.attempt({ profileId, gameId: 'emerald-1' }), { status: 'already-delivered', revision: 3 })
@@ -105,6 +172,29 @@ test('upgrades an existing Emerald event receipt and backs up the Match Call cha
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('Gabby and Ty editor uses Emerald offset, preserves inactive copy, and rejects unrelated changes', () => {
+  const original = emeraldSave()
+  const candidate = stopPokemonGen3GabbyTy(original, 'pokemon-emerald')
+  const selected = selectUnambiguousPokemonGen3SaveCopy(candidate)
+  assert.equal(candidate[pokemonGen3SaveByteOffset(selected, 'large', 0x2bad)], 0xff)
+  assert.deepEqual(readPokemonGen3Flags(candidate, 'pokemon-emerald', [0x31c, 0x31d, 0x31e, 0x31f, 0x385, 0x386, 0x387, 0x388]), [true, true, true, true, true, true, false, true])
+  assert.deepEqual(candidate.subarray(0, 0xe000), original.subarray(0, 0xe000))
+  assert.deepEqual(original, emeraldSave())
+  assert.equal(validatePokemonGen3GabbyTyCandidate(original, candidate, 'pokemon-emerald').changed, true)
+  const corrupted = Buffer.from(candidate)
+  corrupted[pokemonGen3SaveByteOffset(selected, 'large', 0x2bad) + 1] ^= 1
+  refreshPokemonGen3SaveSectionChecksums(corrupted, selected, new Set([1 + Math.floor(0x2bad / 0xf80)]))
+  assert.throws(() => validatePokemonGen3GabbyTyCandidate(original, corrupted, 'pokemon-emerald'), { code: 'SAVE_CANDIDATE_INVALID' })
+})
+
+test('Gabby and Ty editor supports Sapphire with the Ruby save layout', () => {
+  const original = rubySave({ league: false })
+  const candidate = stopPokemonGen3GabbyTy(original, 'pokemon-sapphire')
+  const selected = selectUnambiguousPokemonGen3SaveCopy(candidate)
+  assert.equal(candidate[pokemonGen3SaveByteOffset(selected, 'large', 0x2b19)], 0xff)
+  assert.equal(validatePokemonGen3GabbyTyCandidate(original, candidate, 'pokemon-sapphire').changed, true)
 })
 
 test('event delivery skips a save before Celio repairs the machine without touching it', async () => {

@@ -109,29 +109,3 @@ test('keeps the item navigator minimal and gives sprites room below a compact it
   assert.match(stylesheet, /\.pokemon-item-slot \.pokemon-slot-footer > span\s*\{[^}]*white-space:\s*nowrap/)
   assert.match(source, /<PokemonItemSprite itemKey=\{slot\.itemKey\}\s*\/>/)
 })
-
-test('routes item drops separately from Pokémon moves and enables empty transferable pockets as targets', async () => {
-  const source = await readFile(packageFile, 'utf8')
-  const stylesheet = await readFile(new URL('../frontend/src/styles.css', import.meta.url), 'utf8')
-
-  assert.match(source, /source\?\.kind === 'item' && target\?\.kind === 'item'/)
-  assert.match(source, /await persistPokemonItemReorder\(source, target\)/)
-  assert.match(source, /getPokemonItemReorderIntent\(source, target, inventory\)/)
-  assert.match(source, /reorderPokemonSaveItems\(session\.profileId, session\.sessionId/)
-  assert.match(source, /layout: \{ \.\.\.snapshot\.layout, itemInventory: result\.itemInventory \}/)
-  assert.match(source, /droppable = reorderable \|\| areaId === 'tm-hm' \|\| areaId === 'berries'/)
-  assert.match(source, /droppable \? <PokemonItemDragSlot/)
-  assert.match(source, /disabled: !canDrag/)
-  assert.match(stylesheet, /\.pokemon-item-slot\.drag-over\s*\{[^}]*outline:/)
-})
-
-test('switches a destination save to the dragged item area and confirms a bounded cross-save transfer', async () => {
-  const source = await readFile(packageFile, 'utf8')
-  assert.match(source, /activeDrag\?\.location\?\.kind === 'item'/)
-  assert.match(source, /setItemAreaId\(activeDrag\.location\.area\)/)
-  assert.match(source, /getPokemonItemTransferIntent\(source, target,/)
-  assert.match(source, /transferPokemonSaveItems\(session\.profileId, session\.sessionId/)
-  assert.match(source, /sourceItemInventory/)
-  assert.match(source, /destinationItemInventory/)
-  assert.match(source, /role="dialog" aria-label=\{`Transferir/)
-})

@@ -1,9 +1,14 @@
 import { expect, test } from '@playwright/test'
 import { readPokemonItemInventory } from '../../packages/pokemon-item-inventory.mjs'
-import { addPane, closeWorkspace, createHubProfile, drag, itemProfiles, itemSlot, openItems, openWorkspace, pane, readHubProfile, readItemSave, selectHub, selectItemArea, selectItemSave } from './helpers.mjs'
+import { addPane, closeWorkspace, createHubProfile, drag, forgetSelectedSaves, itemProfiles, itemSlot, openItems, openWorkspace, pane, readHubProfile, readItemSave, selectHub, selectItemArea, selectItemSave } from './helpers.mjs'
+import { watchSnapshots } from './snapshot-audit.mjs'
 
-test.afterEach(async ({ page }) => {
-  if (await page.getByRole('dialog', { name: 'Pokémon Hub' }).isVisible()) await closeWorkspace(page)
+const audits = new WeakMap()
+test.beforeEach(async ({ page }) => { audits.set(page, await watchSnapshots(page)) })
+test.afterEach(async ({ page }, testInfo) => {
+  try {
+    if (await page.getByRole('dialog', { name: 'Pokémon Hub' }).isVisible()) await closeWorkspace(page)
+  } finally { await audits.get(page)(testInfo) }
 })
 
 async function itemOrder(name, area) {
@@ -74,7 +79,11 @@ test('switches the destination area during a Ruby to Sapphire transfer and conse
   const prompt = pane(page, 1).getByRole('dialog', { name: /Transferir Potion/ })
   await expect(prompt).toBeVisible()
   await expect(prompt.getByRole('spinbutton')).toHaveValue('10')
-  await expect(prompt).toContainText('10 / 10')
+  await expect(prompt.locator('.pokemon-item-transfer-identity img.pokemon-item-sprite')).toHaveAttribute('src', /potion/)
+  await expect(prompt.getByText('Quantidade a transferir')).toBeVisible()
+  await expect(prompt.locator('.pokemon-item-transfer-limit')).toHaveText('/ 10')
+  await expect(prompt).not.toContainText('Máximo transferível')
+  await expect(prompt).not.toContainText('No destino')
   await prompt.getByRole('spinbutton').fill('2')
   await prompt.getByRole('button', { name: 'Transferir' }).click()
   await expect(prompt).toHaveCount(0)
@@ -194,7 +203,7 @@ test('limits a Ruby to Emerald stack to nine and cancel leaves both saves unchan
   await dragAcross(page, itemSlot(page, 0, 'Itens', 0), 1, 'Itens')
   const prompt = pane(page, 1).getByRole('dialog', { name: /Transferir Potion/ })
   await expect(prompt.getByRole('spinbutton')).toHaveValue('9')
-  await expect(prompt).toContainText('9 / 9')
+  await expect(prompt.locator('.pokemon-item-transfer-limit')).toHaveText('/ 9')
   await prompt.getByRole('button', { name: 'Cancelar' }).click()
   await expect(prompt).toHaveCount(0)
   expect((await itemOrder('ruby-limit', 'items')).revision).toBe(beforeSource.revision)
@@ -278,6 +287,48 @@ test('refuses cross-save Key Item and HM drags while allowing their local rules'
   await drag(page, itemSlot(page, 0, 'TMs/HMs', 1), itemSlot(page, 1, 'TMs/HMs', 0))
   await expect(pane(page, 1).getByRole('dialog', { name: /Transferir/ })).toHaveCount(0)
   expect((await itemOrder('ruby-blocked', 'tm-hm')).revision).toBe(beforeHm.revision)
+})
+
+test('shows destination-wide blocked feedback for Key Items and HMs while TMs remain draggable', async ({ page }) => {
+  const hub = await createHubProfile('Destino bloqueado')
+  await openWorkspace(page)
+  await selectItemSave(page, 0, 'ruby-block-feedback')
+  await addPane(page)
+  await selectHub(page, 1, hub)
+  await openItems(page, 0)
+  await openItems(page, 1)
+  const before = await readItemSave('ruby-block-feedback')
+  const blocked = pane(page, 1).getByRole('status', { name: 'Não é possível arrastar esse item.' })
+  for (const [area, slot] of [['Itens-chave', 0], ['TMs/HMs', 1]]) {
+    await selectItemArea(page, 0, area)
+    const origin = itemSlot(page, 0, area, slot)
+    await expect(origin).toHaveCSS('cursor', 'grab')
+    const from = await origin.boundingBox()
+    const target = await hubItemSlot(page, 1, hub.name, 0).boundingBox()
+    expect(from).not.toBeNull()
+    expect(target).not.toBeNull()
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(from.x + from.width / 2 + 8, from.y + from.height / 2 + 8, { steps: 4 })
+    await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 12 })
+    await expect(blocked).toBeVisible()
+    const overlayBounds = await blocked.boundingBox()
+    const paneBounds = await pane(page, 1).boundingBox()
+    expect(Math.abs(overlayBounds.x - paneBounds.x)).toBeLessThanOrEqual(1)
+    expect(Math.abs(overlayBounds.y - paneBounds.y)).toBeLessThanOrEqual(1)
+    expect(Math.abs(overlayBounds.width - paneBounds.width)).toBeLessThanOrEqual(1)
+    expect(Math.abs(overlayBounds.height - paneBounds.height)).toBeLessThanOrEqual(1)
+    await expect(pane(page, 0).getByRole('status', { name: 'Não é possível arrastar esse item.' })).toHaveCount(0)
+    await expect(blocked.locator('.pokemon-item-block-icon')).toHaveCSS('color', 'rgb(255, 91, 103)')
+    await page.mouse.up()
+    await expect(blocked).toHaveCount(0)
+    await expect(pane(page, 1).getByRole('dialog', { name: /Transferir/ })).toHaveCount(0)
+  }
+  expect((await readItemSave('ruby-block-feedback')).revision).toBe(before.revision)
+  await expect(itemSlot(page, 0, 'TMs/HMs', 0)).toHaveCSS('cursor', 'grab')
+  await drag(page, itemSlot(page, 0, 'TMs/HMs', 0), hubItemSlot(page, 1, hub.name, 0))
+  await expect(pane(page, 1).getByRole('dialog', { name: /Transferir TM/ })).toBeVisible()
+  await pane(page, 1).getByRole('button', { name: 'Cancelar' }).click()
 })
 
 test('stacks by item identity even when dropped over a different destination item', async ({ page }) => {
@@ -407,7 +458,7 @@ test('caps the final Bag unit at 99 and rejects zero, fractions and excess quant
   const quantity = prompt.getByRole('spinbutton')
   const confirm = prompt.getByRole('button', { name: 'Transferir' })
   await expect(quantity).toHaveValue('1')
-  await expect(prompt).toContainText('1 / 1')
+  await expect(prompt.locator('.pokemon-item-transfer-limit')).toHaveText('/ 1')
   for (const invalid of ['0', '-1', '1.5', '2']) {
     await quantity.fill(invalid)
     await expect(confirm).toBeDisabled()
@@ -446,10 +497,42 @@ test('Hub Items tabs match the card width and save-to-Hub-to-save keeps quantity
   expect(grid).not.toBeNull()
   expect(Math.abs(tabs.x - grid.x)).toBeLessThanOrEqual(1)
   expect(Math.abs(tabs.width - grid.width)).toBeLessThanOrEqual(1)
+  const hubNav = pane(page, 1).locator('.pokemon-hub-item-nav')
+  await expect(hubNav).toContainText(hub.name)
+  await expect(hubNav.getByRole('button', { name: `Renomear ${hub.name}` })).toBeVisible()
+  await expect(hubNav.getByRole('button', { name: `Excluir ${hub.name}` })).toHaveCount(0)
+  const deleteButton = pane(page, 1).getByRole('button', { name: `Excluir ${hub.name}` })
+  await expect(deleteButton).toBeVisible()
+  const addButton = pane(page, 1).getByRole('button', { name: 'Criar Perfil do Hub' })
+  const addBounds = await addButton.boundingBox()
+  const deleteBounds = await deleteButton.boundingBox()
+  expect(Math.abs(addBounds.y - deleteBounds.y)).toBeLessThanOrEqual(1)
+  expect(deleteBounds.x).toBeGreaterThan(addBounds.x)
+  const navBounds = await hubNav.boundingBox()
+  expect(Math.abs(navBounds.x - grid.x)).toBeLessThanOrEqual(1)
+  expect(Math.abs(navBounds.width - grid.width)).toBeLessThanOrEqual(1)
+  expect(navBounds.height).toBeLessThanOrEqual(40)
+  const navTitleBounds = await hubNav.getByRole('heading', { name: hub.name }).boundingBox()
+  expect(Math.abs(navTitleBounds.x + navTitleBounds.width / 2 - navBounds.x - navBounds.width / 2)).toBeLessThanOrEqual(1)
+  await pane(page, 1).getByRole('button', { name: 'Pokémons', exact: true }).click()
+  const summary = pane(page, 1).locator('.pokemon-hub-profile-summary')
+  await expect(summary.getByRole('button', { name: `Renomear ${hub.name}` })).toBeVisible()
+  await expect(summary.getByRole('button', { name: `Excluir ${hub.name}` })).toHaveCount(0)
+  const summaryBounds = await summary.boundingBox()
+  expect(Math.abs(summaryBounds.x - grid.x)).toBeLessThanOrEqual(1)
+  expect(Math.abs(summaryBounds.width - grid.width)).toBeLessThanOrEqual(1)
+  expect(Math.abs(summaryBounds.height - navBounds.height)).toBeLessThanOrEqual(1)
+  const summaryTitleBounds = await summary.getByRole('heading', { name: hub.name }).boundingBox()
+  expect(Math.abs(summaryTitleBounds.x + summaryTitleBounds.width / 2 - summaryBounds.x - summaryBounds.width / 2)).toBeLessThanOrEqual(1)
+  await pane(page, 1).getByRole('button', { name: 'Itens', exact: true }).click()
+  const saveGrid = await pane(page, 0).locator('.pokemon-item-grid').boundingBox()
+  expect(Math.abs(grid.y - saveGrid.y)).toBeLessThanOrEqual(2)
 
   await drag(page, itemSlot(page, 0, 'Itens', 0), hubItemSlot(page, 1, hub.name, 0))
   const deposit = pane(page, 1).getByRole('dialog', { name: /Transferir Potion/ })
   await expect(deposit.getByRole('spinbutton')).toHaveValue('10')
+  await expect(deposit.locator('.pokemon-item-transfer-identity img.pokemon-item-sprite')).toBeVisible()
+  await expect(deposit.locator('.pokemon-item-transfer-limit')).toHaveText('/ 10')
   await deposit.getByRole('spinbutton').fill('4')
   await deposit.getByRole('button', { name: 'Transferir' }).click()
   await expect.poll(async () => (await readHubProfile(hub.hubProfileId)).profile.itemInventory.slots[0]?.quantity).toBe(4)
@@ -465,9 +548,10 @@ test('Hub Items tabs match the card width and save-to-Hub-to-save keeps quantity
   await addPane(page)
   await expect.poll(async () => {
     const nextTabs = await pane(page, 1).locator('.pokemon-pane-tabs').boundingBox()
+    const nextNav = await pane(page, 1).locator('.pokemon-hub-item-nav').boundingBox()
     const nextGrid = await pane(page, 1).locator('.pokemon-hub-item-grid').boundingBox()
-    return nextTabs && nextGrid ? [Math.round(nextTabs.x - nextGrid.x), Math.round(nextTabs.width - nextGrid.width), nextGrid.width < grid.width] : null
-  }).toEqual([0, 0, true])
+    return nextTabs && nextNav && nextGrid ? [Math.round(nextTabs.x - nextGrid.x), Math.round(nextTabs.width - nextGrid.width), Math.round(nextNav.y - nextTabs.y - nextTabs.height), Math.round(nextGrid.y - nextNav.y - nextNav.height), nextGrid.width < grid.width] : null
+  }).toEqual([0, 0, 8, 8, true])
   const profileUrl = `${process.env.E2E_API_URL}/api/pokemon-hub/profiles/${hub.hubProfileId}`
   expect((await fetch(profileUrl, { method: 'DELETE' })).status).toBe(409)
   await closeWorkspace(page)
@@ -700,4 +784,211 @@ test('Ruby and Sapphire deposits merge by itemKey after Hub reordering and remai
   await pane(page, 1).getByRole('button', { name: 'Itens', exact: true }).click()
   await expect(hubItemSlot(page, 1, hub.name, 5)).toHaveAttribute('aria-label', /Potion/)
   expect((await readHubProfile(hub.hubProfileId)).profile.itemInventory.slots[5].quantity).toBe(10)
+})
+
+test('queues two item deposits without blocking the workspace and projects them before the first response', async ({ page }) => {
+  const hub = await createHubProfile('Fila sem bloqueio')
+  let releaseFirst
+  let signalFirst
+  const firstBlocked = new Promise(resolve => { releaseFirst = resolve })
+  const firstStarted = new Promise(resolve => { signalFirst = resolve })
+  let requests = 0
+  await page.route('**/items/transfer', async route => {
+    requests++
+    if (requests === 1) { signalFirst(); await firstBlocked }
+    await route.continue()
+  })
+  try {
+    await openWorkspace(page)
+    await selectItemSave(page, 0, 'ruby-item-queue-success')
+    await addPane(page)
+    await selectHub(page, 1, hub)
+    await openItems(page, 0)
+    await openItems(page, 1)
+    await selectItemArea(page, 0, 'Itens')
+    await drag(page, itemSlot(page, 0, 'Itens', 0), hubItemSlot(page, 1, hub.name, 0))
+    await pane(page, 1).getByRole('dialog', { name: /Transferir Potion/ }).getByRole('button', { name: 'Transferir' }).click()
+    await firstStarted
+    await expect(page.getByRole('status', { name: 'Processando alteração do workspace' })).toHaveCount(0)
+    await expect(hubItemSlot(page, 1, hub.name, 0)).toHaveAttribute('aria-label', /Potion/)
+    await drag(page, itemSlot(page, 0, 'Itens', 0), hubItemSlot(page, 1, hub.name, 1))
+    await pane(page, 1).getByRole('dialog', { name: /Transferir Antidote/ }).getByRole('button', { name: 'Transferir' }).click()
+    await expect(hubItemSlot(page, 1, hub.name, 1)).toHaveAttribute('aria-label', /Antidote/)
+    expect(requests).toBe(1)
+  } finally { releaseFirst() }
+  await expect.poll(async () => (await readHubProfile(hub.hubProfileId)).profile.itemInventory.slots[1]?.itemKey).toBe('antidote')
+  expect(requests).toBe(2)
+})
+
+test('rolls back a rejected item deposit, shows its reason and continues the next queued deposit', async ({ page }) => {
+  const hub = await createHubProfile('Fila com falha')
+  let rejectFirst
+  let signalFirst
+  const firstBlocked = new Promise(resolve => { rejectFirst = resolve })
+  const firstStarted = new Promise(resolve => { signalFirst = resolve })
+  let requests = 0
+  await page.route('**/items/transfer', async route => {
+    requests++
+    if (requests === 1) {
+      signalFirst()
+      await firstBlocked
+      await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'Falha simulada na transferência', code: 'E2E_TEST_FAILURE' }) })
+    } else await route.continue()
+  })
+  try {
+    await openWorkspace(page)
+    await selectItemSave(page, 0, 'ruby-item-queue-failure')
+    await addPane(page)
+    await selectHub(page, 1, hub)
+    await openItems(page, 0)
+    await openItems(page, 1)
+    await selectItemArea(page, 0, 'Itens')
+    await drag(page, itemSlot(page, 0, 'Itens', 0), hubItemSlot(page, 1, hub.name, 0))
+    await pane(page, 1).getByRole('dialog', { name: /Transferir Potion/ }).getByRole('button', { name: 'Transferir' }).click()
+    await firstStarted
+    await drag(page, itemSlot(page, 0, 'Itens', 0), hubItemSlot(page, 1, hub.name, 1))
+    await pane(page, 1).getByRole('dialog', { name: /Transferir Antidote/ }).getByRole('button', { name: 'Transferir' }).click()
+    await expect(hubItemSlot(page, 1, hub.name, 0)).toHaveAttribute('aria-label', /Potion/)
+    await expect(hubItemSlot(page, 1, hub.name, 1)).toHaveAttribute('aria-label', /Antidote/)
+  } finally { rejectFirst() }
+  await expect(page.getByText('Falha simulada na transferência')).toBeVisible()
+  await expect(hubItemSlot(page, 1, hub.name, 0)).toHaveAttribute('aria-label', /vazia/)
+  await expect.poll(async () => (await readHubProfile(hub.hubProfileId)).profile.itemInventory.slots[1]?.itemKey).toBe('antidote')
+  expect((await itemOrder('ruby-item-queue-failure', 'items')).slots[0].itemKey).toBe('potion')
+  expect(requests).toBe(2)
+})
+
+test('five queued deposits survive closing and reopening the Hub while the first request is delayed', async ({ page }) => {
+  test.setTimeout(120_000)
+  const hub = await createHubProfile('Fila durante fechamento')
+  let releaseFirst
+  let signalFirst
+  const firstBlocked = new Promise(resolve => { releaseFirst = resolve })
+  const firstStarted = new Promise(resolve => { signalFirst = resolve })
+  let requests = 0
+  const responses = []
+  await page.route('**/items/transfer', async route => {
+    requests++
+    if (requests === 1) { signalFirst(); await firstBlocked }
+    await route.continue()
+  })
+  page.on('response', response => {
+    if (/\/items\/transfer$/.test(new URL(response.url()).pathname)) responses.push(response.status())
+  })
+  try {
+    await openWorkspace(page)
+    await selectItemSave(page, 0, 'ruby-item-race-close')
+    await addPane(page)
+    await selectHub(page, 1, hub)
+    await openItems(page, 0)
+    await openItems(page, 1)
+    await selectItemArea(page, 0, 'Itens')
+    for (let count = 1; count <= 5; count++) {
+      await drag(page, itemSlot(page, 0, 'Itens', 0), hubItemSlot(page, 1, hub.name, 0))
+      const prompt = pane(page, 1).getByRole('dialog', { name: /Transferir Potion/ })
+      await prompt.getByRole('spinbutton').fill('1')
+      await prompt.getByRole('button', { name: 'Transferir' }).click()
+      if (count === 1) await firstStarted
+      await expect(hubItemSlot(page, 1, hub.name, 0)).toHaveAttribute('aria-label', new RegExp(`Potion, ${count}$`))
+    }
+    expect(requests).toBe(1)
+    await page.getByRole('button', { name: 'Fechar Pokémon Hub' }).click()
+    await expect(page.getByRole('dialog', { name: 'Pokémon Hub' })).toBeVisible()
+  } finally { releaseFirst() }
+  await expect(page.getByRole('dialog', { name: 'Pokémon Hub' })).toHaveCount(0)
+  await expect.poll(() => requests).toBe(5)
+  expect(responses).toEqual([200, 200, 200, 200, 200])
+  expect((await itemOrder('ruby-item-race-close', 'items')).slots[0].quantity).toBe(5)
+  expect((await readHubProfile(hub.hubProfileId)).profile.itemInventory.slots[0].quantity).toBe(5)
+  await openWorkspace(page)
+  await selectItemSave(page, 0, 'ruby-item-race-close')
+  await addPane(page)
+  await selectHub(page, 1, hub)
+  await openItems(page, 0)
+  await openItems(page, 1)
+  await selectItemArea(page, 0, 'Itens')
+  await expect(itemSlot(page, 0, 'Itens', 0)).toHaveAttribute('aria-label', /Potion, 5/)
+  await expect(hubItemSlot(page, 1, hub.name, 0)).toHaveAttribute('aria-label', /Potion, 5/)
+})
+
+test('repeated item swaps preserve every stack and their order across Hub reopen', async ({ page }) => {
+  test.setTimeout(120_000)
+  await openWorkspace(page)
+  await selectItemSave(page, 0, 'ruby-item-race-reorder')
+  await openItems(page, 0)
+  await selectItemArea(page, 0, 'Itens')
+  const initial = await itemOrder('ruby-item-race-reorder', 'items')
+  for (let move = 1; move <= 12; move++) {
+    await drag(page, itemSlot(page, 0, 'Itens', 0), itemSlot(page, 0, 'Itens', 1))
+    await expect.poll(async () => (await itemOrder('ruby-item-race-reorder', 'items')).revision).toBe(initial.revision + move)
+  }
+  const final = await itemOrder('ruby-item-race-reorder', 'items')
+  expect(final.slots.slice(0, 3).map(slot => [slot.itemKey, slot.quantity])).toEqual(initial.slots.slice(0, 3).map(slot => [slot.itemKey, slot.quantity]))
+  expect(final.slots.slice(3).every(slot => !slot.nativeId)).toBe(true)
+  await closeWorkspace(page)
+  await openWorkspace(page)
+  await selectItemSave(page, 0, 'ruby-item-race-reorder')
+  await openItems(page, 0)
+  await selectItemArea(page, 0, 'Itens')
+  expect((await itemOrder('ruby-item-race-reorder', 'items')).slots).toEqual(final.slots)
+  await expect(itemSlot(page, 0, 'Itens', 0)).toHaveAttribute('aria-label', /Potion, 10/)
+})
+
+test('late response from an old close does not replace an already reopened item session', async ({ page }) => {
+  test.setTimeout(120_000)
+  const hub = await createHubProfile('Fechamento atrasado')
+  await openWorkspace(page)
+  await selectItemSave(page, 0, 'ruby-item-race-reopen')
+  await addPane(page)
+  await selectHub(page, 1, hub)
+  await openItems(page, 0)
+  await openItems(page, 1)
+  await selectItemArea(page, 0, 'Itens')
+  await drag(page, itemSlot(page, 0, 'Itens', 0), hubItemSlot(page, 1, hub.name, 0))
+  const firstPrompt = pane(page, 1).getByRole('dialog', { name: /Transferir Potion/ })
+  await firstPrompt.getByRole('spinbutton').fill('1')
+  await firstPrompt.getByRole('button', { name: 'Transferir' }).click()
+  await expect.poll(async () => (await readHubProfile(hub.hubProfileId)).profile.itemInventory.slots[0]?.quantity).toBe(1)
+
+  let releaseClose
+  let signalClose
+  let signalDelivered
+  const closeBlocked = new Promise(resolve => { releaseClose = resolve })
+  const closeStarted = new Promise(resolve => { signalClose = resolve })
+  const closeDelivered = new Promise(resolve => { signalDelivered = resolve })
+  let oldCloseStatus = null
+  await page.route('**/pokemon-hub/sessions/*/close', async route => {
+    const response = await route.fetch()
+    oldCloseStatus = response.status()
+    signalClose()
+    await closeBlocked
+    await route.fulfill({ response })
+    signalDelivered()
+  })
+  try {
+    await page.getByRole('button', { name: 'Fechar Pokémon Hub' }).click()
+    await closeStarted
+    await expect(page.getByRole('dialog', { name: 'Pokémon Hub' })).toHaveCount(0)
+    forgetSelectedSaves(page)
+    await page.getByRole('button', { name: 'Abrir Pokémon Hub' }).click()
+    await expect(page.getByRole('dialog', { name: 'Pokémon Hub' })).toBeVisible()
+    await selectItemSave(page, 0, 'ruby-item-race-reopen')
+    await addPane(page)
+    await selectHub(page, 1, hub)
+    await openItems(page, 0)
+    await openItems(page, 1)
+    await selectItemArea(page, 0, 'Itens')
+    await expect(hubItemSlot(page, 1, hub.name, 0)).toHaveAttribute('aria-label', /Potion, 1/)
+  } finally {
+    releaseClose()
+    await closeDelivered
+    await page.unroute('**/pokemon-hub/sessions/*/close')
+  }
+  expect(oldCloseStatus).toBe(200)
+  await drag(page, itemSlot(page, 0, 'Itens', 0), hubItemSlot(page, 1, hub.name, 0))
+  const secondPrompt = pane(page, 1).getByRole('dialog', { name: /Transferir Potion/ })
+  await secondPrompt.getByRole('spinbutton').fill('1')
+  await secondPrompt.getByRole('button', { name: 'Transferir' }).click()
+  await expect.poll(async () => (await readHubProfile(hub.hubProfileId)).profile.itemInventory.slots[0]?.quantity).toBe(2)
+  expect((await itemOrder('ruby-item-race-reopen', 'items')).slots[0].quantity).toBe(8)
 })

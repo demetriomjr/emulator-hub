@@ -78,3 +78,33 @@ test('fechar painel Hub com ack retido materializa transferência uma vez', asyn
   expect([...await occupiedIds('race-close-hub'), ...hubIds].sort()).toEqual(baseline)
   expect(pokemonGen3Adapter.readSlot((await readSave('race-close-hub')).bytes, 0, 2)).toBeNull()
 })
+
+test('fechamento espera heartbeat em trânsito antes de invalidar a sessão', async ({ page }) => {
+  let releaseHeartbeat
+  let signalHeartbeat
+  const heldHeartbeat = new Promise(resolve => { releaseHeartbeat = resolve })
+  const heartbeatStarted = new Promise(resolve => { signalHeartbeat = resolve })
+  let held = false
+  await page.route('**/pokemon-hub/sessions/*/heartbeat', async route => {
+    if (held) return route.continue()
+    held = true
+    signalHeartbeat()
+    await heldHeartbeat
+    await route.continue()
+  })
+  await openWorkspace(page)
+  await selectSave(page, 0, 'race-close-hub')
+  await heartbeatStarted
+  const closes = []
+  page.on('request', request => {
+    if (request.method() === 'POST' && /\/pokemon-hub\/sessions\/[^/]+\/close$/.test(new URL(request.url()).pathname)) closes.push(request)
+  })
+  const closing = page.waitForResponse(response => response.request().method() === 'POST' && /\/pokemon-hub\/sessions\/[^/]+\/close$/.test(new URL(response.url()).pathname))
+  try {
+    await page.getByRole('button', { name: 'Fechar Pokémon Hub' }).click()
+    await page.waitForTimeout(200)
+    expect(closes).toHaveLength(0)
+  } finally { releaseHeartbeat() }
+  expect((await closing).status()).toBe(200)
+  await expect(page.getByRole('dialog', { name: 'Pokémon Hub' })).toHaveCount(0)
+})

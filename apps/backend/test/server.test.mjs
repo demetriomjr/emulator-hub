@@ -14,7 +14,7 @@ import { observeEmulatorSaveFiles } from '../../packages/emulator-save-events.mj
 import { createSaveStore } from '../../packages/save-store.mjs'
 import { createSnapshotStore } from '../../packages/snapshot-store.mjs'
 import { inspectPokemonGen3Inventory } from '../../packages/pokemon-gen3-inventory.mjs'
-import { readPokemonGen3Flags } from '../../packages/pokemon-gen3-event-flags.mjs'
+import { editPokemonGen3Flags, readPokemonGen3Flags } from '../../packages/pokemon-gen3-event-flags.mjs'
 import { pokemonGen3SaveByteOffset, refreshPokemonGen3SaveSectionChecksums, selectUnambiguousPokemonGen3SaveCopy } from '../../packages/pokemon-gen3-save-validation.mjs'
 
 const liveServers = new Set()
@@ -228,6 +228,42 @@ test('backend release delivers an eligible FireRed save through the real event s
   assert.equal((await readdir(join(fixture.root, 'data', 'backups', 'gen3-events'))).length, 1)
 })
 
+test('completed Emerald close pins Gabby and Ty only after League completion', async () => {
+  const rom = Buffer.alloc(0xc0)
+  rom.write('BPEE', 0xac, 'ascii')
+  const entry = { id: 'emerald', title: 'Pokémon Emerald Version', system: 'gba', core: 'mgba', file: 'emerald.gba', sha256: sha256(rom), pokemonSave: { adapter: 'gen3-gba-v1', layoutProfile: 'pokemon-emerald-gba', title: 'pokemon-emerald', saveKind: 'battery', supported: true } }
+  const logs = []
+  const fixture = await startFixture([entry], { 'emerald.gba': rom }, {}, { savePipelineLogger: { info: (event, context) => logs.push({ event, context }), warn: (event, context) => logs.push({ event, context }), error: (event, context) => logs.push({ event, context }) } })
+  const profile = await jsonResponse(await fetch(`${fixture.baseUrl}/api/games/emerald/profiles`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'May' }) }))
+  const store = createSaveStore({ dataPath: fixture.savesPath, eventBackupsPath: join(fixture.root, 'data', 'backups', 'gen3-events') })
+  await store.put(profile.id, 'emerald', editPokemonGen3Flags(eligibleEmeraldSave(), 'pokemon-emerald', [{ flagId: 0x864, value: false }, { flagId: 0x896, value: false }]), null)
+  const lease = await acquirePlayerLease(fixture.baseUrl, 'emerald', profile.id, 'gabby-close')
+  const response = await fetch(`${fixture.baseUrl}/api/player-leases/gabby-close`, { method: 'DELETE', headers: { Cookie: lease.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: profile.id, gameId: 'emerald', generation: lease.body.leaseGeneration, closeCompleted: true }) })
+  assert.equal(response.status, 200)
+  for (let attempt = 0; attempt < 40 && !logs.some(log => log.event === 'save.backend.event-delivery-result'); attempt += 1) await new Promise(resolve => setTimeout(resolve, 20))
+  assert.equal(logs.find(log => log.event === 'save.backend.event-delivery-result')?.context.status, 'pending-progression')
+  const beforeLeague = await store.get(profile.id, 'emerald')
+  assert.equal(beforeLeague.revision, 1)
+  assert.equal(beforeLeague.eventGrantReceipt, undefined)
+  await store.put(profile.id, 'emerald', editPokemonGen3Flags(beforeLeague.bytes, 'pokemon-emerald', [{ flagId: 0x864, value: true }]), 1, { fenceGeneration: beforeLeague.fenceGeneration })
+  const nextLease = await acquirePlayerLease(fixture.baseUrl, 'emerald', profile.id, 'gabby-post-league')
+  const nextResponse = await fetch(`${fixture.baseUrl}/api/player-leases/gabby-post-league`, { method: 'DELETE', headers: { Cookie: nextLease.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: profile.id, gameId: 'emerald', generation: nextLease.body.leaseGeneration, closeCompleted: true }) })
+  assert.equal(nextResponse.status, 200)
+  for (let attempt = 0; attempt < 40 && logs.filter(log => log.event === 'save.backend.event-delivery-result').length < 2; attempt += 1) await new Promise(resolve => setTimeout(resolve, 20))
+  assert.equal(logs.filter(log => log.event === 'save.backend.event-delivery-result')[1]?.context.status, 'adjusted')
+  let saved
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    saved = await store.get(profile.id, 'emerald')
+    if (saved.eventGrantReceipt) break
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+  assert.deepEqual(saved.eventGrantReceipt?.adjustmentIds, ['gabby-ty-route111'])
+  assert.deepEqual(saved.eventGrantReceipt.eventIds, [])
+  const copy = selectUnambiguousPokemonGen3SaveCopy(saved.bytes)
+  assert.equal(saved.bytes[pokemonGen3SaveByteOffset(copy, 'large', 0x2bad)], 0xff)
+  assert.equal((await readdir(join(fixture.root, 'data', 'backups', 'gen3-events'))).length, 1)
+})
+
 test('completed Emerald close grants events with an IPS and logs exact changes', async () => {
   const rom = Buffer.alloc(0xc0)
   rom.write('BPEE', 0xac, 'ascii')
@@ -253,6 +289,7 @@ test('completed Emerald close grants events with an IPS and logs exact changes',
   assert.ok(saved.eventGrantReceipt)
   assert.deepEqual(inspectPokemonGen3Inventory(saved.bytes, 'pokemon-emerald').keyItems.slots.slice(0, 4).map(slot => slot.itemId), [275, 376, 370, 371])
   assert.deepEqual(readPokemonGen3Flags(saved.bytes, 'pokemon-emerald', [0x8ac, 0x8db, 0x8b3, 0x8d6, 0x8e0, 0x8d5, 0x13a, 0x13b, 0x13c]), Array(9).fill(true))
+  for (let attempt = 0; attempt < 40 && !logs.some(log => log.event === 'save.backend.event-delivery-committed'); attempt += 1) await new Promise(resolve => setTimeout(resolve, 20))
   const committed = logs.find(log => log.event === 'save.backend.event-delivery-committed')?.context
   assert.deepEqual(committed.addedItemIds, [275, 376, 370, 371])
   assert.deepEqual(committed.enabledFlagIds, [0x13a, 0x13b, 0x13c, 0x8ac, 0x8b3, 0x8d5, 0x8d6, 0x8db, 0x8e0])

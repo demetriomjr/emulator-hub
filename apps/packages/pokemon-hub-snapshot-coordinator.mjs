@@ -459,11 +459,10 @@ export function createPokemonHubSnapshotCoordinator({ persistence, eventStore, l
   }
   async function publicSnapshot(source) {
     const snapshot = safeSnapshot(source)
-    for (const placement of snapshot.placements) {
-      if (!placement.pokemonInstanceId) continue
+    await Promise.all(snapshot.placements.filter(placement => placement.pokemonInstanceId).map(async placement => {
       const record = await readRecord(source.profileId, placement.pokemonInstanceId)
       if (record?.hubPassport) snapshot.pokemonDisplay[placement.pokemonInstanceId] = { ...snapshot.pokemonDisplay[placement.pokemonInstanceId], hubPassport: structuredClone(record.hubPassport) }
-    }
+    }))
     return snapshot
   }
   async function writeRecord(record) { await persistence.set(recordKey(record.profileId, record.pokemonInstanceId), JSON.stringify(record)) }

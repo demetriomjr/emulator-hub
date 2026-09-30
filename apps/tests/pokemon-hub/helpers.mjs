@@ -5,6 +5,7 @@ import { expect } from '@playwright/test'
 const api = process.env.E2E_API_URL
 const fixture = JSON.parse(await readFile(join(process.env.E2E_ARTIFACT_DIR, 'fixture.json'), 'utf8'))
 const selectedSavesByPage = new WeakMap()
+export function forgetSelectedSaves(page) { selectedSavesByPage.delete(page) }
 export const gameId = fixture.gameId
 export const profiles = fixture.profiles
 export const itemGames = fixture.itemGames
@@ -142,7 +143,9 @@ export async function selectHub(page, index, hubProfile) {
   const selector = panel.getByRole('combobox', { name: 'Perfil do Hub' })
   await selector.click()
   await selector.fill(hubProfile.name)
-  await activeDropdown(page).locator('.ant-select-item-option').filter({ hasText: hubProfile.name }).click()
+  await expect(activeDropdown(page).locator('.ant-select-item-option').filter({ hasText: hubProfile.name })).toBeVisible()
+  await selector.press('Enter')
+  await expect(selector).toHaveAttribute('aria-expanded', 'false')
   await expect(panel.getByRole('heading', { name: hubProfile.name })).toBeVisible()
 }
 

@@ -245,9 +245,12 @@ function validMetadata(metadata, bytes) {
 }
 
 function validEventGrantReceipt(receipt, revision) {
+  const adjustmentIds = receipt?.adjustmentIds ?? []
   return receipt && typeof receipt.romSha256 === 'string' && /^[a-f0-9]{64}$/.test(receipt.romSha256)
     && Number.isInteger(receipt.recipeVersion) && receipt.recipeVersion > 0
-    && Array.isArray(receipt.eventIds) && receipt.eventIds.length > 0 && receipt.eventIds.every(id => typeof id === 'string' && id.length > 0)
+    && Array.isArray(receipt.eventIds) && receipt.eventIds.every(id => typeof id === 'string' && id.length > 0)
+    && Array.isArray(adjustmentIds) && adjustmentIds.every(id => id === 'gabby-ty-route111') && new Set(adjustmentIds).size === adjustmentIds.length
+    && receipt.eventIds.length + adjustmentIds.length > 0
     && typeof receipt.deliveredAt === 'string' && Number.isFinite(Date.parse(receipt.deliveredAt))
     && Number.isInteger(receipt.saveRevision) && receipt.saveRevision > 0 && receipt.saveRevision <= revision
     && typeof receipt.saveSha256 === 'string' && /^[a-f0-9]{64}$/.test(receipt.saveSha256)

@@ -81,6 +81,43 @@ test('reads every occupied source record for detail hydration without changing t
   assert.deepEqual(await coordinator.getSnapshot({ profileId, sourceKey: adopted.sourceKey }), adopted)
 })
 
+test('reads a 163-Pokémon Hub snapshot without serial Redis record round trips or raw records in the payload', async () => {
+  const memory = createMemoryRedisPersistence()
+  const hubProfileId = '11111111-1111-4111-8111-111111111111'
+  const sourceKey = `hub:${hubProfileId}`
+  const ids = Array.from({ length: 163 }, (_, index) => `pokemon-${index}`)
+  const source = {
+    profileId, sourceKey, sourceRevision: 1, snapshotRevision: 1, saveRevision: 0,
+    needsSaveFlush: false, adapter: 'hub-grid-v1', pokemonDisplay: {},
+    placements: ids.map((pokemonInstanceId, slot) => ({ location: hub(hubProfileId, slot), pokemonInstanceId })),
+  }
+  await memory.set(pokemonHubRedisKeys.source(profileId, sourceKey), JSON.stringify(source))
+  for (const id of ids) await memory.set(pokemonHubRedisKeys.record(profileId, id), JSON.stringify({ hubPassport: { id }, representations: [{ bytesBase64: 'raw-record-must-not-be-exposed' }] }))
+  let activeReads = 0
+  let maximumConcurrentReads = 0
+  let recordReads = 0
+  const persistence = {
+    ...memory,
+    async get(key) {
+      if (!key.includes(':record:')) return memory.get(key)
+      recordReads += 1
+      activeReads += 1
+      maximumConcurrentReads = Math.max(maximumConcurrentReads, activeReads)
+      await new Promise(resolve => setTimeout(resolve, 1))
+      const result = await memory.get(key)
+      activeReads -= 1
+      return result
+    },
+  }
+  const coordinator = createPokemonHubSnapshotCoordinator({ persistence, eventStore: createPokemonHubEventStore({ persistence: memory }) })
+  const snapshot = await coordinator.getSnapshot({ profileId, sourceKey })
+  assert.equal(recordReads, 163)
+  assert.ok(maximumConcurrentReads > 1, 'record reads must overlap instead of waiting for each Redis round trip')
+  assert.equal(snapshot.placements.length, 163)
+  assert.equal(snapshot.pokemonDisplay['pokemon-162'].hubPassport.id, 'pokemon-162')
+  assert.equal(JSON.stringify(snapshot).includes('raw-record-must-not-be-exposed'), false)
+})
+
 test('creates and expands a Hub grid source without assigning native bytes to empty grid slots', async () => {
   const { coordinator } = await fixture()
 

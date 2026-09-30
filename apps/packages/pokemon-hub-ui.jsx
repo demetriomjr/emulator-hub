@@ -10,6 +10,7 @@ import { getPokemonHubColumnCount, getPokemonHubGridWidth, getPokemonHubVisibleS
 import { getPokemonItemAreaView, getPokemonItemName } from './pokemon-item-view.mjs'
 import { getPokemonItemPolicy } from './pokemon-item-policy.mjs'
 import { getPokemonHubItemTransferIntent, getPokemonItemReorderIntent, getPokemonItemTransferIntent } from './pokemon-item-drag.mjs'
+import { projectPokemonItemTransfers } from './pokemon-item-transfer-projection.mjs'
 import { getPokemonItemSpriteUrl } from './pokemon-item-sprite-view.mjs'
 import { createPokemonHubHeartbeatMonitor } from './pokemon-hub-heartbeat-monitor.mjs'
 import { reconcilePokemonCardSelection } from './pokemon-hub-card-selection.mjs'
@@ -35,6 +36,7 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
   const [pokemonDetailsById, setPokemonDetailsById] = useState({})
   const [pokemonHubActiveDrag, setPokemonHubActiveDrag] = useState(null)
   const [pokemonItemTransferDraft, setPokemonItemTransferDraft] = useState(null)
+  const [pokemonItemPendingTransfers, setPokemonItemPendingTransfers] = useState([])
   const [pokemonHubBusy, setPokemonHubBusy] = useState(false)
   const [pokemonHubPendingPanes, setPokemonHubPendingPanes] = useState({})
   const [pokemonHubPanes, setPokemonHubPanes] = useState([])
@@ -53,6 +55,11 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
   const pokemonHubPanesRef = useRef([])
   const pokemonHubBusyRef = useRef(false)
   const pokemonHubPaneQueueRef = useRef(Promise.resolve())
+  const pokemonItemTransferQueueRef = useRef(Promise.resolve())
+  const pokemonItemPendingTransfersRef = useRef([])
+  const pokemonItemConfirmedRef = useRef(new Map())
+  const saveLayoutsBySourceRef = useRef({})
+  const pokemonHubProfilesRef = useRef([])
   const pokemonHubPendingSourcesRef = useRef({})
   const pokemonHubClosingRef = useRef(false)
   const pokemonHubAbortedRef = useRef(false)
@@ -61,6 +68,9 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
   const pokemonHubDragCancelledRef = useRef(false)
   const pokemonCardTriggerRefs = useRef([])
   pokemonHubPanesRef.current = pokemonHubPanes
+  saveLayoutsBySourceRef.current = saveLayoutsBySource
+  pokemonHubProfilesRef.current = pokemonHubProfiles
+  const projectedItems = projectPokemonItemTransfers(saveLayoutsBySource, pokemonHubProfiles, pokemonItemPendingTransfers)
   const games = pokemonHubData?.games || []
   const { profilesByGame: saveProfilesByGame, saveProfileGames } = deriveSaveProfileCatalog(games, layout)
   const pokemonHubDragSensors = [PointerSensor.configure({
@@ -85,10 +95,10 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
   useEffect(() => {
     const renew = async () => {
       const session = pokemonHubSessionRef.current
-      if (!session || session.heartbeatInFlight) return
+      if (!session || session.heartbeatInFlight || session.closing || pokemonHubClosingRef.current) return
       session.heartbeatInFlight = true
       try {
-        const result = await session.heartbeatMonitor.observe(async () => {
+        session.heartbeatPromise = session.heartbeatMonitor.observe(async () => {
           const sentAt = performance.now()
           const renewal = await heartbeatPokemonHubSession(session.profileId, session.sessionId, ++session.heartbeatSequence)
           session.leaseSample = { serverNow: renewal.serverNow, expiresAt: renewal.expiresAt, sentAt, receivedAt: performance.now() }
@@ -97,6 +107,7 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
             ? async () => await session.requestGate.waitForIdle() && pokemonHubSessionRef.current === session
             : undefined,
         })
+        const result = await session.heartbeatPromise
         if (result.status === 'cancelled') return
         if (result.status === 'expired' && pokemonHubSessionRef.current === session) {
           console.error('[Pokemon Hub] session heartbeat expired locally', { code: result.error.code, failures: result.failures })
@@ -104,6 +115,7 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
         }
       } finally {
         session.heartbeatInFlight = false
+        session.heartbeatPromise = null
       }
     }
     const interval = window.setInterval(renew, 3_000)
@@ -168,8 +180,8 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
         else if (source.kind === 'hub-item' && target.kind === 'hub-item' && source.hubProfileId === target.hubProfileId) await persistPokemonHubItemReorder(source, target)
         else {
           const view = location => location.kind === 'hub-item'
-            ? pokemonHubProfiles.find(profile => profile.hubProfileId === location.hubProfileId)?.itemInventory
-            : saveLayoutsBySource[saveSourceKey(location.gameId, location.profileId)]
+            ? projectedItems.profiles.find(profile => profile.hubProfileId === location.hubProfileId)?.itemInventory
+            : projectedItems.layouts[saveSourceKey(location.gameId, location.profileId)]
           const preview = source.kind === 'item' && target.kind === 'item'
             ? getPokemonItemTransferIntent(source, target, view(source), view(target))
             : getPokemonHubItemTransferIntent(source, target, view(source), view(target))
@@ -191,47 +203,88 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
     setPokemonHubActiveDrag(null)
   }
 
-  async function confirmPokemonItemTransfer() {
+  function confirmPokemonItemTransfer() {
     const draft = pokemonItemTransferDraft
     if (!draft || !Number.isSafeInteger(draft.quantity) || draft.quantity < 1 || draft.quantity > draft.maxQuantity
       || pokemonHubBusyRef.current || pokemonHubClosingRef.current) return
     const session = pokemonHubSessionRef.current
     if (!session) return
-    pokemonHubBusyRef.current = true
-    setPokemonHubBusy(true)
+    if (!pokemonItemPendingTransfersRef.current.length) pokemonItemConfirmedRef.current.clear()
+    const transfer = { ...draft, toSlot: draft.destination.slot }
+    const pending = [...pokemonItemPendingTransfersRef.current, transfer]
+    if (projectPokemonItemTransfers(saveLayoutsBySourceRef.current, pokemonHubProfilesRef.current, pending).skipped.some(entry => entry.transfer === transfer)) {
+      setPokemonHubError('A quantidade ou o espaço disponível mudou. Tente arrastar o item novamente.')
+      return
+    }
+    for (const location of [transfer.source, transfer.destination]) {
+      const key = itemInventorySourceKey(location)
+      if (pokemonItemConfirmedRef.current.has(key)) continue
+      const inventory = location.kind === 'hub-item'
+        ? pokemonHubProfilesRef.current.find(profile => profile.hubProfileId === location.hubProfileId)?.itemInventory
+        : saveLayoutsBySourceRef.current[key]?.itemInventory
+      pokemonItemConfirmedRef.current.set(key, inventory)
+    }
+    pokemonItemPendingTransfersRef.current = pending
+    setPokemonItemPendingTransfers(pending)
+    setPokemonItemTransferDraft(null)
+    pokemonItemTransferQueueRef.current = pokemonItemTransferQueueRef.current.then(
+      () => executePokemonItemTransfer(transfer, session),
+      () => executePokemonItemTransfer(transfer, session),
+    )
+  }
+
+  async function executePokemonItemTransfer(transfer, session) {
     try {
+      if (pokemonHubSessionRef.current !== session) throw new Error('A sessão mudou antes da transferência do item.')
+      const confirmed = location => pokemonItemConfirmedRef.current.get(itemInventorySourceKey(location))
+      const sourceInventory = confirmed(transfer.source)
+      const sourceSlot = transfer.source.kind === 'hub-item'
+        ? Number(Object.entries(sourceInventory?.slots ?? {}).find(([, item]) => item.itemKey === transfer.itemKey)?.[0])
+        : sourceInventory?.areas?.[transfer.area]?.slots.findIndex(item => item.itemKey === transfer.itemKey)
+      if (!Number.isSafeInteger(sourceSlot) || sourceSlot < 0) throw new Error('O item não está mais disponível na origem.')
+      const source = { ...transfer.source, slot: sourceSlot }
+      const view = location => location.kind === 'hub-item' ? confirmed(location) : {
+        ...saveLayoutsBySourceRef.current[itemInventorySourceKey(location)], itemInventory: confirmed(location),
+      }
+      const preview = source.kind === 'item' && transfer.destination.kind === 'item'
+        ? getPokemonItemTransferIntent(source, transfer.destination, view(source), view(transfer.destination))
+        : getPokemonHubItemTransferIntent(source, transfer.destination, view(source), view(transfer.destination))
+      if (!preview || transfer.quantity > preview.maxQuantity) throw new Error('A quantidade ou o espaço disponível mudou antes da transferência.')
       if (!await flushPendingPokemonHubSnapshot()) throw new Error('The workspace snapshot could not be synchronized before transferring items.')
       const identity = (location, revision) => location.kind === 'hub-item'
         ? { hubProfileId: location.hubProfileId, expectedItemRevision: revision }
         : { gameId: location.gameId, profileId: location.profileId, expectedSaveRevision: revision }
       const result = await session.requestGate.run(() => transferPokemonSaveItems(session.profileId, session.sessionId, {
-        source: identity(draft.source, draft.source.kind === 'hub-item' ? draft.sourceItemRevision : draft.sourceSaveRevision),
-        destination: identity(draft.destination, draft.destination.kind === 'hub-item' ? draft.destinationItemRevision : draft.destinationSaveRevision),
-        area: draft.area, fromSlot: draft.fromSlot, toSlot: draft.destination.slot, quantity: draft.quantity,
+        source: identity(source, source.kind === 'hub-item' ? preview.sourceItemRevision : preview.sourceSaveRevision),
+        destination: identity(transfer.destination, transfer.destination.kind === 'hub-item' ? preview.destinationItemRevision : preview.destinationSaveRevision),
+        area: transfer.area, fromSlot: sourceSlot, toSlot: transfer.toSlot, quantity: transfer.quantity,
       }))
       if (pokemonHubSessionRef.current !== session) return
       const snapshots = { ...pokemonHubSnapshotsRef.current }
-      for (const [location, inventory] of [[draft.source, result.sourceItemInventory], [draft.destination, result.destinationItemInventory]]) {
+      for (const [location, inventory] of [[transfer.source, result.sourceItemInventory], [transfer.destination, result.destinationItemInventory]]) {
         if (!inventory || location.kind === 'hub-item') continue
+        pokemonItemConfirmedRef.current.set(itemInventorySourceKey(location), inventory)
         const key = saveSourceKey(location.gameId, location.profileId)
         if (snapshots[key]) snapshots[key] = { ...snapshots[key], layout: { ...snapshots[key].layout, itemInventory: inventory } }
       }
       commitSessionSnapshots(snapshots)
-      for (const [location, inventory] of [[draft.source, result.sourceHubItemInventory], [draft.destination, result.destinationHubItemInventory]]) {
+      for (const [location, inventory] of [[transfer.source, result.sourceHubItemInventory], [transfer.destination, result.destinationHubItemInventory]]) {
         if (location.kind !== 'hub-item' || !inventory) continue
+        pokemonItemConfirmedRef.current.set(itemInventorySourceKey(location), inventory)
         setPokemonHubProfiles(current => current.map(profile => profile.hubProfileId === location.hubProfileId ? { ...profile, itemInventory: inventory } : profile))
       }
-      setPokemonItemTransferDraft(null)
     } catch (cause) {
       if (['SAVE_ITEM_REVISION_CONFLICT', 'SAVE_REVISION_CONFLICT', 'SAVE_FENCE_CONFLICT'].includes(cause.code)) {
-        for (const identity of [draft.source, draft.destination]) {
+        for (const identity of [transfer.source, transfer.destination]) {
           try {
             if (identity.kind === 'hub-item') {
               const refreshed = await getPokemonHubProfile(identity.hubProfileId)
+              pokemonItemConfirmedRef.current.set(itemInventorySourceKey(identity), refreshed.profile.itemInventory)
               setPokemonHubProfiles(current => current.map(profile => profile.hubProfileId === identity.hubProfileId ? { ...profile, itemInventory: refreshed.profile.itemInventory } : profile))
               continue
             }
             const refreshed = await getSaveProfileLayout(identity.gameId, identity.profileId, session.profileId)
+            pokemonItemConfirmedRef.current.set(itemInventorySourceKey(identity), refreshed.itemInventory)
             const key = saveSourceKey(identity.gameId, identity.profileId)
             const snapshot = pokemonHubSnapshotsRef.current[key]
             if (pokemonHubSessionRef.current === session && snapshot) commitSessionSnapshots({ ...pokemonHubSnapshotsRef.current, [key]: {
@@ -240,16 +293,16 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
           } catch (refreshError) { console.error('[Pokemon Hub] item inventory refresh failed', { code: refreshError.code, message: refreshError.message }) }
         }
       }
-      setPokemonItemTransferDraft(null)
       setPokemonHubError(cause.message)
     } finally {
-      pokemonHubBusyRef.current = false
-      setPokemonHubBusy(false)
+      pokemonItemPendingTransfersRef.current = pokemonItemPendingTransfersRef.current.filter(candidate => candidate !== transfer)
+      setPokemonItemPendingTransfers(pokemonItemPendingTransfersRef.current)
     }
   }
 
   async function persistPokemonHubItemReorder(source, target) {
-    const profile = pokemonHubProfiles.find(candidate => candidate.hubProfileId === source.hubProfileId)
+    await pokemonItemTransferQueueRef.current
+    const profile = pokemonHubProfilesRef.current.find(candidate => candidate.hubProfileId === source.hubProfileId)
     const revision = profile?.itemInventory?.revision
     if (!Number.isSafeInteger(revision) || !profile.itemInventory.slots[source.slot]
       || pokemonHubBusyRef.current || pokemonHubClosingRef.current) return
@@ -269,8 +322,9 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
   }
 
   async function persistPokemonItemReorder(source, target) {
+    await pokemonItemTransferQueueRef.current
     const key = saveSourceKey(source.gameId, source.profileId)
-    const inventory = saveLayoutsBySource[key]?.itemInventory
+    const inventory = saveLayoutsBySourceRef.current[key]?.itemInventory
     const intent = getPokemonItemReorderIntent(source, target, inventory)
     if (!intent || pokemonHubBusyRef.current || pokemonHubClosingRef.current) return
     const session = pokemonHubSessionRef.current
@@ -392,6 +446,7 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
   }
 
   async function submitStructuralPokemonHubPaneChange(nextPanes, incomingSource, { paneLoad = false, paneIndex = null, signal = undefined } = {}) {
+    await pokemonItemTransferQueueRef.current
     if (pokemonHubBusyRef.current) return false
     pokemonHubBusyRef.current = true
     let switchingSession = false
@@ -492,8 +547,17 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
     }
 
     const finalSnapshot = createCanonicalPokemonHubSnapshot(previousSession, pokemonHubPanesRef.current, pokemonHubSnapshotsRef.current)
-    const correction = await closePokemonHubSession(previousSession.profileId, previousSession.sessionId, finalSnapshot, previousSession.pendingCloseIdempotencyKey ??= crypto.randomUUID())
+    previousSession.closing = true
+    let correction
+    try {
+      if (previousSession.heartbeatPromise) await previousSession.heartbeatPromise
+      correction = await closePokemonHubSession(previousSession.profileId, previousSession.sessionId, finalSnapshot, previousSession.pendingCloseIdempotencyKey ??= crypto.randomUUID())
+    } catch (cause) {
+      previousSession.closing = false
+      throw cause
+    }
     if (correction) {
+      previousSession.closing = false
       applyCanonicalSessionSnapshot(correction)
       setPokemonHubError('The workspace changed while switching profiles. Try again.')
       return false
@@ -644,6 +708,7 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
   async function closePokemonHub() {
     if (pokemonHubClosingRef.current) return
     pokemonHubClosingRef.current = true
+    await pokemonItemTransferQueueRef.current
     if (pokemonHubDragActiveRef.current) pokemonHubDragCancelledRef.current = true
     setPokemonHubBusy(true)
     await pokemonHubPaneQueueRef.current
@@ -651,6 +716,7 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
     if (pokemonHubSnapshotTimerRef.current !== null) window.clearTimeout(pokemonHubSnapshotTimerRef.current)
     pokemonHubSnapshotTimerRef.current = null
     const session = pokemonHubSessionRef.current
+    if (session?.heartbeatPromise) await session.heartbeatPromise
     const finalSnapshot = session ? createCanonicalPokemonHubSnapshot(session, pokemonHubPanesRef.current, pokemonHubSnapshotsRef.current) : null
     pokemonHubSnapshotsRef.current = {}
     pokemonHubSessionRef.current = null
@@ -752,7 +818,7 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
         <Button className="dialog-close" type="text" aria-label="Fechar Pokémon Hub" icon={<CloseOutlined />} onClick={() => void closePokemonHub()} />
       </header>
       <div className={`pokemon-workspace-body pokemon-workspace-body-${pokemonHubPanes.length}`}>
-        {pokemonHubPanes.map((source, index) => <PokemonHubPane key={index} side={index} panes={pokemonHubPanes} paneCount={pokemonHubPanes.length} source={source} activeDrag={pokemonHubActiveDrag} transferDraft={pokemonItemTransferDraft} onTransferQuantityChange={quantity => setPokemonItemTransferDraft(current => current ? { ...current, quantity } : null)} onTransferConfirm={confirmPokemonItemTransfer} onTransferCancel={() => setPokemonItemTransferDraft(null)} data={pokemonHubData} hubProfiles={pokemonHubProfiles} profilesLoading={pokemonHubProfilesLoading} saveProfileGames={saveProfileGames} saveProfileGamesLoading={catalogLoading} saveProfileGamesError={catalogError} saveProfilesByGame={saveProfilesByGame} saveLayoutsBySource={saveLayoutsBySource} selected={pokemonHubSelection} cardSelection={pokemonCardSelection[index]} pokemonDetailsById={pokemonDetailsById} onCardClose={() => closePokemonCard(index)} selectedBox={pokemonHubBoxes[saveSourceKey(source?.gameId, source?.profileId)]} busy={pokemonHubBusy} loading={Boolean(pokemonHubPendingPanes[index])} structureBusy={Object.keys(pokemonHubPendingPanes).length > 0} onSourceChange={nextSource => selectPokemonHubPane(index, nextSource)} onCreate={() => openPokemonHubProfileCreator(index)} onAddPane={addPokemonHubPane} onClosePane={() => closePokemonHubPane(index)} onBoxChange={(gameId, profileId, box) => setPokemonHubBoxes(current => ({ ...current, [saveSourceKey(gameId, profileId)]: box }))} onSlotSelect={selectPokemonHubLocation} onRename={openPokemonHubProfileRenamer} onDelete={deleteHubProfile} />)}
+        {pokemonHubPanes.map((source, index) => <PokemonHubPane key={index} side={index} panes={pokemonHubPanes} paneCount={pokemonHubPanes.length} source={source} activeDrag={pokemonHubActiveDrag} transferDraft={pokemonItemTransferDraft} onTransferQuantityChange={quantity => setPokemonItemTransferDraft(current => current ? { ...current, quantity } : null)} onTransferConfirm={confirmPokemonItemTransfer} onTransferCancel={() => setPokemonItemTransferDraft(null)} data={pokemonHubData} hubProfiles={projectedItems.profiles} profilesLoading={pokemonHubProfilesLoading} saveProfileGames={saveProfileGames} saveProfileGamesLoading={catalogLoading} saveProfileGamesError={catalogError} saveProfilesByGame={saveProfilesByGame} saveLayoutsBySource={projectedItems.layouts} selected={pokemonHubSelection} cardSelection={pokemonCardSelection[index]} pokemonDetailsById={pokemonDetailsById} onCardClose={() => closePokemonCard(index)} selectedBox={pokemonHubBoxes[saveSourceKey(source?.gameId, source?.profileId)]} busy={pokemonHubBusy || pokemonItemPendingTransfers.length > 0} loading={Boolean(pokemonHubPendingPanes[index])} structureBusy={Object.keys(pokemonHubPendingPanes).length > 0} onSourceChange={nextSource => selectPokemonHubPane(index, nextSource)} onCreate={() => openPokemonHubProfileCreator(index)} onAddPane={addPokemonHubPane} onClosePane={() => closePokemonHubPane(index)} onBoxChange={(gameId, profileId, box) => setPokemonHubBoxes(current => ({ ...current, [saveSourceKey(gameId, profileId)]: box }))} onSlotSelect={selectPokemonHubLocation} onRename={openPokemonHubProfileRenamer} onDelete={deleteHubProfile} />)}
       </div>
       {pokemonHubBusy && <div className="pokemon-workspace-stale" role="status" aria-label="Processando alteração do workspace"><span>Processando…</span></div>}
     </div><PokemonHubDragOverlay drag={pokemonHubActiveDrag} /></DragDropProvider>
@@ -795,11 +861,13 @@ export default function PokemonHub({ onClose, closeSignal = 0, layout }) {
   </>
 }
 
-function PokemonHubPaneControls({ side, panes, source, hubProfiles, profilesLoading, saveProfileGames, saveProfileGamesLoading, saveProfileGamesError, saveProfilesByGame, busy, onSourceChange, onCreate }) {
+function PokemonHubPaneControls({ side, panes, source, hubProfiles, profilesLoading, saveProfileGames, saveProfileGamesLoading, saveProfileGamesError, saveProfilesByGame, busy, onSourceChange, onCreate, onDelete }) {
   const [selectionDraft, setSelectionDraft] = useState(null)
   useEffect(() => { setSelectionDraft(null) }, [source?.gameId, source?.hubProfileId, source?.kind, source?.profileId])
   const availableHubProfiles = hubProfiles.filter(profile => isPaneSourceAvailable(panes, side, { kind: 'hub', hubProfileId: profile.hubProfileId }))
   const { activeSourceKind, selectedSaveSource, selectedHubSource } = paneControlSources(source, selectionDraft)
+  const selectedHubProfile = source?.kind === 'hub' && selectedHubSource?.hubProfileId === source.hubProfileId
+    ? hubProfiles.find(profile => profile.hubProfileId === source.hubProfileId) : null
   const selectedGameId = selectedSaveSource?.gameId ?? null
   const saveProfiles = selectedGameId ? saveProfilesByGame[selectedGameId] ?? [] : []
   const allSaveProfiles = saveProfileGames.find(game => game.id === selectedGameId)?.profiles ?? []
@@ -822,7 +890,7 @@ function PokemonHubPaneControls({ side, panes, source, hubProfiles, profilesLoad
       if (!value) { setSelectionDraft({ kind: 'hub' }); return }
       setSelectionDraft(null)
       onSourceChange({ kind: 'hub', hubProfileId: value })
-    }} options={availableHubProfiles.map(profile => ({ value: profile.hubProfileId, label: profile.name }))} /><Button className="pokemon-add-pane" type="default" aria-label="Criar Perfil do Hub" icon={<PlusOutlined />} disabled={busy} onClick={onCreate} /></>}
+    }} options={availableHubProfiles.map(profile => ({ value: profile.hubProfileId, label: profile.name }))} /><Button className="pokemon-add-pane" type="default" aria-label="Criar Perfil do Hub" icon={<PlusOutlined />} disabled={busy} onClick={onCreate} />{selectedHubProfile && <PokemonHubProfileDelete profile={selectedHubProfile} busy={busy} onDelete={onDelete} />}</>}
   </div>
 }
 
@@ -840,7 +908,7 @@ const PokemonHubSlotFrame = React.forwardRef(function PokemonHubSlotFrame({ as =
     : <button ref={ref} type="button" className={className} {...props}>{content}</button>
 })
 
-function PokemonHubSlotGrid({ profile, entries, layoutVersion, side, title, selected, pokemonCount, busy, onSlotSelect, onRename, onDelete, dragPermission, activeTab, onTabChange, transferDraft, onTransferQuantityChange, onTransferConfirm, onTransferCancel }) {
+function PokemonHubSlotGrid({ profile, entries, layoutVersion, side, title, selected, pokemonCount, busy, onSlotSelect, onRename, dragPermission, activeTab, onTabChange, transferDraft, onTransferQuantityChange, onTransferConfirm, onTransferCancel }) {
   const frameRef = useRef(null)
   const [columns, setColumns] = useState(5)
 
@@ -861,7 +929,6 @@ function PokemonHubSlotGrid({ profile, entries, layoutVersion, side, title, sele
   const visibleSlotCount = getPokemonHubVisibleSlotCount(entries, columns)
   const itemEntries = profile.itemInventory?.slots ?? {}
   const visibleItemSlotCount = getPokemonHubVisibleSlotCount(itemEntries, columns)
-  const itemCount = Object.keys(itemEntries).length
   const cardRowWidth = `${getPokemonHubGridWidth(columns)}px`
   const isSelected = location => selected.some(candidate => candidate.kind === location.kind && candidate.slot === location.slot)
 
@@ -872,12 +939,7 @@ function PokemonHubSlotGrid({ profile, entries, layoutVersion, side, title, sele
         {activeTab === 'pokemon' ? <><header className="pokemon-hub-profile-summary" style={{ width: cardRowWidth }}>
           <p className="pokemon-hub-profile-count"><strong>{pokemonCount}</strong><span>Pokémon</span></p>
           <h3>{profile.name}</h3>
-          <div className="pokemon-hub-profile-actions">
-            <Button type="default" aria-label={`Renomear ${profile.name}`} icon={<EditOutlined />} disabled={busy} onClick={() => onRename(profile)} />
-            <Popconfirm title={`Excluir ${profile.name}?`} description={pokemonCount || itemCount ? `${pokemonCount} Pokémon e ${itemCount} itens serão perdidos permanentemente.` : 'O perfil vazio será removido.'} okText="Excluir" cancelText="Cancelar" okButtonProps={{ danger: true }} onConfirm={() => onDelete(profile)}>
-              <Button type="default" danger aria-label={`Excluir ${profile.name}`} icon={<DeleteOutlined />} disabled={busy} />
-            </Popconfirm>
-          </div>
+          <PokemonHubProfileActions profile={profile} busy={busy} onRename={onRename} />
         </header>
         <div className="pokemon-workspace-grid pokemon-hub-profile-grid" style={{ gridTemplateColumns: `repeat(${columns}, var(--pokemon-slot-size))`, width: cardRowWidth }} aria-label={`${title} slots`}>
           {Array.from({ length: visibleSlotCount }, (_, slot) => {
@@ -889,6 +951,10 @@ function PokemonHubSlotGrid({ profile, entries, layoutVersion, side, title, sele
             return <PokemonHubDragSlot key={slot} location={{ ...location, hubProfileId: profile.hubProfileId }} slot={slotProjection} dragDisabled={permission.dragDisabled} dragBlockReason={permission.reason?.message}><PokemonHubSlotFrame className={`pokemon-hub-slot${occupied ? ' occupied' : ''}${isSelected(location) ? ' selected' : ''}`} position={slot + 1} corner={occupied && <span className="pokemon-hub-slot-content">{getPokemonSlotFallback(slotProjection)}</span>} aria-label={`${title}, posição ${slot + 1}, ${occupied ? slotProjection.isEgg ? 'ovo' : 'ocupada' : 'vazia'}`} onClick={event => onSlotSelect(location, side, entry?.pokemonInstanceId, event.currentTarget)}><PokemonSlotSprite slot={slotProjection} /></PokemonHubSlotFrame></PokemonHubDragSlot>
           })}
         </div></> : <div className="pokemon-item-inventory pokemon-hub-item-inventory" style={{ width: cardRowWidth }}>
+          <header className="pokemon-hub-profile-summary pokemon-hub-item-nav">
+            <h3>{profile.name}</h3>
+            <PokemonHubProfileActions profile={profile} busy={busy} onRename={onRename} />
+          </header>
           <div className="pokemon-item-grid pokemon-hub-item-grid" role="list" style={{ gridTemplateColumns: `repeat(${columns}, var(--pokemon-slot-size))`, width: cardRowWidth }} aria-label={`Itens de ${title}`}>
             {Array.from({ length: visibleItemSlotCount }, (_, slot) => {
               const item = itemEntries[slot] ?? null
@@ -907,6 +973,20 @@ function PokemonHubSlotGrid({ profile, entries, layoutVersion, side, title, sele
       </div>
     </div>
   </div>
+}
+
+function PokemonHubProfileActions({ profile, busy, onRename }) {
+  return <div className="pokemon-hub-profile-actions">
+    <Button type="default" aria-label={`Renomear ${profile.name}`} icon={<EditOutlined />} disabled={busy} onClick={() => onRename(profile)} />
+  </div>
+}
+
+function PokemonHubProfileDelete({ profile, busy, onDelete }) {
+  const pokemonCount = Object.keys(profile.grid.entries).length
+  const itemCount = Object.keys(profile.itemInventory?.slots ?? {}).length
+  return <Popconfirm title={`Excluir ${profile.name}?`} description={pokemonCount || itemCount ? `${pokemonCount} Pokémon e ${itemCount} itens serão perdidos permanentemente.` : 'O perfil vazio será removido.'} okText="Excluir" cancelText="Cancelar" okButtonProps={{ danger: true }} onConfirm={() => onDelete(profile)}>
+    <Button className="pokemon-pane-profile-delete" type="default" danger aria-label={`Excluir ${profile.name}`} icon={<DeleteOutlined />} disabled={busy} />
+  </Popconfirm>
 }
 
 function PokemonHubPane({ side, panes, paneCount, source, activeDrag, transferDraft, onTransferQuantityChange, onTransferConfirm, onTransferCancel, data, hubProfiles, profilesLoading, saveProfileGames, saveProfileGamesLoading, saveProfileGamesError, saveProfilesByGame, saveLayoutsBySource, selected, cardSelection, pokemonDetailsById, onCardClose, selectedBox, busy, loading, structureBusy, onSourceChange, onCreate, onAddPane, onClosePane, onBoxChange, onSlotSelect, onRename, onDelete }) {
@@ -938,6 +1018,10 @@ function PokemonHubPane({ side, panes, paneCount, source, activeDrag, transferDr
   const activeSource = activeDrag ? sourceForPokemonHubLocation(panes, activeDrag.location) : null
   const activeFeedback = activeSource ? getPokemonHubDragFeedback({ panes, source: activeSource, slot: activeDrag.slot, saveLayoutsBySource }) : null
   const dragOverlayMessage = activeFeedback?.destinations.find(destination => samePokemonHubPaneSource(destination.source, source) && !destination.allowed)?.reason?.message ?? ''
+  const itemDragLocation = activeDrag?.location
+  const itemDragInventory = itemDragLocation?.kind === 'item' ? saveLayoutsBySource[saveSourceKey(itemDragLocation.gameId, itemDragLocation.profileId)]?.itemInventory : null
+  const itemDragBlocked = itemDragInventory && source && (source.kind === 'hub' || source.gameId !== itemDragLocation.gameId || source.profileId !== itemDragLocation.profileId)
+    && !getPokemonItemPolicy(itemDragInventory.title, itemDragLocation.area, activeDrag.slot?.itemKey)?.canTransfer
   const gameBoxes = game?.boxes ?? []
   const boxIndex = gameBoxes.length ? Math.min(selectedBox ?? 0, gameBoxes.length - 1) : 0
   const gameSlots = gameBoxes[boxIndex]?.slots ?? []
@@ -948,7 +1032,7 @@ function PokemonHubPane({ side, panes, paneCount, source, activeDrag, transferDr
   const showTabs = Boolean(hubProfile || saveLayout)
   const isSelected = location => selected.some(candidate => candidate.kind === location.kind && candidate.gameId === location.gameId && candidate.box === location.box && candidate.slot === location.slot)
   const slotGrid = source && (hubProfile || game?.status === 'ready') && (hubProfile
-    ? <PokemonHubSlotGrid profile={hubProfile} entries={hubProfile.grid.entries} layoutVersion={paneCount} side={side} title={title} selected={selected} pokemonCount={pokemonCount} busy={busy} onSlotSelect={onSlotSelect} onRename={onRename} onDelete={onDelete} dragPermission={dragPermission} activeTab={activeTab} onTabChange={setActiveTab}
+    ? <PokemonHubSlotGrid profile={hubProfile} entries={hubProfile.grid.entries} layoutVersion={paneCount} side={side} title={title} selected={selected} pokemonCount={pokemonCount} busy={busy} onSlotSelect={onSlotSelect} onRename={onRename} dragPermission={dragPermission} activeTab={activeTab} onTabChange={setActiveTab}
       transferDraft={transferDraft?.destination.kind === 'hub-item' && transferDraft.destination.hubProfileId === source.hubProfileId ? transferDraft : null}
       onTransferQuantityChange={onTransferQuantityChange} onTransferConfirm={onTransferConfirm} onTransferCancel={onTransferCancel} />
     : <div className="pokemon-workspace-grid" aria-label={`${title} slots`}>
@@ -961,7 +1045,7 @@ function PokemonHubPane({ side, panes, paneCount, source, activeDrag, transferDr
   </div>)
   return <section className="pokemon-workspace-pane" aria-label={`Painel ${side + 1} do Pokémon Hub`}>
     <header className="pokemon-pane-header" inert={cardOpen}>
-      <PokemonHubPaneControls side={side} panes={panes} source={source} hubProfiles={hubProfiles} profilesLoading={profilesLoading} saveProfileGames={saveProfileGames} saveProfileGamesLoading={saveProfileGamesLoading} saveProfileGamesError={saveProfileGamesError} saveProfilesByGame={saveProfilesByGame} busy={busy} onSourceChange={onSourceChange} onCreate={onCreate} />
+      <PokemonHubPaneControls side={side} panes={panes} source={source} hubProfiles={hubProfiles} profilesLoading={profilesLoading} saveProfileGames={saveProfileGames} saveProfileGamesLoading={saveProfileGamesLoading} saveProfileGamesError={saveProfileGamesError} saveProfilesByGame={saveProfilesByGame} busy={busy} onSourceChange={onSourceChange} onCreate={onCreate} onDelete={onDelete} />
       <div className="pokemon-pane-actions">
         {canClose && <Button className="pokemon-pane-action pokemon-pane-close" type="default" aria-label="Fechar container" title="Fechar container" icon={<CloseOutlined />} disabled={busy || structureBusy} onClick={onClosePane} />}
         {canAdd && <Button className="pokemon-pane-action pokemon-pane-add" type="primary" aria-label="Abrir novo container" title="Abrir novo container" icon={<PlusOutlined />} disabled={busy} onClick={onAddPane} />}
@@ -983,6 +1067,7 @@ function PokemonHubPane({ side, panes, paneCount, source, activeDrag, transferDr
       {hubProfile && slotGrid}
       {game && game.status !== 'ready' && <p className="pokemon-pane-note">{game.status === 'active' ? 'Feche o jogo antes de usar o Hub.' : 'Este save ainda não está disponível.'}</p>}
     </div>
+    {itemDragBlocked && <div className="pokemon-item-block-overlay" role="status" aria-label="Não é possível arrastar esse item." aria-live="polite"><StopOutlined className="pokemon-item-block-icon" aria-hidden="true" /><span>Não é possível arrastar esse item.</span></div>}
     {cardOpen && <PokemonDetailCard key={currentCardId} detail={cardDetail} onClose={onCardClose} />}
     {loading && <div className="pokemon-workspace-pane-stale" role="status" aria-label={`Processando painel ${side + 1}`}><span>Processando…</span></div>}
   </section>
@@ -1027,10 +1112,10 @@ function PokemonItemInventory({ inventory, gameId, profileId, areaId, onAreaChan
         const issue = areaView.issues?.some(problem => problem.slot === slot.index)
         const policy = getPokemonItemPolicy(inventory.title, areaId, slot.itemKey)
         const showQuantity = policy?.showQuantity !== false
-        const frame = <PokemonHubSlotFrame as="div" className={`pokemon-hub-slot pokemon-item-slot${occupied ? ' occupied' : ''}${issue ? ' has-issue' : ''}${reorderable && occupied ? ' reorderable' : ''}`} role="listitem" position={slot.index + 1} corner={occupied && showQuantity && <span className="pokemon-item-quantity">×{slot.quantity}</span>} footer={occupied ? name : null} aria-label={`${areaView.label}, posição ${slot.index + 1}, ${occupied ? `${name}${showQuantity ? `, ${slot.quantity}` : ''}` : 'vazia'}${issue ? ', dados inválidos' : ''}`}>
+        const canDrag = occupied && !areaView.issues?.length && Boolean(policy)
+        const frame = <PokemonHubSlotFrame as="div" className={`pokemon-hub-slot pokemon-item-slot${occupied ? ' occupied' : ''}${issue ? ' has-issue' : ''}${canDrag ? ' draggable' : ''}`} role="listitem" position={slot.index + 1} corner={occupied && showQuantity && <span className="pokemon-item-quantity">×{slot.quantity}</span>} footer={occupied ? name : null} aria-label={`${areaView.label}, posição ${slot.index + 1}, ${occupied ? `${name}${showQuantity ? `, ${slot.quantity}` : ''}` : 'vazia'}${issue ? ', dados inválidos' : ''}`}>
           {occupied && <PokemonItemSprite itemKey={slot.itemKey} />}
         </PokemonHubSlotFrame>
-        const canDrag = occupied && (reorderable || policy?.canTransfer)
         return droppable ? <PokemonItemDragSlot key={slot.index} location={{ kind: 'item', gameId, profileId, area: areaId, slot: slot.index }} slot={slot} canDrag={canDrag}>{frame}</PokemonItemDragSlot> : React.cloneElement(frame, { key: slot.index })
       })}
     </div>
@@ -1039,11 +1124,13 @@ function PokemonItemInventory({ inventory, gameId, profileId, areaId, onAreaChan
 }
 
 function PokemonItemTransferPrompt({ transferDraft, onTransferQuantityChange, onTransferConfirm, onTransferCancel }) {
-  return <div className="pokemon-item-transfer-shade"><div className="pokemon-item-transfer-prompt" role="dialog" aria-label={`Transferir ${getPokemonItemName({ nativeId: 1, itemKey: transferDraft.itemKey })}`}>
-      <strong>{getPokemonItemName({ nativeId: 1, itemKey: transferDraft.itemKey })}</strong>
-      <label>Quantidade <input type="number" min="1" max={transferDraft.maxQuantity} step="1" value={transferDraft.quantity} onChange={event => onTransferQuantityChange(Number(event.target.value))} /></label>
-      <span>{transferDraft.quantity} / {transferDraft.maxQuantity}</span>
-      {transferDraft.destinationLimit !== null && <small>No destino: {transferDraft.destinationExisting} / {transferDraft.destinationLimit}</small>}
+  const name = getPokemonItemName({ nativeId: 1, itemKey: transferDraft.itemKey })
+  return <div className="pokemon-item-transfer-shade"><div className="pokemon-item-transfer-prompt" role="dialog" aria-label={`Transferir ${name}`}>
+      <div className="pokemon-item-transfer-identity">
+        <div className="pokemon-item-transfer-art"><PokemonItemSprite itemKey={transferDraft.itemKey} /></div>
+        <div><span>Transferir item</span><strong>{name}</strong></div>
+      </div>
+      <label className="pokemon-item-transfer-quantity"><span>Quantidade a transferir</span><span className="pokemon-item-transfer-quantity-input"><input type="number" min="1" max={transferDraft.maxQuantity} step="1" value={transferDraft.quantity} onChange={event => onTransferQuantityChange(Number(event.target.value))} /><span className="pokemon-item-transfer-limit">/ {transferDraft.maxQuantity}</span></span></label>
       <div className="pokemon-item-transfer-actions"><Button onClick={onTransferCancel}>Cancelar</Button><Button type="primary" disabled={!Number.isSafeInteger(transferDraft.quantity) || transferDraft.quantity < 1 || transferDraft.quantity > transferDraft.maxQuantity} onClick={onTransferConfirm}>Transferir</Button></div>
     </div></div>
 }
@@ -1103,6 +1190,10 @@ function PokemonHubDragOverlay({ drag }) {
 
 function saveSourceKey(gameId, profileId) {
   return gameId && profileId ? `${gameId}:${profileId}` : ''
+}
+
+function itemInventorySourceKey(location) {
+  return location.kind === 'hub-item' ? `hub:${location.hubProfileId}` : saveSourceKey(location.gameId, location.profileId)
 }
 
 function paneSnapshotKey(source) {

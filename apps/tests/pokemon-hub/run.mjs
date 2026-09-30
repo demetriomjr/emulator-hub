@@ -73,6 +73,7 @@ try {
     ['ruby-insert', 'ruby', { areas: { ...seed, pc: [[13, 2]] } }],
     ['sapphire-insert', 'sapphire', { areas: { ...seed, pc: [[14, 1], [19, 1]] } }],
     ['ruby-blocked', 'ruby', {}],
+    ['ruby-block-feedback', 'ruby', {}],
     ['ruby-stack', 'ruby', {}], ['sapphire-stack', 'sapphire', {}],
     ['sapphire-pc-49', 'sapphire', { areas: { ...seed, pc: Array.from({ length: 51 }, (_, index) => index + 1).filter(id => id !== 13 && id !== 14).map(id => [id, 1]) } }],
     ['ruby-items-19', 'ruby', { areas: { ...seed, items: Array.from({ length: 19 }, (_, index) => [index + 15, 1]) } }],
@@ -89,6 +90,11 @@ try {
     ['sapphire-hub-concurrent-source', 'sapphire', {}],
     ['sapphire-hub-merge-source', 'sapphire', {}],
     ['ruby-hub-merge-source', 'ruby', {}],
+    ['ruby-item-queue-success', 'ruby', {}],
+    ['ruby-item-queue-failure', 'ruby', {}],
+    ['ruby-item-race-close', 'ruby', {}],
+    ['ruby-item-race-reopen', 'ruby', {}],
+    ['ruby-item-race-reorder', 'ruby', {}],
   ]) {
     const itemEntry = itemEntries[game]
     const profile = await profileStore.create(itemEntry.id, name)
