@@ -15,9 +15,8 @@ export async function getGames() {
   return parseGameCatalogResponse(await getJson('/api/games'))
 }
 
-export async function getSaveProfileLayout(gameId, profileId, workspaceProfileId = null, signal = undefined) {
-  const workspace = typeof workspaceProfileId === 'string' && workspaceProfileId ? `?workspaceProfileId=${encodeURIComponent(workspaceProfileId)}` : ''
-  const body = await getJson(`/api/pokemon-hub/save-profiles/${encodeURIComponent(gameId)}/${encodeURIComponent(profileId)}/layout${workspace}`, signal)
+export async function getSaveProfileLayout(gameId, profileId, signal = undefined) {
+  const body = await getJson(`/api/pokemon-hub/save-profiles/${encodeURIComponent(gameId)}/${encodeURIComponent(profileId)}/layout`, signal)
   if (!body.layout || !Array.isArray(body.party) || !Array.isArray(body.boxes) || !isPokemonDetailMap(body.pokemonDetailsById)) throw new Error('Invalid save layout response')
   return body
 }
@@ -134,25 +133,25 @@ export async function releasePlayerLease(sessionId, lease) {
   return body
 }
 
-export function openPokemonHubSession(profileId, signal = undefined) {
-  return postPokemonHubSession(profileId, '', {}, signal)
+export function openPokemonHubSession(sessionId, signal = undefined) {
+  return postPokemonHubSession('', { sessionId }, signal)
 }
 
-export function heartbeatPokemonHubSession(profileId, sessionId, sequence) {
-  return postPokemonHubSession(profileId, `/${encodeURIComponent(sessionId)}/heartbeat`, { sequence })
+export function heartbeatPokemonHubSession(sessionId, sequence) {
+  return postPokemonHubSession(`/${encodeURIComponent(sessionId)}/heartbeat`, { sequence })
 }
 
-export function reorderPokemonSaveItems(profileId, sessionId, request) {
-  return postJson(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/sessions/${encodeURIComponent(sessionId)}/items/reorder`, request)
+export function reorderPokemonSaveItems(sessionId, request) {
+  return postJson(`/api/pokemon-hub/sessions/${encodeURIComponent(sessionId)}/items/reorder`, request)
 }
 
-export function transferPokemonSaveItems(profileId, sessionId, request) {
-  return postJson(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/sessions/${encodeURIComponent(sessionId)}/items/transfer`, request)
+export function transferPokemonSaveItems(sessionId, request) {
+  return postJson(`/api/pokemon-hub/sessions/${encodeURIComponent(sessionId)}/items/transfer`, request)
 }
 
-export async function loadPokemonHubSessionPane(profileId, sessionId, pane, source, signal = undefined) {
+export async function loadPokemonHubSessionPane(sessionId, pane, source, signal = undefined) {
   if (!Number.isInteger(pane) || pane < 0 || pane > 2) throw new TypeError('Pokemon Hub pane is invalid')
-  const response = await fetch(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/sessions/${encodeURIComponent(sessionId)}/panes/${pane}`, {
+  const response = await fetch(`/api/pokemon-hub/sessions/${encodeURIComponent(sessionId)}/panes/${pane}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source }), signal,
   })
   const snapshot = await response.json().catch(() => ({}))
@@ -165,9 +164,9 @@ export async function loadPokemonHubSessionPane(profileId, sessionId, pane, sour
   return { corrected: false, snapshot }
 }
 
-export async function syncPokemonHubSessionSnapshot(profileId, sessionId, snapshot, idempotencyKey) {
+export async function syncPokemonHubSessionSnapshot(sessionId, snapshot, idempotencyKey) {
   if (typeof idempotencyKey !== 'string' || idempotencyKey.length === 0) throw new TypeError('Pokemon Hub snapshot idempotency key is required')
-  const response = await fetch(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/sessions/${encodeURIComponent(sessionId)}/snapshots`, {
+  const response = await fetch(`/api/pokemon-hub/sessions/${encodeURIComponent(sessionId)}/snapshots`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
     body: JSON.stringify(snapshot),
@@ -183,10 +182,10 @@ export async function syncPokemonHubSessionSnapshot(profileId, sessionId, snapsh
   return null
 }
 
-export async function closePokemonHubSession(profileId, sessionId, snapshot, idempotencyKey) {
+export async function closePokemonHubSession(sessionId, snapshot, idempotencyKey) {
   if (!snapshot || typeof snapshot !== 'object' || !Number.isInteger(snapshot.revision) || !Array.isArray(snapshot.panes)) throw new TypeError('Pokemon Hub close snapshot is required')
   if (typeof idempotencyKey !== 'string' || idempotencyKey.length === 0) throw new TypeError('Pokemon Hub close idempotency key is required')
-  const response = await fetch(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/sessions/${encodeURIComponent(sessionId)}/close`, {
+  const response = await fetch(`/api/pokemon-hub/sessions/${encodeURIComponent(sessionId)}/close`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
     body: JSON.stringify(snapshot),
@@ -256,8 +255,8 @@ export async function deletePokemonHubProfile(hubProfileId, { discardOccupied = 
   return body
 }
 
-async function postPokemonHubSession(profileId, suffix, body, signal = undefined) {
-  const response = await fetch(`/api/profiles/${encodeURIComponent(profileId)}/pokemon-hub/sessions${suffix}`, {
+async function postPokemonHubSession(suffix, body, signal = undefined) {
+  const response = await fetch(`/api/pokemon-hub/sessions${suffix}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal,
   })
   return readPokemonHubResponse(response)

@@ -1,4 +1,5 @@
 import { defineConfig } from '@playwright/test'
+import { join } from 'node:path'
 
 export default defineConfig({
   testDir: '.',
@@ -9,7 +10,7 @@ export default defineConfig({
   timeout: 45_000,
   expect: { timeout: 8_000 },
   reporter: [['list']],
-  outputDir: 'test-results/artifacts',
+  outputDir: process.env.E2E_ARTIFACT_DIR ? join(process.env.E2E_ARTIFACT_DIR, 'playwright') : 'test-results/artifacts',
   use: {
     baseURL: process.env.E2E_BASE_URL,
     browserName: 'chromium',

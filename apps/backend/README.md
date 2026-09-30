@@ -6,12 +6,40 @@ This backend uses Node.js HTTP APIs and Redis for durable application data. It s
 
 Application records (profiles, control profile, Pokémon Hub documents, and the ROM registry) require `REDIS_URL` before the backend starts. Game `.sav` bytes and their revision metadata remain in local `data/saves/`.
 
-The production Redis Docker port is intentionally loopback-only on the VPS. Forward it over SSH rather than exposing it publicly, then point the backend at that local port:
+**Namespaces:** `emulator-hub:dev` is development; `emulator-hub:v1` is production. Local development loads `apps/backend/.env`. Never run destructive tests against either existing dataset: the live Redis test creates a unique `emulator-hub:dev:test:pokemon-hub:<uuid>` prefix and removes only its own keys. The local configuration currently uses a loopback SSH tunnel on port 16379; credentials and the remote address remain outside Git.
+
+Explicit operator-directed migration rehearsals may replace `emulator-hub:dev`
+from a verified local production backup. Stop development writers first. The
+rehearsal tools reject production as a destination, preserve replaced local data,
+and do not modify production. See spec 086, section 25, for the current baseline
+and audit results. From the repository root:
+
+```powershell
+node --env-file=apps/backend/.env apps/backend/restore-development-baseline.mjs --baseline <verified-local-backup> --writers-stopped
+node --env-file=apps/backend/.env apps/backend/reconcile-development-pokemon-hub.mjs --baseline <verified-local-backup> --writers-stopped --apply
+node --env-file=apps/backend/.env apps/backend/migrate-pokemon-hub.mjs
+```
+
+Reconciliation selects a Save copy only when exactly one legacy copy matches its
+native revision and every occupied position/payload. It archives superseded
+copies and expired sessions in dev; ambiguity, active leases and unpublished
+Saves block the operation. The final migrator requires the inspection fingerprint,
+`--apply --writers-stopped --fingerprint <value> --archive <new-file>`. Files and
+backups remain under `apps/backend/data/` and the Git-ignored `test-data/` directory.
+
+Run the isolated Lua regression from the repository root:
+
+```powershell
+$env:POKEMON_HUB_LIVE_REDIS = '1'
+node --env-file=apps/backend/.env --test apps/backend/test/pokemon-hub-live-redis.test.mjs
+```
+
+The remote Redis Docker port is intentionally loopback-only on the VPS. Forward it over SSH rather than exposing it publicly, then point the backend at that local port:
 
 ```powershell
 ssh -N -L 127.0.0.1:6380:127.0.0.1:6379 <vps-user>@<vps-host>
 $env:REDIS_URL = 'redis://127.0.0.1:6380'
-$env:REDIS_NAMESPACE = 'emulator-hub:v1'
+$env:REDIS_NAMESPACE = 'emulator-hub:dev'
 npm start
 ```
 

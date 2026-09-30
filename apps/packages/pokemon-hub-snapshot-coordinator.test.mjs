@@ -12,6 +12,21 @@ const profileId = 'profile-may'
 const party = slot => ({ kind: 'game', area: 'party', slot })
 const hub = (hubProfileId, slot) => ({ kind: 'hub', hubProfileId, slot })
 
+test('sources and records have an independent identity without a workspace owner', async () => {
+  const { coordinator, persistence } = await fixture()
+  const sourceKey = 'save:profile-may:emerald'
+  const adopted = await coordinator.adopt({ sourceKey, sourceRevision: 1, adapter: 'gen3-gba-v1', slots: [
+    { location: party(0), record: record(7, { species: 25 }) },
+  ] })
+  assert.deepEqual(await coordinator.getSnapshot({ sourceKey }), adopted)
+  const detail = await coordinator.getDetailSource({ sourceKey })
+  assert.equal(Object.hasOwn(detail.source, 'profileId'), false)
+  assert.equal(Object.hasOwn(detail.records.values().next().value, 'profileId'), false)
+  await coordinator.acquire({ sourceKey, workspaceId: 'morning' })
+  await assert.rejects(coordinator.acquire({ sourceKey, workspaceId: 'afternoon' }), { code: 'SOURCE_RESERVED' })
+  assert.equal((await persistence.keys('pokemon-hub:v2')).length, 0)
+})
+
 function record(seed, display) {
   return { representation: { adapter: 'gen3-gba-v1', kind: 'pc-record', bytes: Buffer.alloc(80, seed) }, display }
 }
@@ -28,9 +43,21 @@ async function fixture(options = {}) {
     newId: (() => { let value = 0; return () => `00000000-0000-4000-8000-${String(++value).padStart(12, '0')}` })(),
     validatePlacementChange: options.validatePlacementChange,
     gameSaveLeases: options.gameSaveLeases,
+    sharedSources: options.sharedSources,
   })
   return { persistence, events, coordinator, setTime: value => { instant = value } }
 }
+
+test('shared source authority keeps the same identities and lease across workspace namespaces', async () => {
+  const { coordinator } = await fixture({ sharedSources: true })
+  const sourceKey = 'save:profile-may:emerald'
+  const saved = await coordinator.adopt({ profileId, sourceKey, sourceRevision: 1, adapter: 'gen3-gba-v1', slots: [
+    { location: party(0), record: record(7, { species: 25 }) },
+  ] })
+  assert.deepEqual(await coordinator.getSnapshot({ profileId: 'another-workspace', sourceKey }), saved)
+  await coordinator.acquire({ profileId, sourceKey, workspaceId: 'workspace-a' })
+  await assert.rejects(coordinator.acquire({ profileId: 'another-workspace', sourceKey, workspaceId: 'workspace-b' }), { code: 'SOURCE_RESERVED' })
+})
 
 test('does not acquire a save source while the player owns its global save lease', async () => {
   const persistence = createMemoryRedisPersistence()
@@ -64,7 +91,7 @@ test('adopts native records once and acquires a safe snapshot without bytes', as
   assert.deepEqual(acquired.pokemonDisplay, { '00000000-0000-4000-8000-000000000001': { species: 289, shiny: false } })
   assert.equal(JSON.stringify(acquired).includes('bytesBase64'), false)
   assert.equal(JSON.stringify(acquired).includes(Buffer.alloc(80, 7).toString('base64')), false)
-  assert.equal((await events.listForPokemon(profileId, adopted.placements[0].pokemonInstanceId))[0].type, 'pokemon.observed')
+  assert.equal((await events.listForPokemon(adopted.placements[0].pokemonInstanceId))[0].type, 'pokemon.observed')
 })
 
 test('reads every occupied source record for detail hydration without changing the source', async () => {
@@ -91,8 +118,8 @@ test('reads a 163-Pokémon Hub snapshot without serial Redis record round trips 
     needsSaveFlush: false, adapter: 'hub-grid-v1', pokemonDisplay: {},
     placements: ids.map((pokemonInstanceId, slot) => ({ location: hub(hubProfileId, slot), pokemonInstanceId })),
   }
-  await memory.set(pokemonHubRedisKeys.source(profileId, sourceKey), JSON.stringify(source))
-  for (const id of ids) await memory.set(pokemonHubRedisKeys.record(profileId, id), JSON.stringify({ hubPassport: { id }, representations: [{ bytesBase64: 'raw-record-must-not-be-exposed' }] }))
+  await memory.set(pokemonHubRedisKeys.source(sourceKey), JSON.stringify(source))
+  for (const id of ids) await memory.set(pokemonHubRedisKeys.record(id), JSON.stringify({ hubPassport: { id }, representations: [{ bytesBase64: 'raw-record-must-not-be-exposed' }] }))
   let activeReads = 0
   let maximumConcurrentReads = 0
   let recordReads = 0
@@ -277,7 +304,7 @@ test('accepts a complete two-source placement snapshot and emits one movement ev
     ['save:profile-may:emerald', 5],
     ['save:profile-may:ruby', 9],
   ])
-  const movementEvents = await events.listForPokemon(profileId, pokemonInstanceId)
+  const movementEvents = await events.listForPokemon(pokemonInstanceId)
   assert.equal(movementEvents.filter(event => event.type === 'pokemon.placement-changed').length, 1)
 })
 
@@ -366,7 +393,7 @@ test('validates a synchronized workspace through its lease index without scannin
   const persistence = {
     ...memory,
     async keys(prefix) {
-      if (prefix.startsWith(pokemonHubRedisKeys.lease(profileId, 'ignored').slice(0, -'ignored'.length))) throw new Error('Request-path lease scans are forbidden')
+      if (prefix.startsWith(pokemonHubRedisKeys.lease('ignored').slice(0, -'ignored'.length))) throw new Error('Request-path lease scans are forbidden')
       return memory.keys(prefix)
     },
   }
@@ -501,7 +528,7 @@ test('persists a first-admission Hub passport only after the rule policy permits
   assert.equal(locked.code, 'TRANSFER_NATIONAL_DEX_REQUIRED')
   assert.deepEqual((await coordinator.getSnapshot({ profileId, sourceKey: game.sourceKey })).placements, game.placements)
   assert.deepEqual((await coordinator.getSnapshot({ profileId, sourceKey: hubSource.sourceKey })).placements, hubSource.placements)
-  assert.equal((await events.listForPokemon(profileId, pokemonInstanceId)).filter(event => event.type === 'pokemon.placement-changed').length, 0)
+  assert.equal((await events.listForPokemon(pokemonInstanceId)).filter(event => event.type === 'pokemon.placement-changed').length, 0)
   await coordinator.refreshTransferCapability({ profileId, sourceKey: game.sourceKey, transferCapability: { title: 'pokemon-ruby', ordinaryTradeReady: false, nationalDexUnlocked: true, gameClear: true, networkMachineRestored: null } })
 
   const accepted = await coordinator.sync({
@@ -756,4 +783,101 @@ test('rejects a change the save materialization policy cannot write before accep
       { sourceKey: destination.sourceKey, sourceSessionId: destinationLease.sourceSessionId, leaseToken: destinationLease.leaseToken, baseRevision: 8, placements: [{ location: party(0), pokemonInstanceId: source.placements[0].pokemonInstanceId }] },
     ],
   }), error => error.code === 'SAVE_MATERIALIZATION_UNSUPPORTED')
+})
+
+test('concurrent workspaces cannot both acquire an independent source', async () => {
+ const { coordinator } = await fixture()
+ await coordinator.ensureHubSource({ sourceKey: 'hub:race', hubProfileId: 'race', minimumSlotCount: 2 })
+ const results = await Promise.allSettled(['one','two'].map(workspaceId => coordinator.acquire({ sourceKey: 'hub:race', workspaceId })))
+ assert.equal(results.filter(result => result.status === 'fulfilled').length, 1)
+ assert.equal(results.find(result => result.status === 'rejected').reason.code, 'SOURCE_RESERVED')
+})
+
+test('a failed physical release retains a discoverable lease until retry completes', async () => {
+ const persistence = createMemoryRedisPersistence()
+ const physical = createGameSaveLeaseCoordinator({ persistence })
+ let fail = true
+ const coordinator = createPokemonHubSnapshotCoordinator({ persistence, eventStore: createPokemonHubEventStore({ persistence }), gameSaveLeases: {
+  ...physical, async releaseHub(input) { if (fail) throw new Error('physical release unavailable'); return physical.releaseHub(input) },
+ } })
+ const sourceKey = 'save:release:emerald'
+ await coordinator.adopt({ sourceKey, sourceRevision: 1, adapter: 'gen3-gba-v1', slots: [{ location: party(0), record: null }] })
+ const lease = await coordinator.acquire({ sourceKey, workspaceId: 'one' })
+ const credentials = { ...lease, workspaceId: 'one' }
+ await assert.rejects(coordinator.release(credentials), /physical release unavailable/)
+ assert.ok(await persistence.get(pokemonHubRedisKeys.lease(sourceKey)))
+ await assert.rejects(coordinator.acquire({ sourceKey, workspaceId: 'two' }))
+ fail = false
+ assert.equal((await coordinator.release(credentials)).released, true)
+ assert.equal(await persistence.get(pokemonHubRedisKeys.lease(sourceKey)), null)
+ assert.equal((await coordinator.acquire({ sourceKey, workspaceId: 'two' })).sourceKey, sourceKey)
+})
+
+test('a crash after physical acquisition leaves an indexed reservation even before adoption', async () => {
+ const persistence=createMemoryRedisPersistence()
+ let instant=1000
+ const physical=createGameSaveLeaseCoordinator({persistence,now:()=>instant})
+ const options={persistence,eventStore:createPokemonHubEventStore({persistence}),now:()=>new Date(instant)}
+ const interrupted=createPokemonHubSnapshotCoordinator({...options,gameSaveLeases:{...physical,async acquireHub(input){await physical.acquireHub(input);throw new Error('connection lost after lock')}}})
+ await assert.rejects(interrupted.reserveSource({sourceKey:'save:may:emerald',workspaceId:'interrupted'}),/connection lost/)
+ const recovered=createPokemonHubSnapshotCoordinator({...options,gameSaveLeases:physical})
+ instant+=10000
+ const pending=await recovered.listExpiredLeases()
+ assert.equal(pending.length,1)
+ assert.equal(pending[0].state,'acquiring')
+ await recovered.releaseExpiredLease(pending[0])
+ const next=await recovered.reserveSource({sourceKey:'save:may:emerald',workspaceId:'next'})
+ assert.equal(next.workspaceId,'next')
+})
+
+test('independent expiry cannot release endpoints belonging to a registered pending session', async () => {
+ const {coordinator,persistence,setTime}=await fixture()
+ await coordinator.ensureHubSource({sourceKey:'hub:pending',hubProfileId:'pending',minimumSlotCount:1})
+ const lease=await coordinator.acquire({sourceKey:'hub:pending',workspaceId:'day'})
+ await persistence.set(pokemonHubRedisKeys.session('day'),JSON.stringify({state:'publishing'}))
+ setTime(lease.expiresAt+1)
+ assert.deepEqual(await coordinator.listExpiredLeases(),[])
+ assert.equal((await coordinator.listWorkspaceLeases({workspaceId:'day'})).length,1)
+ await persistence.delete(pokemonHubRedisKeys.session('day'))
+ assert.equal((await coordinator.listExpiredLeases()).length,1)
+})
+
+test('an expired orphan physical lock can be reclaimed only when its session is gone and its source is clean', async () => {
+ const persistence=createMemoryRedisPersistence()
+ let instant=1000
+ const physical=createGameSaveLeaseCoordinator({persistence,now:()=>instant})
+ const coordinator=createPokemonHubSnapshotCoordinator({persistence,eventStore:createPokemonHubEventStore({persistence}),gameSaveLeases:physical,now:()=>new Date(instant)})
+ const sourceKey='save:may:emerald'
+ await coordinator.adopt({sourceKey,sourceRevision:1,adapter:'gen3-gba-v1',slots:[{location:party(0),record:null}]})
+ // Models a late physical write after its acquisition intent was already cleaned.
+ await physical.acquireHub({profileId:'may',gameId:'emerald',workspaceId:'interrupted'})
+ instant+=10000
+ await persistence.set(pokemonHubRedisKeys.session('interrupted'),JSON.stringify({state:'recovering'}))
+ await assert.rejects(coordinator.acquire({sourceKey,workspaceId:'next'}),{code:'SAVE_IN_USE_BY_POKEMON_HUB'})
+ await persistence.delete(pokemonHubRedisKeys.session('interrupted'))
+ assert.equal((await coordinator.acquire({sourceKey,workspaceId:'next'})).sourceKey,sourceKey)
+})
+
+test('concurrent adoption cannot publish two identities or orphan records for the same native source', async () => {
+ const {coordinator,persistence}=await fixture()
+ const input={sourceKey:'save:may:concurrent',sourceRevision:1,adapter:'gen3-gba-v1',slots:[{location:party(0),record:record(1,{species:25})}]}
+ const results=await Promise.allSettled([coordinator.adopt(input),coordinator.adopt(input)])
+ assert.equal(results.filter(result=>result.status==='fulfilled').length,1)
+ assert.equal(results.find(result=>result.status==='rejected').reason.code,'SOURCE_ADOPTION_CONFLICT')
+ const source=await coordinator.getSnapshot({sourceKey:input.sourceKey})
+ const records=await persistence.keys('pokemon-hub:v3:{pokemon-hub}:record:')
+ assert.deepEqual(records,[pokemonHubRedisKeys.record(source.placements[0].pokemonInstanceId)])
+})
+
+test('a lease lost during placement validation cannot commit either endpoint', async () => {
+ let revoke = async () => {}
+ const { coordinator, persistence } = await fixture({ validatePlacementChange: async () => { await revoke(); return { allowed: true } } })
+ const original = await coordinator.adopt({ sourceKey: 'hub:race', sourceRevision: 1, adapter: 'hub-grid-v1', slots: [
+  { location: hub('race',0), record: record(1, { species: 25 }) }, { location: hub('race',1), record: null },
+ ] })
+ const lease = await coordinator.acquire({ sourceKey: 'hub:race', workspaceId: 'one' })
+ revoke = () => persistence.delete(pokemonHubRedisKeys.lease('hub:race'))
+ const placements = original.placements.map((p,i) => ({ ...p, pokemonInstanceId: i ? original.placements[0].pokemonInstanceId : null }))
+ await assert.rejects(coordinator.sync({ workspaceId: 'one', clientSequence: 1, idempotencyKey: 'race', sources: [{ sourceKey: 'hub:race', sourceSessionId: lease.sourceSessionId, leaseToken: lease.leaseToken, baseRevision: original.sourceRevision, placements }] }), { code: 'SNAPSHOT_COMMIT_CONFLICT' })
+ assert.deepEqual(await coordinator.getSnapshot({ sourceKey: 'hub:race' }), original)
 })

@@ -42,8 +42,8 @@ test('seis ciclos de close e reabertura renovam session ID e persistem Eevee', a
   const eeveeId = (await readLayout('stress-cycles')).boxes[0].slots[2].pokemonInstanceId
   const sessionIds = []
   for (let cycle = 0; cycle < 6; cycle += 1) {
-    await openWorkspace(page)
     const opening = page.waitForResponse(response => /\/pokemon-hub\/sessions$/.test(new URL(response.url()).pathname) && response.status() === 201)
+    await openWorkspace(page)
     await selectSave(page, 0, 'stress-cycles')
     sessionIds.push((await opening).json().then(body => body.sessionId))
     const from = cycle % 2 === 0 ? 2 : 12
@@ -61,8 +61,8 @@ test('F5 após mover Eevee abandona sessão antiga, libera lease e cria sessão 
   test.setTimeout(90_000)
   const baseline = (await occupiedIds('stress-reload')).sort()
   const eeveeId = (await readLayout('stress-reload')).boxes[0].slots[2].pokemonInstanceId
-  await openWorkspace(page)
   const opening = page.waitForResponse(response => /\/pokemon-hub\/sessions$/.test(new URL(response.url()).pathname) && response.status() === 201)
+  await openWorkspace(page)
   await selectSave(page, 0, 'stress-reload')
   const oldSessionId = (await (await opening).json()).sessionId
   const accepted = page.waitForResponse(response => /\/pokemon-hub\/sessions\/[^/]+\/snapshots$/.test(new URL(response.url()).pathname) && response.status() === 200)
@@ -71,8 +71,11 @@ test('F5 após mover Eevee abandona sessão antiga, libera lease e cria sessão 
   await page.reload()
   await expect(page.getByRole('dialog', { name: 'Pokémon Hub' })).toHaveCount(0)
   await expect.poll(async () => (await readLayout('stress-reload')).boxes[0].slots[12].pokemonInstanceId, { timeout: 20_000 }).toBe(eeveeId)
-  await openWorkspace(page)
+  // Native bytes are already durable when the snapshot is acknowledged. They
+  // do not imply that the abandoned session has expired and released its lease.
+  await expect.poll(async () => (await (await fetch(`${process.env.E2E_API_URL}/api/pokemon-hub/sessions`)).json()).sessions.find(session => session.sessionId === oldSessionId)?.closedAt, { timeout: 40_000 }).toBeTruthy()
   const reopening = page.waitForResponse(response => /\/pokemon-hub\/sessions$/.test(new URL(response.url()).pathname) && response.status() === 201)
+  await openWorkspace(page)
   await selectSave(page, 0, 'stress-reload')
   const newSessionId = (await (await reopening).json()).sessionId
   expect(newSessionId).not.toBe(oldSessionId)
@@ -137,10 +140,10 @@ test('segunda sessão não adota Save ocupado e consegue adotá-lo após o close
   await selectSave(page, 0, 'stress-tabs')
   const base = process.env.E2E_API_URL
   const owner = profiles['stress-tabs']
-  const opened = await fetch(`${base}/api/profiles/${owner}/pokemon-hub/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+  const opened = await fetch(`${base}/api/pokemon-hub/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
   expect(opened.status).toBe(201)
   const second = await opened.json()
-  const paneUrl = `${base}/api/profiles/${owner}/pokemon-hub/sessions/${second.sessionId}/panes/0`
+  const paneUrl = `${base}/api/pokemon-hub/sessions/${second.sessionId}/panes/0`
   const source = { kind: 'game', profileId: owner, gameId }
   const blocked = await fetch(paneUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ source }) })
   expect(blocked.status).toBe(409)
@@ -150,7 +153,7 @@ test('segunda sessão não adota Save ocupado e consegue adotá-lo após o close
   expect(acquired.status).toBe(200)
   const authority = await acquired.json()
   expectSnapshotUnique(authority)
-  const closed = await fetch(`${base}/api/profiles/${owner}/pokemon-hub/sessions/${second.sessionId}/close`, {
+  const closed = await fetch(`${base}/api/pokemon-hub/sessions/${second.sessionId}/close`, {
     method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() }, body: JSON.stringify(authority),
   })
   expect(closed.status).toBe(200)
@@ -169,7 +172,9 @@ test('ack descartado após commit recupera Eevee e libera sessão pela expiraç�
     expect(response.status()).toBe(200)
     await route.abort('failed')
   })
+  const opening = page.waitForResponse(response => /\/pokemon-hub\/sessions$/.test(new URL(response.url()).pathname) && response.status() === 201)
   await openWorkspace(page)
+  const oldSessionId = (await (await opening).json()).sessionId
   await selectSave(page, 0, 'stress-lost-ack')
   await drag(page, boxSlot(page, 0, 2), boxSlot(page, 0, 12))
   await expect.poll(() => discarded).toBe(true)
@@ -177,6 +182,7 @@ test('ack descartado após commit recupera Eevee e libera sessão pela expiraç�
   await page.reload()
   await expect.poll(async () => pokemonGen3Adapter.readSlot((await readSave('stress-lost-ack')).bytes, 0, 12)?.canonical.species, { timeout: 20_000 }).toBe(133)
   expect((await readLayout('stress-lost-ack')).boxes[0].slots[12].pokemonInstanceId).toBe(eeveeId)
+  await expect.poll(async () => (await (await fetch(`${process.env.E2E_API_URL}/api/pokemon-hub/sessions`)).json()).sessions.find(session => session.sessionId === oldSessionId)?.closedAt, { timeout: 40_000 }).toBeTruthy()
   await openWorkspace(page)
   await selectSave(page, 0, 'stress-lost-ack')
   await closeWorkspace(page)
@@ -305,6 +311,7 @@ test('F5 com ack retido após commit recupera Eevee sem reaplicar o snapshot', a
   const ack = new Promise(resolve => { releaseAck = resolve })
   const committedResult = new Promise(resolve => { committed = resolve })
   let held = false
+  let oldSessionId
   await page.route('**/pokemon-hub/sessions/*/snapshots', async route => {
     if (held) return route.continue()
     held = true
@@ -314,13 +321,16 @@ test('F5 com ack retido após commit recupera Eevee sem reaplicar o snapshot', a
     await route.fulfill({ response }).catch(() => {})
   })
   try {
+    const opening = page.waitForResponse(response => /\/pokemon-hub\/sessions$/.test(new URL(response.url()).pathname) && response.status() === 201)
     await openWorkspace(page)
+    oldSessionId = (await (await opening).json()).sessionId
     await selectSave(page, 0, 'stress-held-reload')
     await drag(page, boxSlot(page, 0, 2), boxSlot(page, 0, 12))
     expect(await committedResult).toBe(200)
     await page.reload()
   } finally { releaseAck() }
   await expect.poll(async () => pokemonGen3Adapter.readSlot((await readSave('stress-held-reload')).bytes, 0, 12)?.canonical.species, { timeout: 20_000 }).toBe(133)
+  await expect.poll(async () => (await (await fetch(`${process.env.E2E_API_URL}/api/pokemon-hub/sessions`)).json()).sessions.find(session => session.sessionId === oldSessionId)?.closedAt, { timeout: 40_000 }).toBeTruthy()
   await openWorkspace(page)
   await selectSave(page, 0, 'stress-held-reload')
   await closeWorkspace(page)
@@ -388,6 +398,8 @@ test('duas abas reais disputam o mesmo Save e a segunda abre depois do close', a
     await panel.getByRole('button', { name: 'Perfil de Save' }).click()
     const rom = panel.getByRole('combobox', { name: 'ROM com perfil' })
     await rom.click()
+    await rom.press('Home')
+    await rom.press('ArrowDown')
     await rom.press('Enter')
     const profile = panel.getByRole('combobox', { name: 'Perfil de Save' })
     await profile.click()

@@ -15,7 +15,7 @@ test('adopts every adapter slot from persisted save bytes into the snapshot coor
   }
   const coordinator = { adopt: async input => { calls.push(input); return { sourceKey: input.sourceKey } } }
 
-  const result = await adoptPokemonHubSave({ coordinator, profileId: 'profile-may', gameId: 'emerald', saved: { bytes: Buffer.from([7]), revision: 4 }, adapter, layout: { id: 'emerald' } })
+  const result = await adoptPokemonHubSave({ coordinator, sourceProfileId: 'profile-may', gameId: 'emerald', saved: { bytes: Buffer.from([7]), revision: 4 }, adapter, layout: { id: 'emerald' } })
 
   assert.deepEqual(result, { sourceKey: 'save:profile-may:emerald' })
   assert.equal(calls[0].sourceRevision, 4)
@@ -30,7 +30,7 @@ test('persists the inspected transfer capability with its adopted save source', 
     inspect: () => ({ transferCapabilities: { game: 'pokemon-emerald', ordinaryTradeReady: true, nationalDexUnlocked: true, networkMachineRestored: null } }),
     readAllSlots: () => [],
   }
-  await adoptPokemonHubSave({ coordinator: { adopt: async input => { calls.push(input) } }, profileId: 'profile-may', gameId: 'emerald', saved: { bytes: Buffer.from([7]), revision: 4 }, adapter, layout: { id: 'emerald' } })
+  await adoptPokemonHubSave({ coordinator: { adopt: async input => { calls.push(input) } }, sourceProfileId: 'profile-may', gameId: 'emerald', saved: { bytes: Buffer.from([7]), revision: 4 }, adapter, layout: { id: 'emerald' } })
 
   assert.deepEqual(calls[0].transferCapability, { game: 'pokemon-emerald', ordinaryTradeReady: true, nationalDexUnlocked: true, networkMachineRestored: null })
 })

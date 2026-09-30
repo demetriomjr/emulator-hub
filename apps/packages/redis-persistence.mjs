@@ -48,7 +48,7 @@ export function createRedisPersistence({ url, namespace = defaultNamespace, clie
     async keys(prefix) {
       await connect()
       const keys = []
-      for await (const batch of redis.scanIterator({ MATCH: `${key(prefix)}*` })) {
+      for await (const batch of redis.scanIterator({ MATCH: `${key(prefix)}*`, COUNT: 1000 })) {
         for (const found of Array.isArray(batch) ? batch : [batch]) keys.push(found.slice(namespace.length + 1))
       }
       return keys
@@ -80,6 +80,10 @@ export function createMemoryRedisPersistence({ namespace = defaultNamespace } = 
         return 'OK'
       },
       async delete(name) { return values.delete(fullKey(name)) ? 1 : 0 },
+      async addToSet(name, member) { const key = fullKey(name); const set = values.get(key) ?? new Set(); set.add(member); values.set(key, set) },
+      async removeFromSet(name, member) { const set = values.get(fullKey(name)); return set?.delete(member) ? 1 : 0 },
+      async removeFromSortedSet(name, member) { return sortedSets.get(fullKey(name))?.delete(member) ? 1 : 0 },
+      async addToSortedSet(name, member, score) { const key = fullKey(name); const set = sortedSets.get(key) ?? new Map(); set.set(member, score); sortedSets.set(key, set) },
     }))
     evalTail = run.catch(() => {})
     return run

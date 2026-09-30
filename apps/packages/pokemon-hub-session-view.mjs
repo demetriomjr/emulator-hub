@@ -33,13 +33,12 @@ export function visiblePokemonHubPanes(canonicalPanes, visiblePaneCount) {
     : { kind: 'game', gameId: pane.profile.gameId, profileId: pane.profile.profileId })
 }
 
-export function createHubSessionSourceSnapshot({ profileId, profile }) {
+export function createHubSessionSourceSnapshot({ profile }) {
   const entries = profile.grid?.entries ?? {}
   const highestOccupiedSlot = Math.max(-1, ...Object.keys(entries).map(Number))
   const count = Math.max(60, highestOccupiedSlot + 1)
   return {
     kind: 'hub',
-    profileId,
     hubProfileId: profile.hubProfileId,
     sourceKey: `hub:${profile.hubProfileId}`,
     placements: Array.from({ length: count }, (_, slot) => ({ location: { kind: 'hub', hubProfileId: profile.hubProfileId, slot }, pokemonInstanceId: entries[String(slot)]?.pokemonInstanceId ?? null })),

@@ -44,7 +44,7 @@ test('loads a selected pane through the server-owned pane command', async () => 
   const packageSource = await readFile(packageFile, 'utf8')
 
   assert.match(packageSource, /loadPokemonHubSessionPane/)
-  assert.match(packageSource, /session\.requestGate\.run\(\(\) => loadPokemonHubSessionPane\(session\.profileId, session\.sessionId, pane, incomingSource, signal\)\)/)
+  assert.match(packageSource, /session\.requestGate\.run\(\(\) => loadPokemonHubSessionPane\(session\.sessionId, pane, incomingSource, signal\)\)/)
   assert.match(packageSource, /if \(incomingSource\) \{[\s\S]*loadPokemonHubSessionPane/)
 })
 

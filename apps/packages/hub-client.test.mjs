@@ -8,9 +8,9 @@ test('posts a direct save item transfer through the loaded Hub session', async (
   const calls = []
   globalThis.fetch = async (url, options) => { calls.push({ url, options }); return { ok: true, status: 200, json: async () => ({ itemKey: 'potion', quantity: 2 }) } }
   const request = { source: { gameId: 'ruby', profileId: 'may', expectedSaveRevision: 3 }, destination: { gameId: 'sapphire', profileId: 'brendan', expectedSaveRevision: 5 }, area: 'items', fromSlot: 0, quantity: 2 }
-  try { assert.deepEqual(await transferPokemonSaveItems('owner', 'session-a', request), { itemKey: 'potion', quantity: 2 }) }
+  try { assert.deepEqual(await transferPokemonSaveItems('session-a', request), { itemKey: 'potion', quantity: 2 }) }
   finally { globalThis.fetch = originalFetch }
-  assert.deepEqual(calls, [{ url: '/api/profiles/owner/pokemon-hub/sessions/session-a/items/transfer', options: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request) } }])
+  assert.deepEqual(calls, [{ url: '/api/pokemon-hub/sessions/session-a/items/transfer', options: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request) } }])
 })
 
 test('posts a session-scoped item reorder with its save revision', async () => {
@@ -18,9 +18,9 @@ test('posts a session-scoped item reorder with its save revision', async () => {
   const calls = []
   globalThis.fetch = async (url, options) => { calls.push({ url, options }); return { ok: true, status: 200, json: async () => ({ changed: true, itemInventory: { status: 'ready', saveRevision: 8 } }) } }
   try {
-    assert.deepEqual(await reorderPokemonSaveItems('owner', 'session-a', { gameId: 'emerald', sourceProfileId: 'may', area: 'items', fromSlot: 0, toSlot: 2, expectedSaveRevision: 7 }), { changed: true, itemInventory: { status: 'ready', saveRevision: 8 } })
+    assert.deepEqual(await reorderPokemonSaveItems('session-a', { gameId: 'emerald', sourceProfileId: 'may', area: 'items', fromSlot: 0, toSlot: 2, expectedSaveRevision: 7 }), { changed: true, itemInventory: { status: 'ready', saveRevision: 8 } })
   } finally { globalThis.fetch = originalFetch }
-  assert.deepEqual(calls, [{ url: '/api/profiles/owner/pokemon-hub/sessions/session-a/items/reorder', options: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameId: 'emerald', sourceProfileId: 'may', area: 'items', fromSlot: 0, toSlot: 2, expectedSaveRevision: 7 }) } }])
+  assert.deepEqual(calls, [{ url: '/api/pokemon-hub/sessions/session-a/items/reorder', options: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameId: 'emerald', sourceProfileId: 'may', area: 'items', fromSlot: 0, toSlot: 2, expectedSaveRevision: 7 }) } }])
 })
 
 test('passes a pane-load deadline through each request that opens or loads a source', async () => {
@@ -33,8 +33,8 @@ test('passes a pane-load deadline through each request that opens or loads a sou
   const signal = AbortSignal.timeout(300_000)
   try {
     await openPokemonHubSession('owner', signal)
-    await getSaveProfileLayout('emerald', 'may', 'owner', signal)
-    await loadPokemonHubSessionPane('owner', 'session', 0, { kind: 'game', gameId: 'emerald', profileId: 'may' }, signal)
+    await getSaveProfileLayout('emerald', 'may', signal)
+    await loadPokemonHubSessionPane('session', 0, { kind: 'game', gameId: 'emerald', profileId: 'may' }, signal)
   } finally { globalThis.fetch = originalFetch }
   assert.deepEqual(calls, [signal, signal, signal])
 })
@@ -139,11 +139,11 @@ test('sends a canonical session snapshot with an idempotency key and treats an e
   }
   const snapshot = { revision: 2, panes: [null, null, null] }
   try {
-    assert.equal(await syncPokemonHubSessionSnapshot('profile-may', 'session-a', snapshot, 'snapshot-3'), null)
+    assert.equal(await syncPokemonHubSessionSnapshot('session-a', snapshot, 'snapshot-3'), null)
   } finally { globalThis.fetch = originalFetch }
 
   assert.deepEqual(calls, [{
-    url: '/api/profiles/profile-may/pokemon-hub/sessions/session-a/snapshots',
+    url: '/api/pokemon-hub/sessions/session-a/snapshots',
     options: { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'snapshot-3' }, body: JSON.stringify(snapshot) },
   }])
 })
@@ -152,7 +152,7 @@ test('returns the raw canonical correction only for a rejected session snapshot'
   const originalFetch = globalThis.fetch
   globalThis.fetch = async () => ({ ok: false, status: 409, json: async () => ({ revision: 4, panes: [null, null, null] }) })
   try {
-    assert.deepEqual(await syncPokemonHubSessionSnapshot('profile-may', 'session-a', { revision: 3, panes: [null, null, null] }, 'snapshot-4'), { revision: 4, panes: [null, null, null] })
+    assert.deepEqual(await syncPokemonHubSessionSnapshot('session-a', { revision: 3, panes: [null, null, null] }, 'snapshot-4'), { revision: 4, panes: [null, null, null] })
   } finally { globalThis.fetch = originalFetch }
 })
 
@@ -162,11 +162,11 @@ test('closes a Pokemon Hub session with the latest complete snapshot', async () 
   globalThis.fetch = async (url, options) => { calls.push({ url, options }); return { ok: true, status: 200, text: async () => '' } }
   const snapshot = { revision: 5, panes: [null, null, null] }
   try {
-    assert.equal(await closePokemonHubSession('profile-may', 'session-a', snapshot, 'close-5'), null)
+    assert.equal(await closePokemonHubSession('session-a', snapshot, 'close-5'), null)
   } finally { globalThis.fetch = originalFetch }
 
   assert.deepEqual(calls, [{
-    url: '/api/profiles/profile-may/pokemon-hub/sessions/session-a/close',
+    url: '/api/pokemon-hub/sessions/session-a/close',
     options: { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'close-5' }, body: JSON.stringify(snapshot) },
   }])
 })

@@ -12,11 +12,11 @@ export function createPokemonItemReorderService({ sessions, gameSaveLeases, save
 
   return { reorder: reorderRequest, transfer: transferRequest }
 
-  async function transferRequest({ profileId, sessionId, source, destination, area, fromSlot, toSlot, quantity } = {}) {
+  async function transferRequest({ sessionId, source, destination, area, fromSlot, toSlot, quantity } = {}) {
     const validIdentity = value => typeof value?.gameId === 'string' && value.gameId.length > 0
       && typeof value.profileId === 'string' && value.profileId.length > 0
       && Number.isSafeInteger(value.expectedSaveRevision) && value.expectedSaveRevision > 0
-    if (typeof profileId !== 'string' || !profileId || typeof sessionId !== 'string' || !sessionId
+    if (typeof sessionId !== 'string' || !sessionId
       || !validIdentity(source) || !validIdentity(destination) || !Number.isInteger(fromSlot) || fromSlot < 0
       || toSlot !== undefined && (!Number.isInteger(toSlot) || toSlot < 0)
       || !Number.isSafeInteger(quantity) || quantity < 1 || typeof area !== 'string'
@@ -25,15 +25,15 @@ export function createPokemonItemReorderService({ sessions, gameSaveLeases, save
     }
     const identities = [source, destination]
     const sourceKeys = identities.map(item => `save:${item.profileId}:${item.gameId}`)
-    return sessions.withLoadedSources({ profileId, sessionId, sourceKeys, run: async () => {
-      const targets = await Promise.all(sourceKeys.map(sourceKey => resolveSaveSource({ profileId, sourceKey })))
+    return sessions.withLoadedSources({ sessionId, sourceKeys, run: async (_sources, assertActive = async () => {}) => {
+      const targets = await Promise.all(sourceKeys.map(sourceKey => resolveSaveSource({ sourceKey })))
       for (let index = 0; index < 2; index++) {
         if (targets[index]?.sourceProfileId !== identities[index].profileId || targets[index]?.gameId !== identities[index].gameId
           || !['pokemon-ruby', 'pokemon-sapphire', 'pokemon-emerald'].includes(targets[index]?.layout?.pokemonSaveTitle)
           || typeof targets[index].adapter?.inspect !== 'function') throw reorderError('SAVE_ITEM_SOURCE_INVALID', 'The item save source is invalid.')
       }
       const leases = identities.map(item => ({ profileId: item.profileId, gameId: item.gameId, workspaceId: sessionId }))
-      const assertLeases = async () => { for (const lease of leases) await gameSaveLeases.assertHub(lease) }
+      const assertLeases = async () => { await assertActive(); for (const lease of leases) await gameSaveLeases.assertHub(lease) }
       await assertLeases()
       const originals = await Promise.all(identities.map(item => saveStore.get(item.profileId, item.gameId)))
       if (originals.some((saved, index) => !saved || saved.revision !== identities[index].expectedSaveRevision)) {
@@ -50,7 +50,7 @@ export function createPokemonItemReorderService({ sessions, gameSaveLeases, save
       transferItems(originals[0].bytes, titles[0], originals[1].bytes, titles[1], move)
       const flushes = []
       for (const sourceKey of sourceKeys) {
-        const flushed = await saveFlush.flushSource({ profileId, sourceKey })
+        const flushed = await saveFlush.flushSource({ sourceKey })
         if (flushed.status === 'failed') throw reorderError('SAVE_FLUSH_FAILED', 'The Pokémon save could not be flushed before item transfer.')
         flushes.push(flushed)
       }
@@ -65,8 +65,8 @@ export function createPokemonItemReorderService({ sessions, gameSaveLeases, save
         bytes: index === 0 ? result.sourceSaveBytes : result.destinationSaveBytes,
         expectedRevision: current[index].revision, fenceGeneration: current[index].fenceGeneration ?? 0 })), { beforeCommit: assertLeases })
       for (let index = 0; index < 2; index++) {
-        const plan = await snapshotCoordinator.getSaveFlushPlan({ profileId, sourceKey: sourceKeys[index] })
-        if (!plan.source.needsSaveFlush) await snapshotCoordinator.markSaveFlushed({ profileId, sourceKey: sourceKeys[index], sourceRevision: plan.source.sourceRevision, saveRevision: saved[index].revision })
+        const plan = await snapshotCoordinator.getSaveFlushPlan({ sourceKey: sourceKeys[index] })
+        if (!plan.source.needsSaveFlush) await snapshotCoordinator.markSaveFlushed({ sourceKey: sourceKeys[index], sourceRevision: plan.source.sourceRevision, saveRevision: saved[index].revision })
         try { await snapshotStore?.delete(identities[index].profileId, identities[index].gameId, { kind: 'cloud-recovery' }) }
         catch (error) { onWarning('[Pokemon Hub] item transfer cloud recovery cleanup failed', { code: error.code ?? null, gameId: identities[index].gameId }) }
       }
@@ -76,14 +76,14 @@ export function createPokemonItemReorderService({ sessions, gameSaveLeases, save
     } })
   }
 
-  async function reorderRequest({ profileId, sessionId, gameId, sourceProfileId, area, fromSlot, toSlot, expectedSaveRevision } = {}) {
-    if (![profileId, sessionId, gameId, sourceProfileId].every(value => typeof value === 'string' && value.length > 0)
+  async function reorderRequest({ sessionId, gameId, sourceProfileId, area, fromSlot, toSlot, expectedSaveRevision } = {}) {
+    if (![sessionId, gameId, sourceProfileId].every(value => typeof value === 'string' && value.length > 0)
       || !Number.isSafeInteger(expectedSaveRevision) || expectedSaveRevision < 1) {
       throw reorderError('SAVE_ITEM_REQUEST_INVALID', 'The item reorder request is invalid.')
     }
     const sourceKey = `save:${sourceProfileId}:${gameId}`
-    return sessions.withLoadedSource({ profileId, sessionId, sourceKey, run: async () => {
-      const target = await resolveSaveSource({ profileId, sourceKey })
+    return sessions.withLoadedSource({ sessionId, sourceKey, run: async (_source, assertActive = async () => {}) => {
+      const target = await resolveSaveSource({ sourceKey })
       if (target?.sourceProfileId !== sourceProfileId || target.gameId !== gameId || !target.layout?.pokemonSaveTitle) {
         throw reorderError('SAVE_ITEM_SOURCE_INVALID', 'The item save source is invalid.')
       }
@@ -99,7 +99,7 @@ export function createPokemonItemReorderService({ sessions, gameSaveLeases, save
         itemInventory: { status: 'ready', saveRevision: saved.revision, ...readInventory(saved.bytes, title) } })
       if (!preview.changed) return projection(original, preview)
 
-      const flushed = await saveFlush.flushSource({ profileId, sourceKey })
+      const flushed = await saveFlush.flushSource({ sourceKey })
       if (flushed.status === 'failed') throw reorderError('SAVE_FLUSH_FAILED', 'The Pokémon save could not be flushed before item reordering.')
       await gameSaveLeases.assertHub(lease)
       const current = await saveStore.get(sourceProfileId, gameId)
@@ -113,10 +113,10 @@ export function createPokemonItemReorderService({ sessions, gameSaveLeases, save
       const saved = await saveStore.put(sourceProfileId, gameId, candidate.saveBytes, current.revision, {
         fenceGeneration: current.fenceGeneration ?? 0,
         invalidateRuntimeStates: true,
-        beforeCommit: () => gameSaveLeases.assertHub(lease),
+        beforeCommit: async () => { await assertActive(); await gameSaveLeases.assertHub(lease) },
       })
-      const plan = await snapshotCoordinator.getSaveFlushPlan({ profileId, sourceKey })
-      if (!plan.source.needsSaveFlush) await snapshotCoordinator.markSaveFlushed({ profileId, sourceKey, sourceRevision: plan.source.sourceRevision, saveRevision: saved.revision })
+      const plan = await snapshotCoordinator.getSaveFlushPlan({ sourceKey })
+      if (!plan.source.needsSaveFlush) await snapshotCoordinator.markSaveFlushed({ sourceKey, sourceRevision: plan.source.sourceRevision, saveRevision: saved.revision })
       try { await snapshotStore?.delete(sourceProfileId, gameId, { kind: 'cloud-recovery' }) }
       catch (error) { onWarning('[Pokemon Hub] item reorder cloud recovery cleanup failed', { code: error.code ?? null, profileId: sourceProfileId, gameId }) }
       return { changed: true, area: candidate.area, fromSlot: candidate.fromSlot, toSlot: candidate.toSlot,

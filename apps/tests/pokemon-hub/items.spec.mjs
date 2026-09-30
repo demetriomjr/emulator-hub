@@ -602,8 +602,8 @@ test('Hub-to-Hub drops use empty slots, merge equal items and preserve gaps afte
 
 test('Hub-to-save never exceeds the destination stack, even with a forged quantity', async ({ page }) => {
   const hub = await createHubProfile('Limite da pilha')
-  await openWorkspace(page)
   const opening = page.waitForResponse(response => /\/pokemon-hub\/sessions$/.test(new URL(response.url()).pathname) && response.status() === 201)
+  await openWorkspace(page)
   await selectItemSave(page, 0, 'ruby-hub-stack-source')
   const { sessionId } = await (await opening).json()
   await addPane(page)
@@ -621,7 +621,7 @@ test('Hub-to-save never exceeds the destination stack, even with a forged quanti
 
   const sourceBefore = (await readHubProfile(hub.hubProfileId)).profile.itemInventory
   const destinationBefore = await readItemSave('emerald-hub-nearfull')
-  const url = `${process.env.E2E_API_URL}/api/profiles/${itemProfiles['ruby-hub-stack-source'].profileId}/pokemon-hub/sessions/${sessionId}/items/transfer`
+  const url = `${process.env.E2E_API_URL}/api/pokemon-hub/sessions/${sessionId}/items/transfer`
   const payload = {
     source: { hubProfileId: hub.hubProfileId, expectedItemRevision: sourceBefore.revision },
     destination: { gameId: itemProfiles['emerald-hub-nearfull'].gameId, profileId: itemProfiles['emerald-hub-nearfull'].profileId, expectedSaveRevision: destinationBefore.revision },
@@ -653,8 +653,8 @@ test('Hub-to-save never exceeds the destination stack, even with a forged quanti
 
 test('Hub-to-save fills the final distinct slot, rejects a new type, and still merges an existing stack', async ({ page }) => {
   const hub = await createHubProfile('Limite de tipos')
-  await openWorkspace(page)
   const opening = page.waitForResponse(response => /\/pokemon-hub\/sessions$/.test(new URL(response.url()).pathname) && response.status() === 201)
+  await openWorkspace(page)
   await selectItemSave(page, 0, 'ruby-hub-capacity-source')
   const { sessionId } = await (await opening).json()
   await addPane(page)
@@ -680,7 +680,7 @@ test('Hub-to-save fills the final distinct slot, rejects a new type, and still m
   const hubBefore = (await readHubProfile(hub.hubProfileId)).profile.itemInventory
   await drag(page, hubItemSlot(page, 2, hub.name, 1), itemSlot(page, 1, 'Itens', 0))
   await expect(pane(page, 1).getByRole('dialog', { name: /Transferir/ })).toHaveCount(0)
-  const forged = await fetch(`${process.env.E2E_API_URL}/api/profiles/${itemProfiles['ruby-hub-capacity-source'].profileId}/pokemon-hub/sessions/${sessionId}/items/transfer`, {
+  const forged = await fetch(`${process.env.E2E_API_URL}/api/pokemon-hub/sessions/${sessionId}/items/transfer`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
       source: { hubProfileId: hub.hubProfileId, expectedItemRevision: hubBefore.revision },
       destination: { gameId: itemProfiles['ruby-hub-items-19'].gameId, profileId: itemProfiles['ruby-hub-items-19'].profileId, expectedSaveRevision: before.revision },
@@ -703,8 +703,8 @@ test('Hub-to-save fills the final distinct slot, rejects a new type, and still m
 test('parallel and replayed Hub transfers cannot credit the destination twice', async ({ page }) => {
   const first = await createHubProfile('Origem concorrente')
   const second = await createHubProfile('Destino concorrente')
-  await openWorkspace(page)
   const opening = page.waitForResponse(response => /\/pokemon-hub\/sessions$/.test(new URL(response.url()).pathname) && response.status() === 201)
+  await openWorkspace(page)
   await selectItemSave(page, 0, 'sapphire-hub-concurrent-source')
   const { sessionId } = await (await opening).json()
   await addPane(page)
@@ -719,7 +719,7 @@ test('parallel and replayed Hub transfers cannot credit the destination twice', 
   await expect.poll(async () => (await readHubProfile(first.hubProfileId)).profile.itemInventory.slots[0]?.quantity).toBe(10)
   const source = (await readHubProfile(first.hubProfileId)).profile.itemInventory
   const destination = (await readHubProfile(second.hubProfileId)).profile.itemInventory
-  const url = `${process.env.E2E_API_URL}/api/profiles/${itemProfiles['sapphire-hub-concurrent-source'].profileId}/pokemon-hub/sessions/${sessionId}/items/transfer`
+  const url = `${process.env.E2E_API_URL}/api/pokemon-hub/sessions/${sessionId}/items/transfer`
   const payload = { source: { hubProfileId: first.hubProfileId, expectedItemRevision: source.revision },
     destination: { hubProfileId: second.hubProfileId, expectedItemRevision: destination.revision }, fromSlot: 0, toSlot: 0, quantity: 7 }
   const post = () => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) })

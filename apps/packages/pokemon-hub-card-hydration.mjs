@@ -15,7 +15,7 @@ export function projectPokemonHubDetailSource({ source, records, title = null, p
     seen.add(id)
     try {
       const record = records.get(id)
-      if (!record || record.profileId !== source.profileId || record.pokemonInstanceId !== id) throw detailError('POKEMON_DETAIL_RECORD_MISSING')
+      if (!record || record.pokemonInstanceId !== id) throw detailError('POKEMON_DETAIL_RECORD_MISSING')
       if (record.placement?.sourceKey !== source.sourceKey || pokemonHubLocationKey(record.placement.location) !== pokemonHubLocationKey(placement.location)) throw detailError('POKEMON_DETAIL_PLACEMENT_MISMATCH')
       const representation = record.representations?.find(candidate => candidate.adapter === 'gen3-gba-v1' && ['pc-record', 'party-record'].includes(candidate.kind))
       if (!representation || typeof representation.bytesBase64 !== 'string') throw detailError('POKEMON_DETAIL_REPRESENTATION_MISSING')

@@ -6,21 +6,21 @@ export function createPokemonHubItemTransferService({ sessions, gameSaveLeases, 
     || !saveFlush?.flushSource || !hubProfileStore?.list || !resolveSaveSource) throw new TypeError('Hub item transfer dependencies are unavailable.')
   return { transfer, reorder }
 
-  async function transfer({ profileId, sessionId, source, destination, area, fromSlot, toSlot, quantity } = {}) {
-    if (!profileId || !sessionId || !validIdentity(source) || !validIdentity(destination)
+  async function transfer({ sessionId, source, destination, area, fromSlot, toSlot, quantity } = {}) {
+    if (!sessionId || !validIdentity(source) || !validIdentity(destination)
       || !Number.isSafeInteger(fromSlot) || fromSlot < 0 || !Number.isSafeInteger(quantity) || quantity < 1
       || toSlot !== undefined && (!Number.isSafeInteger(toSlot) || toSlot < 0)
       || sourceKey(source) === sourceKey(destination) || !isHub(source) && !isHub(destination)
       || (!isHub(source) || !isHub(destination)) && typeof area !== 'string') throw invalid('Hub item transfer request is invalid.')
     const identities = [source, destination]
     const keys = identities.map(sourceKey)
-    return sessions.withLoadedSources({ profileId, sessionId, sourceKeys: keys, run: async () => {
+    return sessions.withLoadedSources({ sessionId, sourceKeys: keys, run: async (_sources, assertActive = async () => {}) => {
       const profiles = await hubProfileStore.list()
       for (const identity of identities.filter(isHub)) {
         const profile = profiles.find(profile => profile.hubProfileId === identity.hubProfileId)
-        if (!profile || profile.ownerProfileId !== profileId) throw invalid('Hub item profile is unavailable in this workspace.')
+        if (!profile) throw invalid('Hub item profile is unavailable in this workspace.')
       }
-      const targets = await Promise.all(identities.map(identity => isHub(identity) ? null : resolveSaveSource({ profileId, sourceKey: sourceKey(identity) })))
+      const targets = await Promise.all(identities.map(identity => isHub(identity) ? null : resolveSaveSource({ sourceKey: sourceKey(identity) })))
       for (let index = 0; index < 2; index++) {
         if (isHub(identities[index])) continue
         const target = targets[index]
@@ -29,22 +29,24 @@ export function createPokemonHubItemTransferService({ sessions, gameSaveLeases, 
       }
       const leases = identities.filter(identity => !isHub(identity)).map(identity => ({ profileId: identity.profileId, gameId: identity.gameId, workspaceId: sessionId }))
       const assertLeases = async () => {
+        await assertActive()
         for (const lease of leases) await gameSaveLeases.assertHub(lease)
         const currentProfiles = await hubProfileStore.list()
         for (const identity of identities.filter(isHub)) {
-          if (!currentProfiles.some(profile => profile.hubProfileId === identity.hubProfileId && profile.ownerProfileId === profileId)) {
+          if (!currentProfiles.some(profile => profile.hubProfileId === identity.hubProfileId)) {
             throw invalid('Hub item profile is unavailable in this workspace.')
           }
         }
       }
       await assertLeases()
-      const originals = await Promise.all(identities.map(identity => readSource(profileId, identity)))
+      const storageIdentity = identity => isHub(identity) ? identity.hubProfileId : identity.profileId
+      const originals = await Promise.all(identities.map(identity => readSource(storageIdentity(identity), identity)))
       for (let index = 0; index < 2; index++) assertRevision(identities[index], originals[index])
       createCandidates(originals, targets, { area, fromSlot, toSlot, quantity })
-      const flushes = await Promise.all(keys.map((key, index) => isHub(identities[index]) ? { status: 'clean' } : saveFlush.flushSource({ profileId, sourceKey: key })))
+      const flushes = await Promise.all(keys.map((key, index) => isHub(identities[index]) ? { status: 'clean' } : saveFlush.flushSource({ sourceKey: key })))
       if (flushes.some(flush => flush.status === 'failed')) throw invalid('The Pokémon save could not be flushed before item transfer.')
       await assertLeases()
-      const current = await Promise.all(identities.map(identity => readSource(profileId, identity)))
+      const current = await Promise.all(identities.map(identity => readSource(storageIdentity(identity), identity)))
       for (let index = 0; index < 2; index++) {
         if (isHub(identities[index])) assertRevision(identities[index], current[index])
         else if (!current[index].saved || current[index].saved.revision !== originals[index].saved.revision + (flushes[index].status === 'flushed' ? 1 : 0)) throw conflict()
@@ -52,12 +54,12 @@ export function createPokemonHubItemTransferService({ sessions, gameSaveLeases, 
       const result = createCandidates(current, targets, { area, fromSlot, toSlot, quantity })
       for (let index = 0; index < 2; index++) {
         if (!isHub(identities[index]) || current[index].saved) continue
-        try { await saveStore.put(profileId, hubItemLedgerGameId(identities[index].hubProfileId), encodeHubItemLedger(emptyHubItemLedger()), null) }
+        try { await saveStore.put(storageIdentity(identities[index]), hubItemLedgerGameId(identities[index].hubProfileId), encodeHubItemLedger(emptyHubItemLedger()), null) }
         catch (error) { if (error.code !== 'SAVE_REVISION_CONFLICT') throw error; throw conflict() }
-        current[index] = await readSource(profileId, identities[index])
+        current[index] = await readSource(storageIdentity(identities[index]), identities[index])
       }
       const saved = await saveStore.putPair(identities.map((identity, index) => ({
-        profileId: isHub(identity) ? profileId : identity.profileId,
+        profileId: storageIdentity(identity),
         gameId: isHub(identity) ? hubItemLedgerGameId(identity.hubProfileId) : identity.gameId,
         bytes: index === 0 ? result.sourceBytes : result.destinationBytes,
         expectedRevision: current[index].saved.revision,
@@ -65,8 +67,8 @@ export function createPokemonHubItemTransferService({ sessions, gameSaveLeases, 
       })), { beforeCommit: assertLeases })
       for (let index = 0; index < 2; index++) {
         if (isHub(identities[index])) continue
-        const plan = await snapshotCoordinator?.getSaveFlushPlan({ profileId, sourceKey: keys[index] })
-        if (plan && !plan.source.needsSaveFlush) await snapshotCoordinator.markSaveFlushed({ profileId, sourceKey: keys[index], sourceRevision: plan.source.sourceRevision, saveRevision: saved[index].revision })
+        const plan = await snapshotCoordinator?.getSaveFlushPlan({ sourceKey: keys[index] })
+        if (plan && !plan.source.needsSaveFlush) await snapshotCoordinator.markSaveFlushed({ sourceKey: keys[index], sourceRevision: plan.source.sourceRevision, saveRevision: saved[index].revision })
         try { await snapshotStore?.delete(identities[index].profileId, identities[index].gameId, { kind: 'cloud-recovery' }) }
         catch (error) { onWarning('[Pokemon Hub] item transfer cloud recovery cleanup failed', { code: error.code ?? null }) }
       }
@@ -78,17 +80,18 @@ export function createPokemonHubItemTransferService({ sessions, gameSaveLeases, 
     } })
   }
 
-  async function reorder({ profileId, sessionId, hubProfileId, fromSlot, toSlot, expectedItemRevision } = {}) {
-    if (!profileId || !sessionId || !hubProfileId || !Number.isSafeInteger(expectedItemRevision) || expectedItemRevision < 1
+  async function reorder({ sessionId, hubProfileId, fromSlot, toSlot, expectedItemRevision } = {}) {
+    if (!sessionId || !hubProfileId || !Number.isSafeInteger(expectedItemRevision) || expectedItemRevision < 1
       || !Number.isSafeInteger(fromSlot) || !Number.isSafeInteger(toSlot) || fromSlot < 0 || toSlot < 0) throw invalid('Hub item reorder request is invalid.')
-    return sessions.withLoadedSource({ profileId, sessionId, sourceKey: `hub:${hubProfileId}`, run: async () => {
+    return sessions.withLoadedSource({ sessionId, sourceKey: `hub:${hubProfileId}`, run: async (_source, assertActive = async () => {}) => {
       const profile = (await hubProfileStore.list()).find(value => value.hubProfileId === hubProfileId)
-      if (!profile || profile.ownerProfileId !== profileId) throw invalid('Hub item profile is unavailable in this workspace.')
-      const current = await saveStore.get(profileId, hubItemLedgerGameId(hubProfileId))
+      if (!profile) throw invalid('Hub item profile is unavailable in this workspace.')
+      const storageProfileId = hubProfileId
+      const current = await saveStore.get(storageProfileId, hubItemLedgerGameId(hubProfileId))
       if (!current || current.revision !== expectedItemRevision) throw conflict()
       const moved = moveHubItem(decodeHubItemLedger(current.bytes), { fromSlot, toSlot })
       if (fromSlot === toSlot) return { changed: false, hubItemInventory: { revision: current.revision, ...moved } }
-      const saved = await saveStore.put(profileId, hubItemLedgerGameId(hubProfileId), encodeHubItemLedger(moved), current.revision)
+      const saved = await saveStore.put(storageProfileId, hubItemLedgerGameId(hubProfileId), encodeHubItemLedger(moved), current.revision, { beforeCommit: assertActive })
       return { changed: true, hubItemInventory: { revision: saved.revision, ...moved } }
     } })
   }

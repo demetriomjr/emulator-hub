@@ -5,7 +5,8 @@ import { expect } from '@playwright/test'
 const api = process.env.E2E_API_URL
 const fixture = JSON.parse(await readFile(join(process.env.E2E_ARTIFACT_DIR, 'fixture.json'), 'utf8'))
 const selectedSavesByPage = new WeakMap()
-export function forgetSelectedSaves(page) { selectedSavesByPage.delete(page) }
+const selectedSaveNamesByPane = new WeakMap()
+export function forgetSelectedSaves(page) { selectedSavesByPage.delete(page); selectedSaveNamesByPane.delete(page) }
 export const gameId = fixture.gameId
 export const profiles = fixture.profiles
 export const itemGames = fixture.itemGames
@@ -13,8 +14,7 @@ export const itemProfiles = fixture.itemProfiles
 
 export async function readItemLayout(name, workspaceName = name) {
   const identity = itemProfiles[name]
-  const owner = itemProfiles[workspaceName]
-  const response = await fetch(`${api}/api/pokemon-hub/save-profiles/${identity.gameId}/${identity.profileId}/layout?workspaceProfileId=${owner.profileId}`)
+  const response = await fetch(`${api}/api/pokemon-hub/save-profiles/${identity.gameId}/${identity.profileId}/layout`)
   expect(response.status, await response.clone().text()).toBe(200)
   return response.json()
 }
@@ -76,8 +76,7 @@ export async function selectItemArea(page, index, label) {
 
 export async function readLayout(profileName, workspaceProfileName = profileName) {
   const profileId = profiles[profileName]
-  const owner = profiles[workspaceProfileName]
-  const response = await fetch(`${api}/api/pokemon-hub/save-profiles/${gameId}/${profileId}/layout?workspaceProfileId=${owner}`)
+  const response = await fetch(`${api}/api/pokemon-hub/save-profiles/${gameId}/${profileId}/layout`)
   expect(response.status, await response.clone().text()).toBe(200)
   return response.json()
 }
@@ -104,6 +103,7 @@ export async function readHubProfile(id) {
 
 export async function openWorkspace(page) {
   selectedSavesByPage.set(page, new Set())
+  selectedSaveNamesByPane.set(page, new Map())
   await page.goto('/')
   await page.getByRole('button', { name: 'Abrir Pokémon Hub' }).click()
   await expect(page.getByRole('dialog', { name: 'Pokémon Hub' })).toBeVisible()
@@ -118,19 +118,38 @@ export async function selectSave(page, index, profileName) {
   await panel.getByRole('button', { name: 'Perfil de Save' }).click()
   const rom = panel.getByRole('combobox', { name: 'ROM com perfil' })
   await rom.click()
-  await rom.press('Home')
-  await rom.press('ArrowDown')
+  const activeRom = activeDropdown(page).locator('.ant-select-item-option-active')
+  await expect(activeRom).toBeVisible()
+  for (let step = 0; step < 4; step += 1) {
+    const title = await activeRom.getAttribute('title')
+    if (title === 'Pokémon Emerald Version') break
+    await rom.press('ArrowDown')
+    await expect(activeRom).not.toHaveAttribute('title', title)
+  }
+  await expect(activeRom).toHaveAttribute('title', 'Pokémon Emerald Version')
   await rom.press('Enter')
   await expect(panel.getByRole('combobox', { name: 'Perfil de Save' })).toBeEnabled()
   const saveProfile = panel.getByRole('combobox', { name: 'Perfil de Save' })
   await saveProfile.click()
-  await saveProfile.press('Home')
   const selected = selectedSavesByPage.get(page) ?? new Set()
-  const ordinal = Object.keys(profiles).filter(name => !selected.has(name)).indexOf(profileName)
-  expect(ordinal).toBeGreaterThanOrEqual(0)
-  for (let index = 0; index < ordinal; index += 1) await saveProfile.press('ArrowDown')
+  const names = selectedSaveNamesByPane.get(page) ?? new Map()
+  // The virtualized selector retains its active option when reopened, and Home
+  // does not reset it. Navigate by the actual option, not an assumed ordinal.
+  const expectedTitle = new RegExp(`^#\\d+ ${escapeRegExp(profileName)}$`)
+  const activeOption = activeDropdown(page).locator('.ant-select-item-option-active')
+  await expect(activeOption).toBeVisible()
+  for (let step = 0; step < Object.keys(profiles).length; step += 1) {
+    const title = await activeOption.getAttribute('title')
+    if (expectedTitle.test(title)) break
+    await saveProfile.press('ArrowDown')
+    await expect(activeOption).not.toHaveAttribute('title', title)
+  }
+  await expect(activeOption).toHaveAttribute('title', expectedTitle)
   await saveProfile.press('Enter')
-  await expect(panel.getByText(new RegExp(`#\\d+ ${escapeRegExp(profileName)}`))).toBeVisible()
+  await expect(panel.getByTitle(new RegExp(`^#\\d+ ${escapeRegExp(profileName)}$`))).toBeVisible()
+  selected.delete(names.get(index))
+  names.set(index, profileName)
+  selectedSaveNamesByPane.set(page, names)
   selected.add(profileName)
   selectedSavesByPage.set(page, selected)
   await expect(boxSlot(page, index, 0)).toBeVisible()

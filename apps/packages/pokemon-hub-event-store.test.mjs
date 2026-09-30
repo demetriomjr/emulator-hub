@@ -6,7 +6,6 @@ import { createMemoryRedisPersistence } from './redis-persistence.mjs'
 
 function event(overrides = {}) {
   return {
-    profileId: 'profile-may',
     pokemonInstanceId: 'pokemon-alpha',
     operationId: 'snapshot-41',
     type: 'pokemon.placement-changed',
@@ -29,7 +28,6 @@ test('stores an immutable movement event outside the Pokemon document collection
   assert.deepEqual(created, {
     schemaVersion: 1,
     eventId: created.eventId,
-    profileId: 'profile-may',
     pokemonInstanceId: 'pokemon-alpha',
     operationId: 'snapshot-41',
     type: 'pokemon.placement-changed',
@@ -42,7 +40,7 @@ test('stores an immutable movement event outside the Pokemon document collection
     representationHashes: { source: 'a'.repeat(64), destination: 'b'.repeat(64) },
   })
   assert.equal(await persistence.get(`pokemon-hub:pokemon:profile-may:pokemon-alpha`), null)
-  assert.equal((await events.listForPokemon('profile-may', 'pokemon-alpha')).length, 1)
+  assert.equal((await events.listForPokemon('pokemon-alpha')).length, 1)
 })
 
 test('returns the original event when an accepted operation is retried', async () => {
@@ -51,7 +49,7 @@ test('returns the original event when an accepted operation is retried', async (
   const retried = await events.append(event({ occurredAt: '2026-09-18T12:00:00.000Z' }))
 
   assert.deepEqual(retried, first)
-  assert.deepEqual(await events.listForPokemon('profile-may', 'pokemon-alpha'), [first])
+  assert.deepEqual(await events.listForPokemon('pokemon-alpha'), [first])
 })
 
 test('rejects raw save representations and rich gameplay fields from event data', async () => {

@@ -31,20 +31,6 @@ export function createRedisPokemonHubProfileStore({ persistence }) {
         return copy(profiles[index])
       })
     },
-    bindOwner(hubProfileId, ownerProfileId) {
-      return enqueue(async () => {
-        const owner = normalizeOwnerProfileId(ownerProfileId)
-        const profiles = await readRedisProfiles(persistence)
-        const index = profiles.findIndex(profile => profile.hubProfileId === hubProfileId)
-        if (index === -1) throw profileError('POKEMON_HUB_PROFILE_NOT_FOUND', 'PokÃ©mon Hub profile was not found.')
-        const profile = profiles[index]
-        if (profile.ownerProfileId && profile.ownerProfileId !== owner) throw profileError('POKEMON_HUB_PROFILE_OWNER_CONFLICT', 'PokÃ©mon Hub profile is reserved by another backend profile.')
-        if (Object.values(profile.grid.entries).some(entry => typeof entry.pokemonInstanceId !== 'string')) throw profileError('POKEMON_HUB_PROFILE_LEGACY_ENTRIES', 'PokÃ©mon Hub profile contains entries without an authoritative record identity.')
-        profiles[index] = { ...profile, ownerProfileId: owner }
-        await writeRedisProfiles(persistence, profiles)
-        return copy(profiles[index])
-      })
-    },
     delete(hubProfileId, { discardOccupied = false } = {}) {
       return enqueue(async () => {
         const profiles = await readRedisProfiles(persistence)
@@ -87,11 +73,6 @@ function normalizeName(value) {
   return name
 }
 
-function normalizeOwnerProfileId(value) {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 128) throw profileError('POKEMON_HUB_PROFILE_INVALID', 'PokÃ©mon Hub backend profile is invalid.')
-  return value
-}
-
 function normalizeProfile(profile) {
   if (!profile || typeof profile !== 'object'
     || typeof profile.hubProfileId !== 'string' || !/^[0-9a-f-]{36}$/i.test(profile.hubProfileId)
@@ -100,8 +81,6 @@ function normalizeProfile(profile) {
     || !profile.grid || typeof profile.grid !== 'object') return null
 
   if (![1, 2, 3, 4, 5, 6].includes(profile.schemaVersion)) return null
-  if (profile.ownerProfileId !== undefined && (typeof profile.ownerProfileId !== 'string' || profile.ownerProfileId.length === 0 || profile.ownerProfileId.length > 128)) return null
-  const owner = profile.ownerProfileId ? { ownerProfileId: profile.ownerProfileId } : {}
 
   if (profile.schemaVersion >= 4) {
     const entries = normalizeEntries(profile.grid.entries)
@@ -113,7 +92,6 @@ function normalizeProfile(profile) {
       name: profile.name,
       createdAt: profile.createdAt,
       grid: { entries },
-      ...owner,
     }
   }
 
@@ -130,7 +108,6 @@ function normalizeProfile(profile) {
     grid: {
       entries: entriesFromSlots(profile.grid.slots),
     },
-    ...owner,
   }
 }
 

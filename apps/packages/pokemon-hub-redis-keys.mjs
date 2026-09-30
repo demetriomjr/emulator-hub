@@ -1,50 +1,25 @@
-const keyspacePrefix = 'pokemon-hub:v2'
-
+// Sources have their own identity; the fixed hash tag permits atomic cross-source writes.
+const prefix = 'pokemon-hub:v3:{pokemon-hub}'
+const key = (kind, ...parts) => prefix + ':' + kind + ':' + parts.map(part => encodePokemonHubRedisKeyPart(part, kind)).join(':')
 export const pokemonHubRedisKeys = Object.freeze({
-  session: (profileId, sessionId) => profileKey(profileId, 'session', sessionId, 'Session ID'),
-  sessionOperation: (profileId, sessionId, operationId) => profileKey(profileId, 'session-operation', sessionId, 'Session ID', operationId, 'Operation ID'),
-  sessionTerminal: (profileId, closeKey) => profileKey(profileId, 'session-terminal', closeKey, 'Close key'),
-  sessionOutbox: (profileId, outboxId) => profileKey(profileId, 'session-outbox', outboxId, 'Outbox ID'),
-  source: (profileId, sourceKey) => profileKey(profileId, 'source', sourceKey, 'Source key'),
-  sourceCloseClaim: (profileId, sourceKey) => profileKey(profileId, 'source-close-claim', sourceKey, 'Source key'),
-  record: (profileId, pokemonInstanceId) => profileKey(profileId, 'record', pokemonInstanceId, 'Pokemon instance ID'),
-  lease: (profileId, sourceKey) => profileKey(profileId, 'lease', sourceKey, 'Source key'),
-  workspaceLease: (profileId, workspaceId) => profileKey(profileId, 'workspace-lease', workspaceId, 'Workspace ID'),
-  snapshotSync: (profileId, workspaceId, idempotencyKey) => profileKey(profileId, 'snapshot-sync', workspaceId, 'Workspace ID', idempotencyKey, 'Idempotency key'),
-  event: (profileId, pokemonInstanceId, eventId) => profileKey(profileId, 'event', pokemonInstanceId, 'Pokemon instance ID', eventId, 'Event ID'),
-  eventPrefix: (profileId, pokemonInstanceId) => `${profileTag(profileId)}:event:${encodePokemonHubRedisKeyPart(pokemonInstanceId, 'Pokemon instance ID')}:`,
-  eventOutbox: (profileId, eventId) => profileKey(profileId, 'event-outbox', eventId, 'Event ID'),
-  migrationMarker: profileId => `${profileTag(profileId)}:migration-marker`,
-  expiringSessionIndex: () => `${keyspacePrefix}:expiring-session`,
-  expiringLeaseIndex: () => `${keyspacePrefix}:expiring-lease`,
+  session: sessionId => key('session', sessionId),
+  sessionOperation: (sessionId, operationId) => key('session-operation', sessionId, operationId),
+  sessionTerminal: (sessionId, closeKey) => key('session-terminal', sessionId, closeKey),
+  sessionHistory: sessionId => key('session-history', sessionId),
+  sessionHistoryPrefix: () => prefix + ':session-history:',
+  sessionHistoryIndex: () => prefix + ':session-history-index',
+  source: sourceKey => key('source', sourceKey),
+  record: pokemonInstanceId => key('record', pokemonInstanceId),
+  lease: sourceKey => key('lease', sourceKey),
+  workspaceLease: sessionId => key('workspace-lease', sessionId),
+  snapshotSync: (sessionId, operationId) => key('snapshot-sync', sessionId, operationId),
+  event: (pokemonInstanceId, eventId) => key('event', pokemonInstanceId, eventId),
+  eventPrefix: pokemonInstanceId => key('event', pokemonInstanceId) + ':',
+  expiringSessionIndex: () => prefix + ':expiring-session',
+  expiringLeaseIndex: () => prefix + ':expiring-lease',
 })
-
-export function profileHashTag(profileId) {
-  assertComponent(profileId, 'Profile ID')
-  return `{ph:${encodeURIComponent(profileId)}}`
-}
-
 export function encodePokemonHubRedisKeyPart(value, label = 'Key component') {
   if (typeof value === 'number' && Number.isFinite(value)) return encodeURIComponent(String(value))
-  assertComponent(value, label)
+  if (typeof value !== 'string' || value.length === 0) throw new TypeError(label + ' is required')
   return encodeURIComponent(value)
-}
-
-export function taggedProfileKey(profileId, kind, ...parts) {
-  assertComponent(kind, 'Key kind')
-  return [profileHashTag(profileId), encodePokemonHubRedisKeyPart(kind, 'Key kind'), ...parts.map(([value, label]) => encodePokemonHubRedisKeyPart(value, label))].join(':').replace(/^\{ph:/, `${keyspacePrefix}:{ph:`)
-}
-
-function profileKey(profileId, kind, firstValue, firstLabel, secondValue, secondLabel) {
-  const parts = [[firstValue, firstLabel]]
-  if (secondValue !== undefined) parts.push([secondValue, secondLabel])
-  return taggedProfileKey(profileId, kind, ...parts)
-}
-
-function profileTag(profileId) {
-  return `${keyspacePrefix}:${profileHashTag(profileId)}`
-}
-
-function assertComponent(value, label) {
-  if (typeof value !== 'string' || value.length === 0) throw new TypeError(`${label} is required`)
 }

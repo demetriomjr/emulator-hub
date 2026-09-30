@@ -131,8 +131,6 @@ button { font: inherit; }
 .pokemon-workspace { position: fixed; inset: 0; z-index: 20; display: grid; grid-template-rows: auto minmax(0, 1fr); color: #e8f5ef; background: radial-gradient(circle at 15% 0, #b4c0b8, transparent 44%), #9aa89f; }
 .pokemon-hub-error-toast.ant-notification-notice { border: 1px solid #a9555f; color: #e8f5ef; background: #10262a; }
 .pokemon-hub-error-toast .ant-notification-notice-message, .pokemon-hub-error-toast .ant-notification-notice-close { color: #e8f5ef; }
-.pokemon-workspace-stale { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; color: #e8f5ef; background: rgb(8 19 26 / 62%); cursor: wait; }
-.pokemon-workspace-stale span { padding: 12px 16px; border: 1px solid #62b88e; border-radius: 8px; background: #10262a; }
 .pokemon-workspace-pane-stale { position: absolute; inset: 0; z-index: 8; display: grid; place-items: center; color: #e8f5ef; background: rgb(8 19 26 / 62%); cursor: wait; }
 .pokemon-workspace-pane-stale span { padding: 12px 16px; border: 1px solid #62b88e; border-radius: 8px; background: #10262a; }
 .pokemon-workspace-header { display: flex; justify-content: end; align-items: center; min-height: 56px; padding: 10px 14px; border-bottom: 1px solid #398269; background: #10262af2; }

@@ -1010,8 +1010,8 @@ describe('hub backend HTTP contract', () => {
     await new Promise(resolve => setImmediate(resolve))
 
     assert.deepEqual(actions.map(action => action.type), ['save-flushed', 'lease-released', 'session-deleted'])
-    assert.deepEqual(actions[0].request, { profileId: 'profile-may', sourceKey: source.sourceKey })
-    assert.deepEqual(actions[1].request, { profileId: 'profile-may', sourceKey: source.sourceKey, workspaceId: 'expired-session', sourceSessionId: source.sourceSessionId, leaseToken: source.leaseToken })
+    assert.deepEqual(actions[0].request, { sourceKey: source.sourceKey })
+    assert.deepEqual(actions[1].request, { sourceKey: source.sourceKey, workspaceId: 'expired-session', sourceSessionId: source.sourceSessionId, leaseToken: source.leaseToken })
   })
 
   test('traces an accepted canonical session snapshot without save bytes', async () => {
@@ -1036,7 +1036,7 @@ describe('hub backend HTTP contract', () => {
     liveServers.add(server)
     const baseUrl = `http://127.0.0.1:${server.address().port}`
 
-    const response = await fetch(`${baseUrl}/api/profiles/profile-may/pokemon-hub/sessions/session-a/snapshots`, {
+    const response = await fetch(`${baseUrl}/api/pokemon-hub/sessions/session-a/snapshots`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'snapshot-7' },
       body: JSON.stringify({ revision: 0, panes: [null, null, null] }),
@@ -1045,8 +1045,8 @@ describe('hub backend HTTP contract', () => {
     assert.equal(response.status, 200)
     assert.equal(response.headers.get('content-length'), '0')
     assert.equal(await response.text(), '')
-    assert.deepEqual(requests.map(({ profileId, sessionId, idempotencyKey, snapshot }) => ({ profileId, sessionId, idempotencyKey, snapshot })), [{
-      profileId: 'profile-may', sessionId: 'session-a', idempotencyKey: 'snapshot-7', snapshot: { revision: 0, panes: [null, null, null] },
+    assert.deepEqual(requests.map(({ sessionId, idempotencyKey, snapshot }) => ({ sessionId, idempotencyKey, snapshot })), [{
+      sessionId: 'session-a', idempotencyKey: 'snapshot-7', snapshot: { revision: 0, panes: [null, null, null] },
     }])
     assert.deepEqual(events.map(entry => entry.event), [
       'snapshot.http.received', 'snapshot.http.body-read', 'snapshot.http.accepted', 'snapshot.http.response',
@@ -1072,7 +1072,7 @@ describe('hub backend HTTP contract', () => {
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
     liveServers.add(server)
 
-    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/profiles/profile-may/pokemon-hub/sessions/session-a/snapshots`, {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/pokemon-hub/sessions/session-a/snapshots`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'snapshot-error' }, body: JSON.stringify({ revision: 0, panes: [null, null, null] }),
     })
 
@@ -1100,7 +1100,7 @@ describe('hub backend HTTP contract', () => {
     liveServers.add(server)
     const baseUrl = `http://127.0.0.1:${server.address().port}`
 
-    const response = await fetch(`${baseUrl}/api/profiles/profile-may/pokemon-hub/sessions/session-a/heartbeat`, {
+    const response = await fetch(`${baseUrl}/api/pokemon-hub/sessions/session-a/heartbeat`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sequence: 8 }),
     })
 
@@ -1116,8 +1116,10 @@ describe('hub backend HTTP contract', () => {
     const server = createHubServer({
       ...fixture,
       pokemonHubSessionService: {
-        async close({ beforeClose }) {
+        async closeCanonicalSession({ flushOutgoingSource, releaseSource }) {
+          const beforeClose = async sources => { for (const source of sources) await flushOutgoingSource(source); for (const source of sources) await releaseSource(source) }
           await beforeClose([{ sourceKey: 'hub:profile-a', sourceSessionId: 'source-session', leaseToken: 'lease-token' }])
+          return { status: 'complete' }
         },
       },
       pokemonHubSnapshotCoordinator: {
@@ -1131,11 +1133,11 @@ describe('hub backend HTTP contract', () => {
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
     liveServers.add(server)
 
-    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/profiles/profile-may/pokemon-hub/sessions/session-a`, { method: 'DELETE' })
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/pokemon-hub/sessions/session-a/close`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'close' }, body: JSON.stringify({ revision: 0, panes: [null,null,null] }) })
 
     assert.equal(response.status, 200)
     assert.deepEqual(flushes, [])
-    assert.deepEqual(releases, [{ profileId: 'profile-may', sourceKey: 'hub:profile-a', workspaceId: 'session-a', sourceSessionId: 'source-session', leaseToken: 'lease-token' }])
+    assert.deepEqual(releases, [{ sourceKey: 'hub:profile-a', workspaceId: 'session-a', sourceSessionId: 'source-session', leaseToken: 'lease-token' }])
   })
 
   test('flushes a cross-profile game source to its save before closing the session', async () => {
@@ -1146,8 +1148,10 @@ describe('hub backend HTTP contract', () => {
     const server = createHubServer({
       ...fixture,
       pokemonHubSessionService: {
-        async close({ beforeClose }) {
+        async closeCanonicalSession({ flushOutgoingSource, releaseSource }) {
+          const beforeClose = async sources => { for (const source of sources) await flushOutgoingSource(source); for (const source of sources) await releaseSource(source) }
           await beforeClose([source])
+          return { status: 'complete' }
         },
       },
       pokemonHubSnapshotCoordinator: {
@@ -1161,11 +1165,11 @@ describe('hub backend HTTP contract', () => {
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
     liveServers.add(server)
 
-    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/profiles/profile-ruby/pokemon-hub/sessions/session-a`, { method: 'DELETE' })
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/pokemon-hub/sessions/session-a/close`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'close' }, body: JSON.stringify({ revision: 0, panes: [null,null,null] }) })
 
     assert.equal(response.status, 200)
-    assert.deepEqual(flushes, [{ profileId: 'profile-ruby', sourceKey: source.sourceKey }])
-    assert.deepEqual(releases, [{ profileId: 'profile-ruby', sourceKey: source.sourceKey, workspaceId: 'session-a', sourceSessionId: 'source-session', leaseToken: 'lease-token' }])
+    assert.deepEqual(flushes, [{ sourceKey: source.sourceKey }])
+    assert.deepEqual(releases, [{ sourceKey: source.sourceKey, workspaceId: 'session-a', sourceSessionId: 'source-session', leaseToken: 'lease-token' }])
   })
 
   test('flushes every save source in a three-save session before releasing its leases', async () => {
@@ -1200,7 +1204,7 @@ describe('hub backend HTTP contract', () => {
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
     liveServers.add(server)
 
-    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/profiles/profile-may/pokemon-hub/sessions/session-a/close`, {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/pokemon-hub/sessions/session-a/close`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'close-4' },
       body: JSON.stringify(snapshot),
@@ -1208,10 +1212,10 @@ describe('hub backend HTTP contract', () => {
 
     assert.equal(response.status, 200)
     assert.equal(await response.text(), '')
-    assert.deepEqual(flushes, sources.map(source => ({ profileId: 'profile-may', sourceKey: source.sourceKey })))
-    assert.deepEqual(releases, sources.map(source => ({ profileId: 'profile-may', sourceKey: source.sourceKey, workspaceId: 'session-a', sourceSessionId: source.sourceSessionId, leaseToken: source.leaseToken })))
+    assert.deepEqual(flushes, sources.map(source => ({ sourceKey: source.sourceKey })))
+    assert.deepEqual(releases, sources.map(source => ({ sourceKey: source.sourceKey, workspaceId: 'session-a', sourceSessionId: source.sourceSessionId, leaseToken: source.leaseToken })))
     assert.equal(closes.length, 1)
-    assert.equal(closes[0].profileId, 'profile-may')
+    assert.equal(Object.hasOwn(closes[0], 'profileId'), false)
     assert.equal(closes[0].sessionId, 'session-a')
     assert.equal(closes[0].idempotencyKey, 'close-4')
     assert.deepEqual(closes[0].snapshot, snapshot)
@@ -1228,7 +1232,7 @@ describe('hub backend HTTP contract', () => {
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
     liveServers.add(server)
     for (const action of ['snapshots', 'close']) {
-      const response = await fetch(`http://127.0.0.1:${server.address().port}/api/profiles/profile-may/pokemon-hub/sessions/session-a/${action}`, {
+      const response = await fetch(`http://127.0.0.1:${server.address().port}/api/pokemon-hub/sessions/session-a/${action}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'snapshot-8' }, body: JSON.stringify({ revision: 2, panes: [null, null, null] }),
       })
 
@@ -1237,236 +1241,65 @@ describe('hub backend HTTP contract', () => {
     }
   })
 
-  test('passes profile-scoped snapshot acquire and sync requests to the coordinator', async () => {
+  test('rejects every legacy mutation endpoint without invoking the old coordinator', async () => {
     const fixture = await createFixture([])
-    const requests = []
-    const server = createHubServer({
-      ...fixture,
-      pokemonHubSnapshotCoordinator: {
-        async acquire(request) { requests.push({ type: 'acquire', request }); return { status: 'acquired' } },
-        async renew(request) { requests.push({ type: 'renew', request }); return { status: 'renewed' } },
-        async sync(request) { requests.push({ type: 'sync', request }); return { status: 'accepted', snapshots: [] } },
-      },
-      pokemonHubSaveFlush: { async flushSource() { return { status: 'clean' } } },
-    })
-    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-    liveServers.add(server)
-    const baseUrl = `http://127.0.0.1:${server.address().port}`
-
-    const acquire = await fetch(`${baseUrl}/api/profiles/profile-may/pokemon-hub/snapshots/acquire`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceKey: 'save:profile-may:emerald', workspaceId: 'workspace-a', profileId: 'forged' }),
-    })
-    const sync = await fetch(`${baseUrl}/api/profiles/profile-may/pokemon-hub/snapshots/sync`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspaceId: 'workspace-a', clientSequence: 1, idempotencyKey: 'sync-1', sources: [], profileId: 'forged' }),
-    })
-    const renew = await fetch(`${baseUrl}/api/profiles/profile-may/pokemon-hub/snapshots/renew`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceKey: 'save:profile-may:emerald', workspaceId: 'workspace-a', sourceSessionId: 'session-a', leaseToken: 'token-a', profileId: 'forged' }),
-    })
-
-    assert.equal(acquire.status, 200)
-    assert.equal(sync.status, 200)
-    assert.equal(renew.status, 200)
-    assert.deepEqual(requests, [
-      { type: 'acquire', request: { sourceKey: 'save:profile-may:emerald', workspaceId: 'workspace-a', profileId: 'profile-may' } },
-      { type: 'sync', request: { workspaceId: 'workspace-a', clientSequence: 1, idempotencyKey: 'sync-1', sources: [], profileId: 'profile-may' } },
-      { type: 'renew', request: { sourceKey: 'save:profile-may:emerald', workspaceId: 'workspace-a', sourceSessionId: 'session-a', leaseToken: 'token-a', profileId: 'profile-may' } },
-    ])
-  })
-
-  test('acquires an open grid pane as a workspace snapshot source', async () => {
-    const fixture = await createFixture([])
-    const requests = []
-    const server = createHubServer({
-      ...fixture,
-      pokemonHubSnapshotCoordinator: {
-        async acquire(request) {
-          requests.push({ type: 'acquire', request })
-          if (requests.filter(entry => entry.type === 'acquire').length === 1) {
-            const error = new Error('source is not adopted')
-            error.code = 'SOURCE_NOT_ADOPTED'
-            throw error
-          }
-          return { sourceKey: request.sourceKey, sourceSessionId: 'workspace-source', leaseToken: 'lease-token', placements: [] }
-        },
-        async ensureHubSource(request) { requests.push({ type: 'ensure', request }) },
-      },
-      pokemonHubProfileStore: {
-        async bindOwner(hubProfileId, profileId) { requests.push({ type: 'bind', hubProfileId, profileId }); return { hubProfileId } },
-      },
-      pokemonHubGridTransferService: {},
-      pokemonHubSaveFlush: { async flushSource() { return { status: 'clean' } } },
-    })
-    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-    liveServers.add(server)
-    const baseUrl = `http://127.0.0.1:${server.address().port}`
-
-    const response = await fetch(`${baseUrl}/api/profiles/profile-may/pokemon-hub/snapshots/acquire`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceKey: 'hub:grid-a', workspaceId: 'workspace-a' }),
-    })
-
-    assert.equal(response.status, 200)
-    assert.deepEqual(requests, [
-      { type: 'acquire', request: { sourceKey: 'hub:grid-a', workspaceId: 'workspace-a', profileId: 'profile-may' } },
-      { type: 'bind', hubProfileId: 'grid-a', profileId: 'profile-may' },
-      { type: 'ensure', request: { profileId: 'profile-may', sourceKey: 'hub:grid-a', hubProfileId: 'grid-a', minimumSlotCount: 60 } },
-      { type: 'acquire', request: { sourceKey: 'hub:grid-a', workspaceId: 'workspace-a', profileId: 'profile-may' } },
-    ])
-  })
-
-  test('delegates a persistent grid transfer without scheduling an eager save write', async () => {
-    const fixture = await createFixture([])
-    const requests = []
-    const dirty = []
-    const server = createHubServer({
-      ...fixture,
-      pokemonHubGridTransferService: {
-        async transfer(request) {
-          requests.push(request)
-          return { status: 'accepted', snapshots: [{ sourceKey: 'save:profile-may:emerald' }, { sourceKey: 'hub:grid-a' }], hubProfile: { hubProfileId: 'grid-a', grid: { entries: {} } } }
-        },
-      },
-      pokemonHubSaveFlush: { markDirty(request) { dirty.push(request) }, async flushSource() { return { status: 'clean' } } },
-    })
-    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-    liveServers.add(server)
-
-    const response = await fetch(`${`http://127.0.0.1:${server.address().port}`}/api/profiles/profile-may/pokemon-hub/transfers`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspaceId: 'workspace-a', clientSequence: 3, idempotencyKey: 'transfer-3', source: { kind: 'game' }, target: { kind: 'hub' }, sources: [] }),
-    })
-
-    assert.equal(response.status, 200)
-    assert.equal(requests.length, 1)
-    assert.equal(requests[0].profileId, 'profile-may')
-    assert.deepEqual(dirty, [])
-  })
-
-  test('accepts a full snapshot payload larger than the default JSON request limit', async () => {
-    const fixture = await createFixture([])
-    const requests = []
-    const server = createHubServer({
-      ...fixture,
-      pokemonHubSnapshotCoordinator: {
-        async sync(request) { requests.push(request); return { status: 'accepted', snapshots: [] } },
-      },
-      pokemonHubSaveFlush: { async flushSource() { return { status: 'clean' } } },
-    })
-    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-    liveServers.add(server)
-    const baseUrl = `http://127.0.0.1:${server.address().port}`
-    const payload = {
-      workspaceId: 'workspace-a',
-      clientSequence: 1,
-      idempotencyKey: 'sync-large-1',
-      sources: [{
-        sourceKey: 'save:profile-may:emerald',
-        sourceSessionId: 'session-a',
-        leaseToken: 'token-a',
-        placements: Array.from({ length: 420 }, (_, slot) => ({
-          location: { kind: 'game', area: 'box', box: Math.floor(slot / 30), slot: slot % 30 },
-          pokemonInstanceId: null,
-        })),
-      }],
+    const calls = []
+    const server = createHubServer({ ...fixture, pokemonHubSnapshotCoordinator: {
+      async acquire() { calls.push('acquire') }, async sync() { calls.push('sync') },
+    }, pokemonHubSaveFlush: { async flushSource() { calls.push('flush') } } })
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); liveServers.add(server)
+    const base = 'http://127.0.0.1:' + server.address().port
+    for (const endpoint of ['transfers','snapshots/acquire','snapshots/renew','snapshots/sync','snapshots/release','sessions']) {
+      const response = await fetch(base + '/api/profiles/former-owner/pokemon-hub/' + endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      assert.equal(response.status, 410)
     }
-
-    const body = JSON.stringify(payload)
-    assert.ok(Buffer.byteLength(body) > 4096)
-    const response = await fetch(`${baseUrl}/api/profiles/profile-may/pokemon-hub/snapshots/sync`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
-    })
-
-    assert.equal(response.status, 200)
-    assert.equal(requests.length, 1)
-    assert.equal(requests[0].sources[0].placements.length, 420)
+    assert.deepEqual(calls, [])
   })
 
-  test('accepts a persistent grid transfer carrying a full save snapshot', async () => {
+  test('opens an independent Hub pane without assigning a Save owner', async () => {
+    const fixture = await createFixture([])
+    const server = createHubServer(fixture)
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); liveServers.add(server)
+    const base = 'http://127.0.0.1:' + server.address().port
+    const post = (path, body) => fetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    const profile = await (await post('/api/pokemon-hub/profiles', { name: 'Independent grid' })).json()
+    const catalog = await fixture.persistence.get('pokemon-hub:profiles')
+    const opened = await post('/api/pokemon-hub/sessions', { sessionId: 'independent-opening' })
+    assert.equal(opened.status, 201)
+    const loaded = await post('/api/pokemon-hub/sessions/independent-opening/panes/0', { source: { kind: 'hub', hubProfileId: profile.hubProfileId } })
+    assert.equal(loaded.status, 200)
+    assert.equal((await loaded.json()).panes[0].profile.hubProfileId, profile.hubProfileId)
+    assert.equal(await fixture.persistence.get('pokemon-hub:profiles'), catalog)
+  })
+
+  test('accepts a canonical snapshot larger than the default JSON request limit', async () => {
     const fixture = await createFixture([])
     const requests = []
-    const server = createHubServer({
-      ...fixture,
-      pokemonHubGridTransferService: { async transfer(request) { requests.push(request); return { status: 'accepted', snapshots: [], hubProfile: { hubProfileId: 'grid-a', grid: { entries: {} } } } } },
-      pokemonHubSaveFlush: { async flushSource() { return { status: 'clean' } } },
-    })
-    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-    liveServers.add(server)
-    const payload = {
-      workspaceId: 'workspace-a', clientSequence: 1, idempotencyKey: 'transfer-1', source: { kind: 'game' }, target: { kind: 'hub' },
-      sources: [{ sourceKey: 'save:profile-may:emerald', sourceSessionId: 'session-a', leaseToken: 'token-a', baseRevision: 1, placements: Array.from({ length: 420 }, (_, slot) => ({ location: { kind: 'game', area: 'box', box: Math.floor(slot / 30), slot: slot % 30 }, pokemonInstanceId: null })) }],
-    }
-    const body = JSON.stringify(payload)
+    const server = createHubServer({ ...fixture, pokemonHubSessionService: {
+      async syncCanonicalSnapshot(request) { requests.push(request); return { status: 'accepted' } },
+    } })
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); liveServers.add(server)
+    const snapshot = { revision: 1, panes: [{ pane: 0, profile: { type: 'hub-profile', hubProfileId: 'box' }, hub: Array.from({ length: 420 }, (_, slot) => ({ slot, pokemonInstanceId: 'pokemon-' + slot })) }, null, null] }
+    const body = JSON.stringify(snapshot)
     assert.ok(Buffer.byteLength(body) > 4096)
-
-    const response = await fetch(`${`http://127.0.0.1:${server.address().port}`}/api/profiles/profile-may/pokemon-hub/transfers`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
-    })
-
+    const response = await fetch('http://127.0.0.1:' + server.address().port + '/api/pokemon-hub/sessions/session/snapshots', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'large' }, body })
     assert.equal(response.status, 200)
-    assert.equal(requests.length, 1)
+    assert.deepEqual(requests[0].snapshot, snapshot)
   })
 
-  test('finalizes an expired snapshot session before retrying its new acquisition', async () => {
+  test('flushes expired source authority before retrying a session pane acquisition', async () => {
     const fixture = await createFixture([])
-    let acquireAttempts = 0
-    let finalizations = 0
-    const server = createHubServer({
-      ...fixture,
-      pokemonHubSnapshotCoordinator: {
-        async acquire() {
-          acquireAttempts += 1
-          if (acquireAttempts === 1) {
-            const error = new Error('Pokemon Hub source is waiting for its final save flush.')
-            error.code = 'SOURCE_FLUSH_PENDING'
-            throw error
-          }
-          return { sourceKey: 'save:profile-may:emerald', sourceSessionId: 'new-source-session', leaseToken: 'new-token', placements: [] }
-        },
-      },
-      pokemonHubSaveFlush: {
-        async flushExpiredLeases() { finalizations += 1 },
-        async flushSource() { return { status: 'clean' } },
-      },
+    let attempts = 0, flushes = 0
+    const server = createHubServer({ ...fixture,
+      pokemonHubSessionService: { async loadCanonicalPane({ acquireSource, sourceKey }) { await acquireSource(sourceKey); return { status: 'accepted', snapshot: { revision: 1, panes: [null,null,null] } } } },
+      pokemonHubSnapshotCoordinator: { async acquire() { if (++attempts === 1) throw Object.assign(new Error('pending'), { code: 'SOURCE_FLUSH_PENDING' }); return {} } },
+      pokemonHubSaveFlush: { async flushSource() {}, async flushExpiredLeases() { flushes++ } },
     })
-    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-    liveServers.add(server)
-    const baseUrl = `http://127.0.0.1:${server.address().port}`
-
-    const response = await fetch(`${baseUrl}/api/profiles/profile-may/pokemon-hub/snapshots/acquire`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceKey: 'save:profile-may:emerald', workspaceId: 'new-workspace-session' }),
-    })
-
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); liveServers.add(server)
+    const response = await fetch('http://127.0.0.1:' + server.address().port + '/api/pokemon-hub/sessions/session/panes/0', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: { kind: 'hub', hubProfileId: 'box' } }) })
     assert.equal(response.status, 200)
-    assert.equal(acquireAttempts, 2)
-    assert.ok(finalizations >= 1)
-  })
-
-  test('flushes before a source lease is released without an eager dirty notification', async () => {
-    const fixture = await createFixture([])
-    const actions = []
-    const server = createHubServer({
-      ...fixture,
-      pokemonHubSnapshotCoordinator: {
-        async sync() { return { status: 'accepted', snapshots: [{ sourceKey: 'save:profile-may:emerald' }] } },
-        async release(request) { actions.push({ type: 'release', request }); return { released: true } },
-      },
-      pokemonHubSaveFlush: {
-        markDirty(request) { actions.push({ type: 'dirty', request }) },
-        async flushSource(request) { actions.push({ type: 'flush', request }); return { status: 'flushed' } },
-      },
-    })
-    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-    liveServers.add(server)
-    const baseUrl = `http://127.0.0.1:${server.address().port}`
-
-    const synced = await fetch(`${baseUrl}/api/profiles/profile-may/pokemon-hub/snapshots/sync`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspaceId: 'workspace-a', clientSequence: 1, idempotencyKey: 'sync-1', sources: [] }),
-    })
-    const released = await fetch(`${baseUrl}/api/profiles/profile-may/pokemon-hub/snapshots/release`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceKey: 'save:profile-may:emerald', workspaceId: 'workspace-a', sourceSessionId: 'session-a', leaseToken: 'token-a' }),
-    })
-
-    assert.equal(synced.status, 200)
-    assert.equal(released.status, 200)
-    assert.deepEqual(actions.map(action => action.type), ['flush', 'release'])
+    assert.equal(attempts, 2)
+    assert.ok(flushes >= 1)
   })
 
   test('adopts supported save bytes into the snapshot coordinator after a save revision is stored', async () => {
@@ -1497,7 +1330,7 @@ describe('hub backend HTTP contract', () => {
 
     assert.equal(saved.status, 201)
     assert.equal(adopted.length, 1)
-    assert.equal(adopted[0].profileId, profile.id)
+    assert.equal(Object.hasOwn(adopted[0], 'profileId'), false)
     assert.equal(adopted[0].sourceKey, `save:${profile.id}:pokemon-emerald`)
     assert.equal(adopted[0].sourceRevision, 1)
     assert.equal(adopted[0].adapter, 'gen3-gba-v1')
@@ -1552,10 +1385,10 @@ describe('hub backend HTTP contract', () => {
     const response = await fetch(`http://127.0.0.1:${server.address().port}/api/pokemon-hub/save-profiles/pokemon-emerald/profile-may/layout`)
 
     assert.equal(response.status, 200)
-    assert.deepEqual(refreshed, [{ profileId: 'profile-may', sourceKey: 'save:profile-may:pokemon-emerald', transferCapability: capability }])
+    assert.deepEqual(refreshed, [{ sourceKey: 'save:profile-may:pokemon-emerald', transferCapability: capability }])
   })
 
-  test('hydrates occupied save slots in the layout GET using the workspace owner namespace', async () => {
+  test('hydrates occupied save slots from their independent source identity', async () => {
     const fixture = await createFixture([{
       id: 'pokemon-emerald', title: 'Pokémon Emerald', system: 'gba', core: 'mgba', file: 'pokemon-emerald.gba', sha256: 'a'.repeat(64),
       pokemonSave: { supported: true, adapter: 'gen3-gba-v1', layoutProfile: 'pokemon-emerald-gba', title: 'pokemon-emerald' },
@@ -1564,7 +1397,7 @@ describe('hub backend HTTP contract', () => {
     bytes.writeUInt16LE(25, 0x20)
     bytes.writeUInt16LE(25, 0x1c)
     const location = { kind: 'game', area: 'box', box: 0, slot: 0 }
-    const source = { profileId: 'workspace-a', sourceKey: 'save:profile-may:pokemon-emerald', sourceRevision: 1, saveRevision: 4, needsSaveFlush: false, placements: [{ location, pokemonInstanceId: 'pokemon-one' }] }
+    const source = { sourceKey: 'save:profile-may:pokemon-emerald', sourceRevision: 1, saveRevision: 4, needsSaveFlush: false, placements: [{ location, pokemonInstanceId: 'pokemon-one' }] }
     const calls = []
     const server = createHubServer({
       ...fixture,
@@ -1586,7 +1419,7 @@ describe('hub backend HTTP contract', () => {
     assert.equal(response.status, 200)
     assert.equal(body.boxes[0].slots[0].pokemonInstanceId, 'pokemon-one')
     assert.equal(body.pokemonDetailsById['pokemon-one'].identity.species, 25)
-    assert.deepEqual(calls, [{ profileId: 'workspace-a', sourceKey: source.sourceKey }, { profileId: 'workspace-a', sourceKey: source.sourceKey }])
+    assert.deepEqual(calls, [{ sourceKey: source.sourceKey }, { sourceKey: source.sourceKey }])
     assert.equal(JSON.stringify(body).includes('bytesBase64'), false)
   })
 
@@ -1634,17 +1467,17 @@ describe('hub backend HTTP contract', () => {
       return { changed: true, itemInventory: { status: 'ready', saveRevision: 5, title: 'pokemon-emerald', areas: {} } }
     } } })
     const body = { gameId: 'pokemon-emerald', sourceProfileId: 'may', area: 'items', fromSlot: 0, toSlot: 2, expectedSaveRevision: 4 }
-    const response = await fetch(`${baseUrl}/api/profiles/workspace/pokemon-hub/sessions/session-a/items/reorder`, {
+    const response = await fetch(`${baseUrl}/api/pokemon-hub/sessions/session-a/items/reorder`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     })
     assert.equal(response.status, 200)
     assert.deepEqual(await jsonResponse(response), { changed: true, itemInventory: { status: 'ready', saveRevision: 5, title: 'pokemon-emerald', areas: {} } })
-    assert.deepEqual(calls, [{ profileId: 'workspace', sessionId: 'session-a', ...body }])
+    assert.deepEqual(calls, [{ sessionId: 'session-a', ...body }])
   })
 
   test('registers the real item reorder service when the backend starts', async () => {
     const { baseUrl } = await startFixture([])
-    const response = await fetch(`${baseUrl}/api/profiles/workspace/pokemon-hub/sessions/missing-session/items/reorder`, {
+    const response = await fetch(`${baseUrl}/api/pokemon-hub/sessions/missing-session/items/reorder`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ gameId: 'pokemon-emerald', sourceProfileId: 'may', area: 'items', fromSlot: 0, toSlot: 1, expectedSaveRevision: 1 }),
     })
@@ -1692,7 +1525,7 @@ describe('hub backend HTTP contract', () => {
       },
       snapshotStore: { async delete() {} },
     })
-    const response = await fetch(`${baseUrl}/api/profiles/workspace/pokemon-hub/sessions/session-a/items/reorder`, {
+    const response = await fetch(`${baseUrl}/api/pokemon-hub/sessions/session-a/items/reorder`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ gameId: 'pokemon-emerald', sourceProfileId: 'may', area: 'items', fromSlot: 0, toSlot: 1, expectedSaveRevision: 4 }),
     })
@@ -1707,7 +1540,7 @@ describe('hub backend HTTP contract', () => {
     const { baseUrl } = await startFixture([], {}, {}, { pokemonItemReorderService: { async reorder() {
       throw Object.assign(new Error('The item save revision has changed.'), { code: 'SAVE_ITEM_REVISION_CONFLICT' })
     } } })
-    const response = await fetch(`${baseUrl}/api/profiles/workspace/pokemon-hub/sessions/session-a/items/reorder`, {
+    const response = await fetch(`${baseUrl}/api/pokemon-hub/sessions/session-a/items/reorder`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ gameId: 'pokemon-emerald', sourceProfileId: 'may', area: 'items', fromSlot: 0, toSlot: 2, expectedSaveRevision: 4 }),
     })
@@ -1722,12 +1555,12 @@ describe('hub backend HTTP contract', () => {
     } })
     const body = { source: { gameId: 'ruby', profileId: 'may', expectedSaveRevision: 3 },
       destination: { gameId: 'sapphire', profileId: 'brendan', expectedSaveRevision: 5 }, area: 'items', fromSlot: 0, quantity: 2 }
-    const response = await fetch(`${baseUrl}/api/profiles/workspace/pokemon-hub/sessions/session-a/items/transfer`, {
+    const response = await fetch(`${baseUrl}/api/pokemon-hub/sessions/session-a/items/transfer`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     })
     assert.equal(response.status, 200)
     assert.deepEqual(await jsonResponse(response), { itemKey: 'potion', quantity: 2 })
-    assert.deepEqual(calls, [{ profileId: 'workspace', sessionId: 'session-a', ...body }])
+    assert.deepEqual(calls, [{ sessionId: 'session-a', ...body }])
   })
 
   test('keeps the Pokémon layout available when only the item inventory is ambiguous', async () => {
@@ -2316,11 +2149,11 @@ describe('hub backend HTTP contract', () => {
     bytes.writeUInt16LE(25, 0x20)
     bytes.writeUInt16LE(25, 0x1c)
     const location = { kind: 'hub', hubProfileId: '11111111-1111-4111-8111-111111111111', slot: 4 }
-    const source = { profileId: 'profile-may', sourceKey: `hub:${location.hubProfileId}`, sourceRevision: 1, placements: [{ location, pokemonInstanceId: 'pokemon-alpha' }] }
+    const source = { sourceKey: `hub:${location.hubProfileId}`, sourceRevision: 1, placements: [{ location, pokemonInstanceId: 'pokemon-alpha' }] }
     const server = createHubServer({
       ...fixture,
       pokemonHubProfileStore: {
-        async list() { return [{ hubProfileId: '11111111-1111-4111-8111-111111111111', ownerProfileId: 'profile-may', name: 'Transfer box', grid: { entries: {} } }] },
+        async list() { return [{ hubProfileId: '11111111-1111-4111-8111-111111111111', name: 'Transfer box', grid: { entries: {} } }] },
       },
       pokemonHubSnapshotCoordinator: {
         async getSnapshot() { snapshotReads += 1; return { ...source, pokemonDisplay: { 'pokemon-alpha': { species: 25, shiny: true } } } },
@@ -2333,7 +2166,7 @@ describe('hub backend HTTP contract', () => {
 
     const baseUrl = `http://127.0.0.1:${server.address().port}`
     const list = await jsonResponse(await fetch(`${baseUrl}/api/pokemon-hub/profiles`))
-    assert.deepEqual(list, { profiles: [{ hubProfileId: location.hubProfileId, ownerProfileId: 'profile-may', name: 'Transfer box' }] })
+    assert.deepEqual(list, { profiles: [{ hubProfileId: location.hubProfileId, name: 'Transfer box' }] })
     assert.equal(snapshotReads, 0)
 
     const response = await fetch(`${baseUrl}/api/pokemon-hub/profiles/${location.hubProfileId}`)

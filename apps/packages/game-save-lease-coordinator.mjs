@@ -8,7 +8,7 @@ local active = lease and tonumber(lease.expiresAt) > now
 local result
 
 if input.action == 'acquire-player' then
-  if active and lease.ownerKind ~= 'player' then
+  if lease and lease.ownerKind == 'pokemon-hub' then
     result = { status = 'held-hub' }
   elseif active and lease.deviceId ~= input.deviceId then
     result = { status = 'held-player' }
@@ -24,15 +24,15 @@ if input.action == 'acquire-player' then
 elseif input.action == 'acquire-hub' then
   if active and lease.ownerKind == 'player' then
     result = { status = 'held-player' }
-  elseif active and lease.workspaceId ~= input.workspaceId then
+  elseif lease and lease.ownerKind == 'pokemon-hub' and lease.workspaceId ~= input.workspaceId then
     result = { status = 'held-hub' }
   else
     local next = active and lease or { profileId = input.profileId, gameId = input.gameId, ownerKind = 'pokemon-hub', workspaceId = input.workspaceId, expiresAt = now + tonumber(input.duration) }
-    if active then next.expiresAt = now + tonumber(input.duration) end
+    if active then next.expiresAt = math.max(next.expiresAt, now + tonumber(input.duration)) end
     redis.call('SET', KEYS[1], cjson.encode(next))
     result = { status = 'ok', lease = next }
   end
-elseif not active then
+elseif not active and not (lease and input.action == 'release' and input.ownerKind == 'pokemon-hub' and lease.ownerKind == 'pokemon-hub' and lease.workspaceId == input.workspaceId) then
   result = { status = 'invalid' }
 elseif input.ownerKind == 'player' and (lease.ownerKind ~= 'player' or lease.deviceId ~= input.deviceId or lease.sessionId ~= input.sessionId or tonumber(lease.generation) ~= tonumber(input.generation)) then
   result = { status = 'invalid' }
@@ -42,7 +42,7 @@ elseif input.action == 'release' then
   redis.call('DEL', KEYS[1])
   result = { status = 'ok', lease = lease }
 else
-  lease.expiresAt = now + tonumber(input.duration)
+  lease.expiresAt = math.max(lease.expiresAt, now + tonumber(input.duration))
   redis.call('SET', KEYS[1], cjson.encode(lease))
   result = { status = 'ok', lease = lease }
 end
@@ -53,7 +53,7 @@ return cjson.encode(result)`,
     const lease = raw ? JSON.parse(raw) : null
     const active = lease?.expiresAt > input.now
     if (input.action === 'acquire-player') {
-      if (active && lease.ownerKind !== 'player') return JSON.stringify({ status: 'held-hub' })
+      if (lease?.ownerKind === 'pokemon-hub') return JSON.stringify({ status: 'held-hub' })
       if (active && lease.deviceId !== input.deviceId) return JSON.stringify({ status: 'held-player' })
       const minimumGeneration = input.minimumGeneration ?? 1
       const currentGeneration = lease?.generation ?? 0
@@ -65,17 +65,17 @@ return cjson.encode(result)`,
     }
     if (input.action === 'acquire-hub') {
       if (active && lease.ownerKind === 'player') return JSON.stringify({ status: 'held-player' })
-      if (active && lease.workspaceId !== input.workspaceId) return JSON.stringify({ status: 'held-hub' })
-      const next = active ? { ...lease, expiresAt: input.now + input.duration } : { profileId: input.profileId, gameId: input.gameId, ownerKind: 'pokemon-hub', workspaceId: input.workspaceId, expiresAt: input.now + input.duration }
+      if (lease?.ownerKind === 'pokemon-hub' && lease.workspaceId !== input.workspaceId) return JSON.stringify({ status: 'held-hub' })
+      const next = active ? { ...lease, expiresAt: Math.max(lease.expiresAt, input.now + input.duration) } : { profileId: input.profileId, gameId: input.gameId, ownerKind: 'pokemon-hub', workspaceId: input.workspaceId, expiresAt: input.now + input.duration }
       await set(keys[0], JSON.stringify(next))
       return JSON.stringify({ status: 'ok', lease: next })
     }
-    if (!active || (input.ownerKind === 'player' && (lease.ownerKind !== 'player' || lease.deviceId !== input.deviceId || lease.sessionId !== input.sessionId || lease.generation !== input.generation)) || (input.ownerKind === 'pokemon-hub' && (lease.ownerKind !== 'pokemon-hub' || lease.workspaceId !== input.workspaceId))) return JSON.stringify({ status: 'invalid' })
+    if ((!active && !(input.action === 'release' && input.ownerKind === 'pokemon-hub' && lease?.ownerKind === 'pokemon-hub' && lease.workspaceId === input.workspaceId)) || (input.ownerKind === 'player' && (lease.ownerKind !== 'player' || lease.deviceId !== input.deviceId || lease.sessionId !== input.sessionId || lease.generation !== input.generation)) || (input.ownerKind === 'pokemon-hub' && (lease.ownerKind !== 'pokemon-hub' || lease.workspaceId !== input.workspaceId))) return JSON.stringify({ status: 'invalid' })
     if (input.action === 'release') {
       await remove(keys[0])
       return JSON.stringify({ status: 'ok', lease })
     }
-    const renewed = { ...lease, expiresAt: input.now + input.duration }
+    const renewed = { ...lease, expiresAt: Math.max(lease.expiresAt, input.now + input.duration) }
     await set(keys[0], JSON.stringify(renewed))
     return JSON.stringify({ status: 'ok', lease: renewed })
   },
@@ -91,14 +91,14 @@ export function createGameSaveLeaseCoordinator({ persistence, now = () => Date.n
     releasePlayer: input => run('release', 'player', input, playerLeaseDurationMs),
     assertPlayerWrite: input => run('assert', 'player', input, playerLeaseDurationMs),
     acquireHub: input => run('acquire-hub', 'pokemon-hub', input, hubLeaseDurationMs),
-    renewHub: input => run('renew', 'pokemon-hub', input, hubLeaseDurationMs),
+    renewHub: input => run('renew', 'pokemon-hub', input, Math.max(hubLeaseDurationMs, (input.minimumExpiresAt ?? 0) - now())),
     assertHub: input => run('assert', 'pokemon-hub', input, hubLeaseDurationMs),
     releaseHub: input => run('release', 'pokemon-hub', input, hubLeaseDurationMs),
     async get({ profileId, gameId }) {
       validateIdentity({ profileId, gameId })
       const raw = await persistence.get(key(profileId, gameId))
       const lease = raw ? JSON.parse(raw) : null
-      return lease?.expiresAt > now() ? lease : null
+      return lease?.ownerKind === 'pokemon-hub' || lease?.expiresAt > now() ? lease : null
     },
   }
 

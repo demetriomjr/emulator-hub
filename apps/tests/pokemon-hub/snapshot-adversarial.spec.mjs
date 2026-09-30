@@ -20,7 +20,7 @@ test.afterEach(async ({}, testInfo) => {
 
 async function loadedSession(request, profileName) {
   const profileId = profiles[profileName]
-  const base = `${api}/api/profiles/${profileId}/pokemon-hub/sessions`
+  const base = `${api}/api/pokemon-hub/sessions`
   const opened = await request.post(base, { data: {} })
   expect(opened.status()).toBe(201)
   const { sessionId } = await opened.json()

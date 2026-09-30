@@ -25,10 +25,15 @@ export function createPokemonHubEventStore({ persistence, now = () => new Date()
   }
 
   return {
+    prepare(input) {
+      const event = normalizeEvent(input, now)
+      const eventId = eventIdentifier(event.pokemonInstanceId, event.operationId)
+      return { key: eventKey(event.pokemonInstanceId, eventId), document: { schemaVersion: 1, eventId, ...event } }
+    },
     async append(input) {
       const event = normalizeEvent(input, now)
-      const eventId = eventIdentifier(event.profileId, event.pokemonInstanceId, event.operationId)
-      const key = eventKey(event.profileId, event.pokemonInstanceId, eventId)
+      const eventId = eventIdentifier(event.pokemonInstanceId, event.operationId)
+      const key = eventKey(event.pokemonInstanceId, eventId)
       const existing = await persistence.get(key)
       if (existing !== null) return copy(parseEvent(existing))
 
@@ -40,10 +45,9 @@ export function createPokemonHubEventStore({ persistence, now = () => new Date()
       if (raced === null) throw new Error('Pokemon Hub event could not be stored')
       return copy(parseEvent(raced))
     },
-    async listForPokemon(profileId, pokemonInstanceId) {
-      assertNonEmptyString(profileId, 'Profile ID')
+    async listForPokemon(pokemonInstanceId) {
       assertNonEmptyString(pokemonInstanceId, 'Pokemon instance ID')
-      const keys = await persistence.keys(`${eventPrefix(profileId, pokemonInstanceId)}`)
+      const keys = await persistence.keys(`${eventPrefix(pokemonInstanceId)}`)
       const events = await Promise.all(keys.map(async key => {
         const source = await persistence.get(key)
         return source === null ? null : parseEvent(source)
@@ -56,7 +60,6 @@ export function createPokemonHubEventStore({ persistence, now = () => new Date()
 function normalizeEvent(input, now) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new TypeError('Pokemon Hub event is invalid')
   for (const field of forbiddenFields) if (Object.hasOwn(input, field)) throw new TypeError(`Pokemon Hub event field ${field} is not allowed`)
-  assertNonEmptyString(input.profileId, 'Profile ID')
   assertNonEmptyString(input.pokemonInstanceId, 'Pokemon instance ID')
   assertNonEmptyString(input.operationId, 'Operation ID')
   if (!eventTypes.has(input.type)) throw new TypeError('Pokemon Hub event type is invalid')
@@ -66,7 +69,6 @@ function normalizeEvent(input, now) {
   const requiresDestination = input.type === 'pokemon.placement-changed' || input.type === 'pokemon.projection-applied'
 
   return {
-    profileId: input.profileId,
     pokemonInstanceId: input.pokemonInstanceId,
     operationId: input.operationId,
     type: input.type,
@@ -119,16 +121,16 @@ function normalizeHashes(value, requiresDestination) {
   return { source: value.source, destination: value.destination }
 }
 
-function eventIdentifier(profileId, pokemonInstanceId, operationId) {
-  return createHash('sha256').update(JSON.stringify([profileId, pokemonInstanceId, operationId])).digest('hex')
+function eventIdentifier(pokemonInstanceId, operationId) {
+  return createHash('sha256').update(JSON.stringify([pokemonInstanceId, operationId])).digest('hex')
 }
 
-function eventPrefix(profileId, pokemonInstanceId) {
-  return pokemonHubRedisKeys.eventPrefix(profileId, pokemonInstanceId)
+function eventPrefix(pokemonInstanceId) {
+  return pokemonHubRedisKeys.eventPrefix(pokemonInstanceId)
 }
 
-function eventKey(profileId, pokemonInstanceId, eventId) {
-  return pokemonHubRedisKeys.event(profileId, pokemonInstanceId, eventId)
+function eventKey(pokemonInstanceId, eventId) {
+  return pokemonHubRedisKeys.event(pokemonInstanceId, eventId)
 }
 
 function assertNonEmptyString(value, label) {
