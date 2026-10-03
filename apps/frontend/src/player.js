@@ -256,6 +256,19 @@ function setPlayerReady() {
   playerLoading.style.display = 'none'
 }
 
+function failPlayerStartup(error, phase) {
+  runtimeReady = false
+  snapshotTelemetry.error('startup-failed', { phase, code: error.code, error: error.message, status: error.status })
+  clientDiagnostics?.capture({ kind: 'emulator-failure', message: error.message, name: error.name, stack: error.stack })
+  setPlayerLoading(`Não foi possível iniciar o emulador: ${error.message}`)
+  try {
+    if (window.EJS_emulator?.gameManager) window.EJS_emulator.pause()
+  } catch (pauseError) {
+    console.warn('[emulator-startup] failed to pause after startup failure', pauseError)
+  }
+  loseLease()
+}
+
 function startEmulatedFpsOverlay() {
   if (!clientDiagnosticsOptions.enabled || emulatedFpsTimer) return
   const overlay = document.createElement('output')
@@ -1087,135 +1100,130 @@ async function start() {
   }
   window.EJS_ready = () => {
     if (closeRequested || threadFallbackRequested || leaseLost) return
-    configureEmulatorNotifications(window.EJS_emulator)
-    interactionLock.apply()
-    stopLifecycleDiagnostics?.()
-    audioMute.attach(window.EJS_emulator)
-    audioMute.apply()
-    if (isMobilePlayerViewport) window.EJS_emulator?.changeSettingOption?.('virtual-gamepad', 'enabled')
-    if (isMobilePlayerViewport) {
-      applyMobileGamepadLayout()
-      window.addEventListener('resize', applyMobileGamepadLayout)
-    }
-    if (clientDiagnostics) {
-      stopLifecycleDiagnostics = instrumentEmulatorLifecycle({
-        emulator: window.EJS_emulator,
-        report: clientDiagnostics.capture,
-      })
-    }
-    applyFastForward()
-    const failSaveStartup = error => {
-      snapshotTelemetry.error('startup-failed', { phase: 'save-storage', error: error.message })
-      loseLease()
-      game.textContent = error.message
-    }
     try {
-      startEmulatorWithMemorySaves({ emulator: window.EJS_emulator, GameManager: window.EJS_GameManager, onError: failSaveStartup })
+      configureEmulatorNotifications(window.EJS_emulator)
+      interactionLock.apply()
+      stopLifecycleDiagnostics?.()
+      if (isMobilePlayerViewport) {
+        applyMobileGamepadLayout()
+        window.addEventListener('resize', applyMobileGamepadLayout)
+      }
+      if (clientDiagnostics) {
+        stopLifecycleDiagnostics = instrumentEmulatorLifecycle({
+          emulator: window.EJS_emulator,
+          report: clientDiagnostics.capture,
+        })
+      }
+      startEmulatorWithMemorySaves({ emulator: window.EJS_emulator, GameManager: window.EJS_GameManager, onError: error => failPlayerStartup(error, 'save-storage') })
     } catch (error) {
-      failSaveStartup(error)
+      failPlayerStartup(error, 'save-storage')
     }
   }
   window.EJS_onGameStart = async () => {
-    threadGameStarted = true
-    stopThreadStartupMonitor()
-    if (closeRequested || threadFallbackRequested) return
-    setPlayerLoading('Carregando save...')
-    audioMute.attach(window.EJS_emulator)
-    audioMute.apply()
-    // EJS_ready fires before EmulatorJS creates its gameManager. Reapply here
-    // because earlier setting changes can be ignored during loader startup.
-    applyFastForward()
-    clientDiagnostics?.capture({ kind: 'emulator-lifecycle', message: 'EmulatorJS game start callback' })
-    removeAudioResumeGesture?.()
-    removeAudioResumeGesture = installAudioResumeOnUserGesture({
-      element: game,
-      getAudioContext: () => getEmulatorAudioContext(window.EJS_emulator),
-    })
-    gamepadInput = createEmulatorGamepadInput(window.EJS_emulator, controlProfile.bindings)
-    interactionLock.apply()
-    if (!interactionLock.isLocked()) {
-      if (gamepadBindings.length > 0) offerPolicy.recordInput()
-      gamepadInput.update(gamepadBindings)
-    }
-    const focusPlayer = () => window.parent.postMessage({ type: 'emulator-hub:player-focused', sessionId, gameId: id, profileId }, hubOrigin)
-    window.addEventListener('keydown', event => { if (event.isTrusted) { offerPolicy.recordInput(); focusPlayer() } }, { capture: true })
-    game.addEventListener('pointerdown', event => { if (event.isTrusted) { offerPolicy.recordInput(); focusPlayer() } }, { capture: true })
-    game.addEventListener('touchstart', event => { if (event.isTrusted) { offerPolicy.recordInput(); focusPlayer() } }, { capture: true, passive: true })
-    restoreCandidates = sortRestoreCandidates([
-      ...(localRecoveryPrompt && localRecovery?.candidateId === localRecoveryCandidateId ? [localCandidateSummary(localRecovery, { currentSaveRevision: cloudSaveSynchronizer.getRevision() })] : []),
-      ...(savedSnapshot ? [remoteCandidateSummary(savedSnapshot, { currentSaveRevision: cloudSaveSynchronizer.getRevision(), installationId: installationIdentity.comparisonId })] : []),
-      ...(userSnapshot ? [remoteCandidateSummary(userSnapshot, { currentSaveRevision: cloudSaveSynchronizer.getRevision(), installationId: installationIdentity.comparisonId })] : []),
-    ])
-    if (restoreCandidates.length) snapshotTelemetry.info('candidates-offered', { candidateCount: restoreCandidates.length, saveRevision: cloudSaveSynchronizer.getRevision() })
-    if (restoreCandidates.length) window.EJS_emulator.pause()
-    const restoreChoice = restoreCandidates.length ? await requestRestoreChoice(restoreCandidates) : null
-    if (closeRequested) return
-    const selectedCandidateId = restoreChoice?.candidateId ?? (restoreLocalRecovery ? localRecovery?.candidateId : null)
-    let restoredRuntimeState = false
-    const selected = restoreCandidates.find(candidate => candidate.candidateId === selectedCandidateId)
-    const selectedRevision = selected?.kind === 'user-state' ? userSnapshot?.revision : selected?.kind === 'cloud-recovery' ? savedSnapshot?.revision : undefined
-    if (restoreChoice?.explicit) snapshotTelemetry.info('restore-choice', { candidateId: selectedCandidateId ?? undefined, snapshotKind: selected?.kind, revision: selectedRevision, reason: selectedCandidateId ? 'user-selected' : 'continue' })
-    let restoreError = null
     try {
-      if (selected?.kind === 'local-recovery' || (restoreLocalRecovery && selectedCandidateId === localRecovery?.candidateId)) {
-        const current = await localRecoveryStore.get(profileId, id)
-        if (closeRequested) return
-        if (current?.candidateId === selectedCandidateId && current.core === launchDescriptor.core && current.romSha256 === launchDescriptor.romSha256 && current.runtimeId === launchDescriptor.runtimeId && current.patchSha256 === launchDescriptor.patchSha256) {
-          window.EJS_emulator.gameManager.loadState(new Uint8Array(current.state))
-          restoredRuntimeState = true
+      threadGameStarted = true
+      stopThreadStartupMonitor()
+      if (closeRequested || threadFallbackRequested || leaseLost) return
+      setPlayerLoading('Carregando save...')
+      audioMute.attach(window.EJS_emulator)
+      audioMute.apply()
+      // EJS_ready has no runtime Module yet; audio and core settings are safe only here.
+      applyFastForward()
+      if (isMobilePlayerViewport) window.EJS_emulator?.changeSettingOption?.('virtual-gamepad', 'enabled')
+      clientDiagnostics?.capture({ kind: 'emulator-lifecycle', message: 'EmulatorJS game start callback' })
+      removeAudioResumeGesture?.()
+      removeAudioResumeGesture = installAudioResumeOnUserGesture({
+        element: game,
+        getAudioContext: () => getEmulatorAudioContext(window.EJS_emulator),
+      })
+      gamepadInput = createEmulatorGamepadInput(window.EJS_emulator, controlProfile.bindings)
+      interactionLock.apply()
+      if (!interactionLock.isLocked()) {
+        if (gamepadBindings.length > 0) offerPolicy.recordInput()
+        gamepadInput.update(gamepadBindings)
+      }
+      const focusPlayer = () => window.parent.postMessage({ type: 'emulator-hub:player-focused', sessionId, gameId: id, profileId }, hubOrigin)
+      window.addEventListener('keydown', event => { if (event.isTrusted) { offerPolicy.recordInput(); focusPlayer() } }, { capture: true })
+      game.addEventListener('pointerdown', event => { if (event.isTrusted) { offerPolicy.recordInput(); focusPlayer() } }, { capture: true })
+      game.addEventListener('touchstart', event => { if (event.isTrusted) { offerPolicy.recordInput(); focusPlayer() } }, { capture: true, passive: true })
+      restoreCandidates = sortRestoreCandidates([
+        ...(localRecoveryPrompt && localRecovery?.candidateId === localRecoveryCandidateId ? [localCandidateSummary(localRecovery, { currentSaveRevision: cloudSaveSynchronizer.getRevision() })] : []),
+        ...(savedSnapshot ? [remoteCandidateSummary(savedSnapshot, { currentSaveRevision: cloudSaveSynchronizer.getRevision(), installationId: installationIdentity.comparisonId })] : []),
+        ...(userSnapshot ? [remoteCandidateSummary(userSnapshot, { currentSaveRevision: cloudSaveSynchronizer.getRevision(), installationId: installationIdentity.comparisonId })] : []),
+      ])
+      if (restoreCandidates.length) snapshotTelemetry.info('candidates-offered', { candidateCount: restoreCandidates.length, saveRevision: cloudSaveSynchronizer.getRevision() })
+      if (restoreCandidates.length) window.EJS_emulator.pause()
+      const restoreChoice = restoreCandidates.length ? await requestRestoreChoice(restoreCandidates) : null
+      if (closeRequested) return
+      const selectedCandidateId = restoreChoice?.candidateId ?? (restoreLocalRecovery ? localRecovery?.candidateId : null)
+      let restoredRuntimeState = false
+      const selected = restoreCandidates.find(candidate => candidate.candidateId === selectedCandidateId)
+      const selectedRevision = selected?.kind === 'user-state' ? userSnapshot?.revision : selected?.kind === 'cloud-recovery' ? savedSnapshot?.revision : undefined
+      if (restoreChoice?.explicit) snapshotTelemetry.info('restore-choice', { candidateId: selectedCandidateId ?? undefined, snapshotKind: selected?.kind, revision: selectedRevision, reason: selectedCandidateId ? 'user-selected' : 'continue' })
+      let restoreError = null
+      try {
+        if (selected?.kind === 'local-recovery' || (restoreLocalRecovery && selectedCandidateId === localRecovery?.candidateId)) {
+          const current = await localRecoveryStore.get(profileId, id)
+          if (closeRequested) return
+          if (current?.candidateId === selectedCandidateId && current.core === launchDescriptor.core && current.romSha256 === launchDescriptor.romSha256 && current.runtimeId === launchDescriptor.runtimeId && current.patchSha256 === launchDescriptor.patchSha256) {
+            window.EJS_emulator.gameManager.loadState(new Uint8Array(current.state))
+            restoredRuntimeState = true
+            if (closeRequested) return
+          }
+        } else if (selected && (selected.kind === 'cloud-recovery' || selected.kind === 'user-state')) {
+          const current = selected.kind === 'user-state' ? userSnapshot : savedSnapshot
+          if (current && remoteCandidateSummary(current, { currentSaveRevision: cloudSaveSynchronizer.getRevision(), installationId: installationIdentity.comparisonId }).candidateId === selectedCandidateId && snapshotMatchesLaunch(current, launchDescriptor)) {
+            window.EJS_emulator.gameManager.loadState(new Uint8Array(current.state))
+            restoredRuntimeState = true
+          }
+        }
+      } catch (error) {
+        restoreError = error
+        console.error('[emulator-snapshot] selected state could not be loaded', error)
+      }
+      if (selectedCandidateId && restoredRuntimeState) snapshotTelemetry.info('restore-applied', { candidateId: selectedCandidateId, snapshotKind: selected?.kind, revision: selectedRevision })
+      if (selectedCandidateId && !restoredRuntimeState) {
+        snapshotTelemetry.error('restore-load-failed', { candidateId: selectedCandidateId, snapshotKind: selected?.kind, code: restoreError?.code ?? 'STATE_UNAVAILABLE', error: restoreError?.message ?? 'Selected state was unavailable or incompatible.' })
+        reportPlayerActionFailure('restore-state')
+      }
+      try {
+        if (!restoredRuntimeState) {
+          await Promise.resolve(window.EJS_emulator.gameManager.restart?.())
           if (closeRequested) return
         }
-      } else if (selected && (selected.kind === 'cloud-recovery' || selected.kind === 'user-state')) {
-        const current = selected.kind === 'user-state' ? userSnapshot : savedSnapshot
-        if (current && remoteCandidateSummary(current, { currentSaveRevision: cloudSaveSynchronizer.getRevision(), installationId: installationIdentity.comparisonId }).candidateId === selectedCandidateId && snapshotMatchesLaunch(current, launchDescriptor)) {
-          window.EJS_emulator.gameManager.loadState(new Uint8Array(current.state))
-          restoredRuntimeState = true
+        const saveLoaded = await cloudSaveSynchronizer.restore(window.EJS_emulator.gameManager)
+        if (selectedCandidateId) snapshotTelemetry[saveLoaded ? 'info' : 'warn'](saveLoaded ? 'canonical-save-loaded' : 'canonical-save-missing', { candidateId: selectedCandidateId, snapshotKind: selected?.kind, saveRevision: cloudSaveSynchronizer.getRevision() })
+        if (saveLoaded === false && selectedCandidateId) {
+          cloudSaveSynchronizer.ignoreRuntimeStateSave(window.EJS_emulator.gameManager.getSaveFile?.())
         }
+        if (saveLoaded === false && Math.max(savedSnapshot?.metadata?.saveRevision ?? 0, userSnapshot?.metadata?.saveRevision ?? 0) > 0) reportPlayerActionFailure('game-save-missing')
+      } catch (error) {
+        console.error('[save-pipeline] canonical game save could not be loaded', error)
+        reportPlayerActionFailure('game-save-load')
+        throw error
+      }
+      if (restoredRuntimeState) offerPolicy.recordRuntimeRestore()
+      if (closeRequested) return
+      setPlayerReady()
+      runtimeReady = true
+      startEmulatedFpsOverlay()
+      if (restoreCandidates.length && !interactionLock.isLocked()) window.EJS_emulator.play()
+      interactionLock.apply()
+      announcePlaybackState()
+      if (restoreChoice?.explicit && localRecoveryPrompt && localRecoveryCandidateId) scheduleLocalRecoveryDeleteAfterChoice(localRecoveryCandidateId)
+      else startLocalRecoveryCapture()
+      if (restoreChoice?.explicit && savedSnapshot && (!selectedCandidateId || restoredRuntimeState)) scheduleCloudRecoveryDeleteAfterChoice(savedSnapshot.revision)
+      watchBatterySaveChanges()
+      cloudSaveInterval = window.setInterval(() => saveEmulatorState({ reasonCode: 'periodic-recovery' }).catch(error => snapshotTelemetry.error('automatic-capture-failed', { snapshotKind: 'cloud-recovery', code: error.code, error: error.message, status: error.status }, { repeating: true })), 15000)
+      stopFrameProgressMonitor?.()
+      if (clientDiagnostics) {
+        stopFrameProgressMonitor = monitorEmulatorFrameProgress({
+          getFrame: () => window.EJS_emulator?.gameManager?.getFrameNum?.(),
+          report: clientDiagnostics.capture,
+        })
       }
     } catch (error) {
-      restoreError = error
-      console.error('[emulator-snapshot] selected state could not be loaded', error)
-    }
-    if (selectedCandidateId && restoredRuntimeState) snapshotTelemetry.info('restore-applied', { candidateId: selectedCandidateId, snapshotKind: selected?.kind, revision: selectedRevision })
-    if (selectedCandidateId && !restoredRuntimeState) {
-      snapshotTelemetry.error('restore-load-failed', { candidateId: selectedCandidateId, snapshotKind: selected?.kind, code: restoreError?.code ?? 'STATE_UNAVAILABLE', error: restoreError?.message ?? 'Selected state was unavailable or incompatible.' })
-      reportPlayerActionFailure('restore-state')
-    }
-    try {
-      if (!restoredRuntimeState) {
-        await Promise.resolve(window.EJS_emulator.gameManager.restart?.())
-        if (closeRequested) return
-      }
-      const saveLoaded = await cloudSaveSynchronizer.restore(window.EJS_emulator.gameManager)
-      if (selectedCandidateId) snapshotTelemetry[saveLoaded ? 'info' : 'warn'](saveLoaded ? 'canonical-save-loaded' : 'canonical-save-missing', { candidateId: selectedCandidateId, snapshotKind: selected?.kind, saveRevision: cloudSaveSynchronizer.getRevision() })
-      if (saveLoaded === false && selectedCandidateId) {
-        cloudSaveSynchronizer.ignoreRuntimeStateSave(window.EJS_emulator.gameManager.getSaveFile?.())
-      }
-      if (saveLoaded === false && Math.max(savedSnapshot?.metadata?.saveRevision ?? 0, userSnapshot?.metadata?.saveRevision ?? 0) > 0) reportPlayerActionFailure('game-save-missing')
-    } catch (error) {
-      console.error('[save-pipeline] canonical game save could not be loaded', error)
-      reportPlayerActionFailure('game-save-load')
-      return
-    }
-    if (restoredRuntimeState) offerPolicy.recordRuntimeRestore()
-    if (closeRequested) return
-    setPlayerReady()
-    runtimeReady = true
-    startEmulatedFpsOverlay()
-    if (restoreCandidates.length && !interactionLock.isLocked()) window.EJS_emulator.play()
-    interactionLock.apply()
-    announcePlaybackState()
-    if (restoreChoice?.explicit && localRecoveryPrompt && localRecoveryCandidateId) scheduleLocalRecoveryDeleteAfterChoice(localRecoveryCandidateId)
-    else startLocalRecoveryCapture()
-    if (restoreChoice?.explicit && savedSnapshot && (!selectedCandidateId || restoredRuntimeState)) scheduleCloudRecoveryDeleteAfterChoice(savedSnapshot.revision)
-    watchBatterySaveChanges()
-    cloudSaveInterval = window.setInterval(() => saveEmulatorState({ reasonCode: 'periodic-recovery' }).catch(error => snapshotTelemetry.error('automatic-capture-failed', { snapshotKind: 'cloud-recovery', code: error.code, error: error.message, status: error.status }, { repeating: true })), 15000)
-    stopFrameProgressMonitor?.()
-    if (clientDiagnostics) {
-      stopFrameProgressMonitor = monitorEmulatorFrameProgress({
-        getFrame: () => window.EJS_emulator?.gameManager?.getFrameNum?.(),
-        report: clientDiagnostics.capture,
-      })
+      failPlayerStartup(error, 'game-start')
     }
   }
   const loader = document.createElement('script')
@@ -1223,16 +1231,12 @@ async function start() {
   loader.onerror = () => {
     if (fallBackFromThreadedCore('loader-unavailable')) return
     const message = 'EmulatorJS loader could not be reached.'
-    clientDiagnostics?.capture({ kind: 'emulator-failure', message })
-    game.textContent = message
+    failPlayerStartup(new Error(message), 'loader')
   }
   document.body.appendChild(loader)
   monitorThreadedCoreStartup()
 }
 
 start().catch(error => {
-  snapshotTelemetry.error('startup-failed', { phase: 'initialization', code: error.code, error: error.message, status: error.status })
-  loseLease()
-  clientDiagnostics?.capture({ kind: 'emulator-failure', message: error.message, name: error.name, stack: error.stack })
-  game.textContent = error.message
+  failPlayerStartup(error, 'initialization')
 })

@@ -74,6 +74,35 @@ RUN layer; prefer current seed assets over older cached copies. Sprite hash and
 completeness validation still runs normally. Persistent backend data is outside
 this build stage and is not affected by the build correction.
 
+## Startup failure correction — 2026-10-03
+
+Explicit startup exposes an ordering requirement in pinned EmulatorJS 4.2.3:
+`EJS_ready` runs before `emulator.Module` exists. Its volume setter dereferences
+`Module.AL` without a module guard. Applying audio mute/volume in that callback
+therefore throws before the memory-save adapter can start the core. Apply audio,
+fast-forward and virtual-gamepad runtime settings only in `EJS_onGameStart`.
+Keep the memory filesystem installation before core startup.
+
+A missing snapshot (HTTP 404) remains a valid absence, independent from the
+canonical in-game save. Existing and fresh profiles both dismiss the loading
+gate after canonical restoration finishes. Synchronous readiness errors,
+asynchronous game-start failures, loader failure and initial launch failure
+must replace the loading text with a visible error, fence the player from
+save writes and pause any initialized runtime. A failed canonical save load
+must never mark the player ready or start save polling.
+
+Validation reproduced the original `Module.AL` exception with the pinned
+runtime and the real audio helper before the correction. The full player
+then passed six isolated Chromium cases: fresh/existing Ruby saves with mute
+on/off at requested 5× speed, save-service failure and loader failure. Both
+snapshot endpoints returned 404 in each case. Successful starts hid the gate,
+used MEMFS without opening `/data/saves` IndexedDB, and preserved the existing
+128 KiB save hash exactly. Failure cases displayed an error without announcing
+readiness or uploading any bytes. The 62 selected startup, recovery, save and
+audio tests and frontend lint passed. The frontend production build passed
+before publication of the correction. Deployment must verify the served player
+startup and retain a complete, independently checked save backup.
+
 ## Problem
 
 Production logs show that the backend returns the correct save on every launch, but reopening a profile can start EmulatorJS without that profile's data. Multiple profiles of the same game currently share `window.EJS_gameID = launch.gameId`, allowing EmulatorJS local state and battery-save paths to collide across profiles and sessions.

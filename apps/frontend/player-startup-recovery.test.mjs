@@ -228,9 +228,9 @@ test('a failed selected snapshot alerts the player and still loads the canonical
   assert.deepEqual(actions, ['load-state', 'failed:restore-state', 'restart', 'restore-save'])
 })
 
-test('a canonical save load failure alerts the player and prevents startup capture', async () => {
+test('a canonical save load failure alerts the player and reaches the startup failure handler', async () => {
   const { context, actions, run } = harness({ restoreSave: async () => { throw new Error('save load failed') } })
-  await run()
+  await assert.rejects(run(), /save load failed/)
   assert.deepEqual(actions, ['restart', 'restore-save', 'failed:game-save-load'])
   assert.equal(context.runtimeReady, false)
 })
