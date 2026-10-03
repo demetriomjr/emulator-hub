@@ -1,5 +1,39 @@
 # Spec 053: Profile-scoped EmulatorJS save namespace
 
+## Runtime correction — 2026-10-03
+
+The `EJS_gameID` namespace does not isolate battery saves in EmulatorJS 4.2.3.
+Battery saves use a filename derived from `EJS_gameName`, and the runtime mounts
+`/data/saves` in IndexedDB independently of its cache/settings flags. A profile
+without a backend save could therefore start with another profile's cached save
+and upload it as its own first save.
+
+The approved hotfix supersedes the browser-save namespace design below. Keep
+the existing runtime identity for diagnostics, but mount `/data/saves` in MEMFS
+only. Disable upstream automatic startup, install the mount adapter at readiness,
+then start the core explicitly. The adapter must run before any persistent save
+mount or read and must fail startup rather than fall back to IndexedDB.
+
+The existing backend fetch on every launch remains authoritative. A save response
+loads through the current canonical restore flow; a missing save leaves the fresh
+memory filesystem empty, without creating a synthetic save. Normal in-game saves
+continue through the current backend synchronization. Browser recovery snapshots
+remain a separate, explicitly selected mechanism under Spec 059. This hotfix does
+not delete browser data, change backend save paths, repair existing production
+duplicates, commit, build, or deploy.
+
+Regression coverage must prove that old browser saves cannot enter a new profile
+or its first upload, existing backend saves still load and synchronize, identical
+filenames remain isolated between instances, and incompatible/late adapter
+installation never starts with persistent save storage.
+
+Local runtime verification used the actual pinned 4.2.3 browser runtime and Ruby
+in an isolated browser context. The legacy mount persisted a 128 KiB fixture;
+the subsequent fresh launch mounted MEMFS, opened no `/data/saves` IndexedDB
+database, and exposed no save bytes. Loading the existing fixture into MEMFS
+preserved its SHA-256 exactly. Unit tests also verify that missing saves produce
+no upload and that later changed in-game saves still synchronize to the backend.
+
 ## Problem
 
 Production logs show that the backend returns the correct save on every launch, but reopening a profile can start EmulatorJS without that profile's data. Multiple profiles of the same game currently share `window.EJS_gameID = launch.gameId`, allowing EmulatorJS local state and battery-save paths to collide across profiles and sessions.

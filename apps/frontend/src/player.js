@@ -1,5 +1,6 @@
 import { deleteEmulatorSnapshot, getCloudSave, getControlProfile, getEmulatorSnapshot, getPlayerLeaseLaunch, heartbeatPlayerLease, putCloudSave, putEmulatorSnapshot } from '../../packages/hub-client.js'
 import { createCloudSaveSynchronizer } from '../../packages/cloud-save-sync.mjs'
+import { startEmulatorWithMemorySaves } from '../../packages/emulator-save-filesystem.mjs'
 import { observeEmulatorSaveFiles } from '../../packages/emulator-save-events.mjs'
 import { startEmulatorSavePolling } from '../../packages/emulator-save-poller.mjs'
 import { createEmulatorGamepadInput } from '../../packages/gamepad-input.mjs'
@@ -1056,7 +1057,8 @@ async function start() {
   // EmulatorJS per-game localStorage profile replace them during startup.
   window.EJS_disableLocalStorage = true
   window.EJS_pathtodata = dataUrl
-  window.EJS_startOnLoaded = true
+  // Start explicitly from EJS_ready after replacing the persistent save mount.
+  window.EJS_startOnLoaded = false
   window.EJS_Buttons = {
     playPause: false,
     restart: false,
@@ -1078,6 +1080,7 @@ async function start() {
     exitEmulation: false,
   }
   window.EJS_ready = () => {
+    if (closeRequested || threadFallbackRequested || leaseLost) return
     configureEmulatorNotifications(window.EJS_emulator)
     interactionLock.apply()
     stopLifecycleDiagnostics?.()
@@ -1095,6 +1098,16 @@ async function start() {
       })
     }
     applyFastForward()
+    const failSaveStartup = error => {
+      snapshotTelemetry.error('startup-failed', { phase: 'save-storage', error: error.message })
+      loseLease()
+      game.textContent = error.message
+    }
+    try {
+      startEmulatorWithMemorySaves({ emulator: window.EJS_emulator, GameManager: window.EJS_GameManager, onError: failSaveStartup })
+    } catch (error) {
+      failSaveStartup(error)
+    }
   }
   window.EJS_onGameStart = async () => {
     threadGameStarted = true
