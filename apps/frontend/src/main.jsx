@@ -85,9 +85,9 @@ const huntErrorMessages = Object.freeze({
   'unsupported-rom': 'Esta ROM não é compatível com a leitura de encontros da caça.',
   'enemy-already-created': 'O encontro começou antes do próximo comando; a caça foi parada para preservar o Pokémon.',
   'state-unavailable': 'Não foi possível ler o estado deste emulador.',
-  'unsupported-starter': 'Inicial de Hoenn requer Pokémon Ruby, Sapphire ou Emerald compatível.',
-  'invalid-starter-choice': 'Escolha a Poké Bola e use soft reset para caçar um inicial de Hoenn.',
-  'starter-already-owned': 'Salve em frente à bolsa, antes de escolher o inicial.',
+  'unsupported-starter': 'Caça de iniciais requer uma ROM compatível de Ruby, Sapphire, Emerald, FireRed ou LeafGreen.',
+  'invalid-starter-choice': 'Escolha a Poké Bola de Hoenn e use soft reset para caçar iniciais.',
+  'starter-already-owned': 'Salve antes de escolher o inicial, em frente à bolsa ou à Poké Bola desejada.',
   'input-frame-timeout': 'O emulador não processou o toque direcional; a caça foi parada.',
   'input-frame-unavailable': 'Não foi possível confirmar o toque direcional neste emulador.',
 })
@@ -952,6 +952,7 @@ function App() {
     const sessions = await getPlayingSessions()
     if (!sessions.length || activeSessionsRef.current.map(session => session.sessionId).join('|') !== participantKey) return
     const huntId = crypto.randomUUID()
+    const huntGameCodes = new Map()
     huntParticipantsRef.current = participantKey
     setHuntHeaderStopRequested(false)
     huntActiveRef.current = true
@@ -985,6 +986,7 @@ function App() {
       return false
     }
     const controller = createShinyHuntController({
+      getGameCode: session => huntGameCodes.get(session.sessionId),
       prepare: async selected => {
         assertParticipants()
         setOddsManipulatorEnabled(true)
@@ -996,7 +998,10 @@ function App() {
           const ready = await ensureHuntOddsClock(session, session.oddsResetCount ?? 0)
           if (!ready) throw new Error('Relógio do Odds Manipulator não confirmado: ' + (session.profileName ?? session.sessionId))
         }))
-        await Promise.all(selected.map(session => requestHunt(session, 'prepare', null, { ...huntConfig })))
+        await Promise.all(selected.map(async session => {
+          const reply = await requestHunt(session, 'prepare', null, { ...huntConfig })
+          huntGameCodes.set(session.sessionId, reply.gameCode)
+        }))
       },
       reset: async (session, _signal, cycleId) => {
         const nextCount = (session.oddsResetCount ?? 0) + 1
@@ -1899,12 +1904,12 @@ function App() {
               <label><input type="radio" name="hunt-start-mode" value="walk-left" checked={huntConfig.startMode === 'walk-left'} onChange={() => setHuntConfig(current => ({ ...current, startMode: 'walk-left' }))} />Andar para a esquerda</label>
               <label><input type="radio" name="hunt-start-mode" value="walk-up" checked={huntConfig.startMode === 'walk-up'} onChange={() => setHuntConfig(current => ({ ...current, startMode: 'walk-up' }))} />Andar para cima</label>
               <label><input type="radio" name="hunt-start-mode" value="common" checked={huntConfig.startMode === 'common'} onChange={() => setHuntConfig(current => ({ ...current, startMode: 'common' }))} />Encounter comum</label>
-              <label><input type="radio" name="hunt-start-mode" value="hoenn-starter" checked={huntConfig.startMode === 'hoenn-starter'} onChange={() => setHuntConfig(current => ({ ...current, startMode: 'hoenn-starter', resetMode: 'soft-reset' }))} />Inicial de Hoenn</label>
+              <label><input type="radio" name="hunt-start-mode" value="hoenn-starter" checked={huntConfig.startMode === 'hoenn-starter'} onChange={() => setHuntConfig(current => ({ ...current, startMode: 'hoenn-starter', resetMode: 'soft-reset' }))} />Iniciais (por jogo)</label>
             </div>
             {huntConfig.startMode === 'hoenn-starter' && <div className="hunt-starter-choice">
-              <label htmlFor="hunt-starter-position">Poké Bola · todos os jogadores</label>
+              <label htmlFor="hunt-starter-position">Poké Bola em Hoenn · todos os jogadores</label>
               <Select id="hunt-starter-position" value={huntConfig.starterPosition} placeholder="Escolha a Poké Bola" options={hoennStarterChoices} disabled={huntRunning} onChange={starterPosition => setHuntConfig(current => ({ ...current, starterPosition }))} aria-describedby="hunt-starter-help" />
-              <p id="hunt-starter-help">Ruby, Sapphire ou Emerald. Salve em frente à bolsa fechada. Requer soft reset.</p>
+              <p id="hunt-starter-help">Hoenn: salve em frente à bolsa fechada. FireRed/LeafGreen: em frente à Poké Bola desejada. Requer soft reset.</p>
             </div>}
           </fieldset>
           {huntStatus.phase === 'error' && <p role="alert">{huntErrorMessages[huntStatus.error] ?? huntStatus.error}</p>}

@@ -1,4 +1,4 @@
-import { getShinyHuntStartSequence } from './shiny-hunt-start-sequence.mjs'
+import { getShinyHuntStartSequence, resolveShinyHuntStartPlan } from './shiny-hunt-start-sequence.mjs'
 
 const FIRST_A_DELAY_MS = 2000
 const A_INTERVAL_MS = 1000
@@ -25,7 +25,7 @@ function sleepWithAbort(ms, signal) {
   })
 }
 
-export function createShinyHuntController({ now = () => performance.now(), sleep = sleepWithAbort, prepare, reset, confirmReset, pulse, begin, input, tap, releaseInput, inspect, inspectPhase, saveState, release, onStatus = () => {} }) {
+export function createShinyHuntController({ now = () => performance.now(), sleep = sleepWithAbort, getGameCode = session => session.gameCode, prepare, reset, confirmReset, pulse, begin, input, tap, releaseInput, inspect, inspectPhase, saveState, release, onStatus = () => {} }) {
   let active = null
   let lastStatus = { phase: 'idle', resetCount: 0 }
 
@@ -102,10 +102,11 @@ export function createShinyHuntController({ now = () => performance.now(), sleep
   async function runConfigured(sessions, signal, config) {
     const { resetMode, startMode, stopMode } = config
     if (!['soft-reset', 'exit-encounter'].includes(resetMode) || !['interact-a', 'walk-right', 'walk-left', 'walk-up', 'common', 'hoenn-starter'].includes(startMode) || !['first-shiny', 'all-shiny'].includes(stopMode)) throw new Error('Configuração de caça inválida')
-    const startSequence = getShinyHuntStartSequence(config)
-    if (startMode === 'hoenn-starter' && (resetMode !== 'soft-reset' || typeof tap !== 'function')) throw new Error('Inicial de Hoenn requer soft reset e toque direcional local')
+    getShinyHuntStartSequence(config)
+    if (startMode === 'hoenn-starter' && resetMode !== 'soft-reset') throw new Error('Caça de iniciais requer soft reset')
     if (typeof begin !== 'function' || typeof input !== 'function' || resetMode === 'exit-encounter' && typeof inspectPhase !== 'function') throw new Error('Entrada de caça indisponível')
     const completed = new Set()
+    const plans = new Map()
     const foundIds = new Set()
     const progress = new Map(sessions.map(session => [session.sessionId, { cycleId: 0, attemptCount: 0, phase: 'starting' }]))
     const workers = new Map(sessions.map(session => [session.sessionId, new AbortController()]))
@@ -162,6 +163,7 @@ export function createShinyHuntController({ now = () => performance.now(), sleep
     }
     const runSession = async session => {
       const state = progress.get(session.sessionId)
+      const plan = plans.get(session.sessionId)
       const workerSignal = workers.get(session.sessionId).signal
       let inputStage = 'encounter'
       let lastNormalAt = null
@@ -253,7 +255,19 @@ export function createShinyHuntController({ now = () => performance.now(), sleep
             if (reply.status !== 'pending') return reply
           }
         }
-        for (const step of startSequence) {
+        if (plan.repeatUntilEncounter) {
+          const step = plan.startSequence[0]
+          for (let index = 0; index < MAX_PENDING_READS; index++) {
+            const pressedAt = now()
+            const earlyEncounter = await holdOrReadEncounter(step.button, step.holdMs)
+            if (earlyEncounter) return earlyEncounter
+            await waitAtLeast(pressedAt + step.intervalMs)
+            const reply = await read()
+            if (reply.status !== 'pending') return reply
+          }
+          throw new Error('Encounter inspection timed out in ' + session.sessionId)
+        }
+        for (const step of plan.startSequence) {
           checkWork()
           const pressedAt = now()
           if (step.localTap) {
@@ -372,6 +386,11 @@ export function createShinyHuntController({ now = () => performance.now(), sleep
     try {
       await prepare(sessions, signal)
       check(signal)
+      for (const session of sessions) {
+        const plan = resolveShinyHuntStartPlan(config, getGameCode(session))
+        if (plan.startSequence?.some(step => step.localTap) && typeof tap !== 'function') throw new Error('Toque direcional local indisponível')
+        plans.set(session.sessionId, plan)
+      }
       status('resetting')
       const initialResets = await Promise.allSettled(sessions.map(session => resetWithConfirmation(session, workers.get(session.sessionId).signal, 1)))
       check(signal)

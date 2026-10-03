@@ -65,4 +65,6 @@ test('a running Hoenn hunt locks settings and keeps Stop available', () => {
 test('the hub sends the shared choice and a single tap command through the player protocol', () => {
   assert.match(hub, /requestHunt\(session, 'prepare', null, \{ \.\.\.huntConfig \}\)/)
   assert.match(hub, /tap: .*requestHunt\(session, 'tap', cycleId, \{ button \}, 2000\)/)
+  assert.match(hub, /getGameCode: session => huntGameCodes\.get\(session\.sessionId\)/)
+  assert.match(hub, /huntGameCodes\.set\(session\.sessionId, reply\.gameCode\)/)
 })

@@ -42,7 +42,7 @@ for (const [position, direction] of [[1, 'LEFT'], [2, null], [3, 'RIGHT']]) {
       inspect: async () => ({ status: confirmations === 3 && ++reads > 2 ? 'shiny' : 'pending' }),
       saveState: async () => {}, release: async () => {},
     })
-    const result = await controller.start([{ sessionId: 'a' }], { resetMode: 'soft-reset', startMode: 'hoenn-starter', starterPosition: position, stopMode: 'first-shiny' })
+    const result = await controller.start([{ sessionId: 'a', gameCode: 'AXVE' }], { resetMode: 'soft-reset', startMode: 'hoenn-starter', starterPosition: position, stopMode: 'first-shiny' })
     assert.equal(result.phase, 'found')
     assert.deepEqual(commands.filter(([, down]) => down === true || down === 'tap').map(([button]) => button), direction ? ['A', direction, 'A', 'A'] : ['A', 'A', 'A'])
     const starts = commands.filter(([, down]) => down === true || down === 'tap')
@@ -74,11 +74,35 @@ test('a lost Hoenn direction response stops the hunt without retrying or confirm
     inspect: async () => ({ status: 'pending' }), release: async () => {},
     saveState: async () => { assert.fail('no encounter was confirmed') },
   })
-  const result = await controller.start([{ sessionId: 'a' }], { resetMode: 'soft-reset', startMode: 'hoenn-starter', starterPosition: 1, stopMode: 'first-shiny' })
+  const result = await controller.start([{ sessionId: 'a', gameCode: 'AXVE' }], { resetMode: 'soft-reset', startMode: 'hoenn-starter', starterPosition: 1, stopMode: 'first-shiny' })
   assert.equal(result.phase, 'error')
   assert.equal(taps, 1)
   assert.equal(resets, 1)
   assert.deepEqual(encounterButtons, ['A'])
+})
+
+test('one starter hunt routes all five verified titles and never sends Hoenn arrows to Kanto', async () => {
+  let time = 0
+  const players = ['AXVE', 'AXPE', 'BPEE', 'BPRE', 'BPGE'].map(gameCode => ({ sessionId: gameCode, gameCode }))
+  const presses = new Map(players.map(player => [player.sessionId, []]))
+  const released = new Map(players.map(player => [player.sessionId, 0]))
+  const saved = []
+  const controller = createShinyHuntController({
+    now: () => time, sleep: async ms => { time += ms }, prepare: async () => {}, reset: async () => {}, begin: async () => {},
+    input: async (session, button, down, _signal, _cycle, stage) => {
+      if (stage !== 'encounter') return
+      if (down) presses.get(session.sessionId).push(button)
+      else if (button === 'A') released.set(session.sessionId, released.get(session.sessionId) + 1)
+    },
+    tap: async (session, button) => { presses.get(session.sessionId).push(button) },
+    inspect: async session => ({ status: released.get(session.sessionId) >= (session.gameCode.startsWith('AX') || session.gameCode === 'BPEE' ? 3 : 4) ? 'shiny' : 'pending' }),
+    saveState: async session => { saved.push(session.sessionId) }, release: async () => {},
+  })
+  const result = await controller.start(players, { resetMode: 'soft-reset', startMode: 'hoenn-starter', starterPosition: 3, stopMode: 'all-shiny' })
+  assert.equal(result.phase, 'found')
+  for (const gameCode of ['AXVE', 'AXPE', 'BPEE']) assert.deepEqual(presses.get(gameCode), ['A', 'RIGHT', 'A', 'A'])
+  for (const gameCode of ['BPRE', 'BPGE']) assert.deepEqual(presses.get(gameCode), ['A', 'A', 'A', 'A'])
+  assert.deepEqual(saved.sort(), players.map(player => player.sessionId).sort())
 })
 
 test('saves every open player and stops before another reset on enemy shiny', async () => {

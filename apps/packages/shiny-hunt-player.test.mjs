@@ -16,7 +16,7 @@ test('Hoenn direction runs as one local 8 ms tap and starter inspection waits fo
     wait: async ms => { durations.push(ms) }, setA() {}, setButton: (button, down) => buttons.push([button, down]), saveState: async () => true,
   })
   const request = { huntId: 'starter', cycleId: 1 }
-  assert.deepEqual(await player.handle({ ...request, type: 'prepare', resetMode: 'soft-reset', startMode: 'hoenn-starter', starterPosition: 1 }), { ok: true })
+  assert.deepEqual(await player.handle({ ...request, type: 'prepare', resetMode: 'soft-reset', startMode: 'hoenn-starter', starterPosition: 1 }), { ok: true, gameCode: 'AXVE' })
   await player.handle({ ...request, type: 'reset', oddsResetCount: 1 })
   await player.handle({ ...request, type: 'begin', afterReset: true })
   const beforeInputs = inspections
@@ -66,9 +66,30 @@ test('canceling a local tap immediately releases the direction and its late comp
   assert.deepEqual(await player.handle({ ...next, type: 'input', button: 'A', down: false, stage: 'encounter' }), { ok: true })
 })
 
-test('Hoenn mode rejects a Kanto layout before resetting or pressing anything', async () => {
-  const player = createShinyHuntPlayer({ getLayout: () => ({ gameCode: 'BPRE' }), setA() {} })
+test('starter mode rejects an unregistered layout before resetting or pressing anything', async () => {
+  const player = createShinyHuntPlayer({ getLayout: () => ({ gameCode: '????' }), setA() {} })
   assert.deepEqual(await player.handle({ type: 'prepare', huntId: 'starter', resetMode: 'soft-reset', startMode: 'hoenn-starter', starterPosition: 2 }), { ok: false, error: 'unsupported-starter' })
+})
+
+for (const gameCode of ['BPRE', 'BPGE']) test(`${gameCode} ignores the Hoenn ball, accepts only A, and inspects its newly obtained Kanto starter`, async () => {
+  let released = 0
+  const buttons = []
+  const player = createShinyHuntPlayer({
+    getLayout: () => ({ gameCode }), getState: () => new Uint8Array([0]), captureBaseline: () => new Uint8Array(80),
+    inspect: (_state, layout) => { assert.deepEqual(layout.starterSpecies, [1, 4, 7]); return { status: released >= 3 ? 'shiny' : 'pending', species: 7 } },
+    configureOdds: () => true, softReset: async () => true, setA() {},
+    setButton: (button, down) => { buttons.push([button, down]); if (!down && button === 'A') released++ },
+  })
+  const request = { huntId: 'mixed', cycleId: 1 }
+  assert.deepEqual(await player.handle({ ...request, type: 'prepare', resetMode: 'soft-reset', startMode: 'hoenn-starter', starterPosition: 3 }), { ok: true, gameCode })
+  await player.handle({ ...request, type: 'reset', oddsResetCount: 1 })
+  await player.handle({ ...request, type: 'begin', afterReset: true })
+  assert.deepEqual(await player.handle({ ...request, type: 'tap', button: 'RIGHT' }), { ok: false, error: 'invalid-input-order' })
+  assert.deepEqual(await player.handle({ ...request, type: 'input', stage: 'encounter', button: 'RIGHT', down: true }), { ok: false, error: 'invalid-input-order' })
+  for (let count = 0; count < 3; count++) for (const down of [true, false]) assert.deepEqual(await player.handle({ ...request, type: 'input', stage: 'encounter', button: 'A', down }), { ok: true })
+  assert.equal((await player.handle({ ...request, type: 'inspect', configured: true })).status, 'shiny')
+  assert.equal((await player.handle({ ...request, type: 'input', stage: 'encounter', button: 'A', down: true })).error, 'enemy-already-created')
+  assert.deepEqual(buttons.map(([button]) => button), Array(6).fill('A'))
 })
 
 test('a short direction stays down until the core has sampled an emulated frame, then releases', async () => {

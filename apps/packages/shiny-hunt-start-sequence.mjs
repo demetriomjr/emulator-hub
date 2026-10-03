@@ -6,6 +6,34 @@ export const hoennStarterChoices = Object.freeze([
 
 export const HOENN_DIRECTION_TAP_MS = 8
 
+const starterGameStrategies = new Map([
+  ['AXVE', 'hoenn-bag'], ['AXPE', 'hoenn-bag'], ['BPEE', 'hoenn-bag'],
+  ['BPRE', 'kanto-ball'], ['BPGE', 'kanto-ball'],
+])
+const starterStrategies = {
+  'hoenn-bag': {
+    species: [252, 255, 258],
+    resolve: config => ({ startSequence: getShinyHuntStartSequence(config), starterSpecies: hoennStarterChoices.find(choice => choice.value === config.starterPosition)?.species, repeatUntilEncounter: false }),
+  },
+  'kanto-ball': {
+    species: [1, 4, 7],
+    resolve: () => ({ startSequence: [{ button: 'A', holdMs: 40, intervalMs: 1000 }], starterSpecies: [1, 4, 7], repeatUntilEncounter: true }),
+  },
+}
+
+export function isShinyHuntStarterSpecies(gameCode, selection) {
+  const strategy = starterStrategies[starterGameStrategies.get(gameCode)]
+  const species = Array.isArray(selection) ? selection : [selection]
+  return !!strategy && species.length > 0 && species.every(value => strategy.species.includes(value))
+}
+
+export function resolveShinyHuntStartPlan(config, gameCode) {
+  if (config.startMode !== 'hoenn-starter') return { startSequence: getShinyHuntStartSequence(config), repeatUntilEncounter: false }
+  const strategy = starterStrategies[starterGameStrategies.get(gameCode)]
+  if (!strategy) throw new Error('unsupported-starter')
+  return strategy.resolve(config)
+}
+
 // Each step describes its input and minimum time before the following step.
 export function getShinyHuntStartSequence({ startMode, starterPosition }) {
   if (startMode === 'common') return null

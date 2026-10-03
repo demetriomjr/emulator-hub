@@ -64,6 +64,23 @@ test('a starter must be newly created, valid, and match the selected ball', () =
   assert.deepEqual(inspectGen3Encounter(state, selected), { status: 'error', reason: 'invalid-starter-record' })
 })
 
+for (const gameCode of ['BPRE', 'BPGE']) test(`${gameCode} reads any newly obtained Kanto starter and ignores the enemy or a Hoenn choice`, () => {
+  const selected = { gameCode, playerAddress: 0x02024284, enemyAddress: 0x0202402c, starterSpecies: [1, 4, 7] }
+  for (const species of [1, 4, 7]) {
+    const state = makeState(gameCode)
+    const baselineEnemy = state.slice(stateOffset(selected.playerAddress), stateOffset(selected.playerAddress) + 80)
+    writeMon(state, selected.enemyAddress, { pid: 1, species: 25 })
+    assert.equal(inspectGen3Encounter(state, { ...selected, baselineEnemy }).status, 'pending')
+    writeMon(state, selected.playerAddress, { pid: 8, species })
+    assert.equal(inspectGen3Encounter(state, { ...selected, baselineEnemy }).status, 'normal')
+    writeMon(state, selected.playerAddress, { pid: 1, species })
+    assert.equal(inspectGen3Encounter(state, { ...selected, baselineEnemy }).status, 'shiny')
+    assert.equal(inspectGen3Encounter(state, { ...selected, starterSpecies: 252 }).reason, 'unsupported-starter')
+    writeMon(state, selected.playerAddress, { pid: 1, species: 25 })
+    assert.equal(inspectGen3Encounter(state, selected).reason, 'unexpected-starter')
+  }
+})
+
 test('reads the enemy party and ignores a shiny in the player party', () => {
   const state = makeState()
   writeMon(state, playerAddress, { pid: 1 })

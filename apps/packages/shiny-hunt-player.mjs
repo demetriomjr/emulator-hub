@@ -1,5 +1,5 @@
 import { captureGen3EnemyBaseline, inspectGen3BattlePhase, inspectGen3Encounter } from './pokemon-gen3-encounter.mjs'
-import { getShinyHuntStartSequence, hoennStarterChoices, HOENN_DIRECTION_TAP_MS } from './shiny-hunt-start-sequence.mjs'
+import { resolveShinyHuntStartPlan, hoennStarterChoices, HOENN_DIRECTION_TAP_MS } from './shiny-hunt-start-sequence.mjs'
 
 export function createShinyHuntPlayer({
   getLayout,
@@ -27,6 +27,8 @@ export function createShinyHuntPlayer({
   let saving = null
   let starterButtons = null
   let starterInputIndex = 0
+  let starterRepeat = false
+  let starterStarted = false
   let pendingTap = null
 
   function releaseA() {
@@ -45,7 +47,7 @@ export function createShinyHuntPlayer({
   }
 
   function inspectCurrent() {
-    if (starterButtons && starterInputIndex < starterButtons.length) return { status: 'pending' }
+    if (starterButtons && (!starterStarted || !starterRepeat && starterInputIndex < starterButtons.length)) return { status: 'pending' }
     return inspect(getState(), { ...layout, baselineEnemy })
   }
 
@@ -55,24 +57,26 @@ export function createShinyHuntPlayer({
         if (typeof message.huntId !== 'string' || !message.huntId) return { ok: false, error: 'invalid-hunt' }
         const nextLayout = getLayout()
         if (!nextLayout) return { ok: false, error: 'unsupported-rom' }
-        let choice = null
+        let plan = null
         if (message.startMode === 'hoenn-starter') {
-          if (!['AXVE', 'AXPE', 'BPEE'].includes(nextLayout.gameCode)) return { ok: false, error: 'unsupported-starter' }
-          choice = hoennStarterChoices.find(candidate => candidate.value === message.starterPosition)
+          const choice = hoennStarterChoices.find(candidate => candidate.value === message.starterPosition)
           if (!choice || message.resetMode !== 'soft-reset') return { ok: false, error: 'invalid-starter-choice' }
+          plan = resolveShinyHuntStartPlan(message, nextLayout.gameCode)
         }
         releaseA()
         huntId = message.huntId
         cycleId = null
-        layout = choice ? { ...nextLayout, starterSpecies: choice.species } : nextLayout
-        starterButtons = choice ? getShinyHuntStartSequence(message).map(step => step.button) : null
+        layout = plan ? { ...nextLayout, starterSpecies: plan.starterSpecies } : nextLayout
+        starterButtons = plan ? plan.startSequence.map(step => step.button) : null
         starterInputIndex = 0
+        starterRepeat = plan?.repeatUntilEncounter ?? false
+        starterStarted = false
         baselineEnemy = null
         pressIndex = 0
         completed = false
         savedCycleId = null
         saving = null
-        return { ok: true }
+        return { ok: true, ...(plan ? { gameCode: nextLayout.gameCode } : {}) }
       }
       if (message.type === 'cancel') {
         if (message.huntId === huntId) {
@@ -90,6 +94,7 @@ export function createShinyHuntPlayer({
         if (message.huntId !== huntId || message.cycleId !== (cycleId ?? 0) + 1 || !Number.isSafeInteger(message.oddsResetCount) || message.oddsResetCount < 0) return { ok: false, error: 'stale-cycle' }
         releaseA()
         starterInputIndex = 0
+        starterStarted = false
         if (!configureOdds(message.oddsResetCount)) return { ok: false, error: 'odds-clock-rejected' }
         if (!await softReset()) return { ok: false, error: 'soft-reset-failed' }
         let baseline = null
@@ -116,6 +121,7 @@ export function createShinyHuntPlayer({
           baselineEnemy = captureBaseline(state, layout)
           if (!baselineEnemy) return { ok: false, error: 'state-unavailable' }
           starterInputIndex = 0
+          starterStarted = true
           return { ok: true }
         }
         let existing
@@ -164,7 +170,7 @@ export function createShinyHuntPlayer({
       if (message.type === 'input') {
         if (message.button !== undefined) {
           if (completed || !['A', 'B', 'UP', 'DOWN', 'LEFT', 'RIGHT'].includes(message.button) || typeof message.down !== 'boolean') return { ok: false, error: 'invalid-input' }
-          if (starterButtons && message.stage === 'encounter' && (message.button !== 'A' || starterButtons[starterInputIndex] !== 'A')) return { ok: false, error: 'invalid-input-order' }
+          if (starterButtons && message.stage === 'encounter' && (!starterStarted || message.button !== 'A' || !starterRepeat && starterButtons[starterInputIndex] !== 'A')) return { ok: false, error: 'invalid-input-order' }
           if (message.down) {
             if (heldButton || aDown) {
               releaseA()

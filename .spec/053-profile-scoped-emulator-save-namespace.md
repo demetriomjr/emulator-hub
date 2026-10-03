@@ -40,7 +40,17 @@ The approved extension to the existing Spec 076 hunter adds one start method,
 `hoenn-starter`, with one shared Poké Ball position (1/left, 2/center, 3/right)
 for all active players. The existing modal reveals a compact selector only for
 this method; no three separate hunt methods or modal redesign are introduced.
-An explicit ball choice and soft reset are required.
+An explicit Hoenn ball choice and soft reset are required. Mixed-title hunts
+resolve each verified ROM through a shared game-code/strategy registry. Ruby,
+Sapphire and Emerald use the bag sequence below. FireRed and LeafGreen ignore
+the Hoenn ball choice and use timed A interaction with the ball directly in
+front of the saved player, reading the newly obtained Bulbasaur, Charmander or
+Squirtle from the player party. They repeat A only while that record is absent,
+with the existing 40 ms hold and one-second spacing, bounded by the encounter
+timeout. No directional input is sent to these titles. Each player reports its
+verified game code during prepare; every strategy must resolve before any reset.
+Future title support adds registry data/strategies below the presentation layer,
+without title branches in the Hub UI or controller.
 
 After the existing four-A save-loading sequence, open the bag with A, navigate
 once from the center if needed, then press A twice to select and confirm. A
@@ -56,6 +66,13 @@ party record, ignores the opposing Pokémon, waits through the confirmation-to-
 battle delay, and preserves existing stop/state-save behavior. It never modifies
 the canonical in-game save as part of generating a new attempt. Unsupported ROMs,
 wrong starter species, invalid records, and timeout stop the hunt visibly.
+
+Deployment validation exposed an existing Docker overlayfs EXDEV error when
+the sprite synchronizer renamed an asset directory inherited from an image
+layer. Recreate only the generated build asset directory in the synchronization
+RUN layer; prefer current seed assets over older cached copies. Sprite hash and
+completeness validation still runs normally. Persistent backend data is outside
+this build stage and is not affected by the build correction.
 
 ## Problem
 

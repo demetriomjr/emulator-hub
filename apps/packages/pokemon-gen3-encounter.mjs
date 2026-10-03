@@ -1,4 +1,5 @@
 import { getGen3NationalDex } from './pokemon-gen3-species.mjs'
+import { isShinyHuntStarterSpecies } from './shiny-hunt-start-sequence.mjs'
 
 const layouts = new Map([
   ['0fdd36e92b75bed65d09df4635ab0b707b288c2bf1dc4c6e7a4a4f0eebe9d64c', { playerAddress: 0x03004360, enemyAddress: 0x030045c0, gameCode: 'AXVE', battleFlag: { main: 0x03001770, inBattleOffset: 0x43d } }],
@@ -66,7 +67,7 @@ function decodeRecord(bytes, offset) {
 export function inspectGen3Encounter(bytes, layout) {
   if (!stateMatches(bytes, layout)) return { status: 'error', reason: 'state-mismatch' }
   const starter = layout.starterSpecies !== undefined
-  if (starter && (!['AXVE', 'AXPE', 'BPEE'].includes(layout.gameCode) || ![252, 255, 258].includes(layout.starterSpecies))) return { status: 'error', reason: 'unsupported-starter' }
+  if (starter && !isShinyHuntStarterSpecies(layout.gameCode, layout.starterSpecies)) return { status: 'error', reason: 'unsupported-starter' }
   if (!starter && (layout.battle || layout.battleFlag) && !gen3InBattle(bytes, layout.battle ?? layout.battleFlag)) return { status: 'pending' }
   const offset = gen3StateOffset(starter ? layout.playerAddress : layout.enemyAddress)
   if (offset === null || offset + 80 > bytes.length) return { status: 'error', reason: 'state-mismatch' }
@@ -75,7 +76,7 @@ export function inspectGen3Encounter(bytes, layout) {
   const record = decodeRecord(bytes, offset)
   if (!record) return { status: 'pending' }
   if (record.invalid) return { status: 'error', reason: starter ? 'invalid-starter-record' : 'invalid-enemy-record' }
-  if (starter && record.species !== layout.starterSpecies) return { status: 'error', reason: 'unexpected-starter' }
+  if (starter && !(Array.isArray(layout.starterSpecies) ? layout.starterSpecies : [layout.starterSpecies]).includes(record.species)) return { status: 'error', reason: 'unexpected-starter' }
   return { status: record.shiny ? 'shiny' : 'normal', species: record.species, pid: record.pid, otid: record.otid }
 }
 
