@@ -1,8 +1,10 @@
 import { captureGen3EnemyBaseline, inspectGen3BattlePhase, inspectGen3Encounter } from './pokemon-gen3-encounter.mjs'
+import { getShinyHuntStartSequence, hoennStarterChoices, HOENN_DIRECTION_TAP_MS } from './shiny-hunt-start-sequence.mjs'
 
 export function createShinyHuntPlayer({
   getLayout,
   getState,
+  getFrameNumber = () => null,
   captureBaseline = captureGen3EnemyBaseline,
   inspect = inspectGen3Encounter,
   inspectPhase = inspectGen3BattlePhase,
@@ -23,8 +25,12 @@ export function createShinyHuntPlayer({
   let completed = false
   let savedCycleId = null
   let saving = null
+  let starterButtons = null
+  let starterInputIndex = 0
+  let pendingTap = null
 
   function releaseA() {
+    pendingTap = null
     if (heldButton) {
       setButton(heldButton, false)
       heldButton = null
@@ -38,16 +44,29 @@ export function createShinyHuntPlayer({
     return huntId !== null && message.huntId === huntId && (message.type === 'prepare' || message.cycleId === cycleId)
   }
 
+  function inspectCurrent() {
+    if (starterButtons && starterInputIndex < starterButtons.length) return { status: 'pending' }
+    return inspect(getState(), { ...layout, baselineEnemy })
+  }
+
   async function handle(message) {
     try {
       if (message.type === 'prepare') {
         if (typeof message.huntId !== 'string' || !message.huntId) return { ok: false, error: 'invalid-hunt' }
         const nextLayout = getLayout()
         if (!nextLayout) return { ok: false, error: 'unsupported-rom' }
+        let choice = null
+        if (message.startMode === 'hoenn-starter') {
+          if (!['AXVE', 'AXPE', 'BPEE'].includes(nextLayout.gameCode)) return { ok: false, error: 'unsupported-starter' }
+          choice = hoennStarterChoices.find(candidate => candidate.value === message.starterPosition)
+          if (!choice || message.resetMode !== 'soft-reset') return { ok: false, error: 'invalid-starter-choice' }
+        }
         releaseA()
         huntId = message.huntId
         cycleId = null
-        layout = nextLayout
+        layout = choice ? { ...nextLayout, starterSpecies: choice.species } : nextLayout
+        starterButtons = choice ? getShinyHuntStartSequence(message).map(step => step.button) : null
+        starterInputIndex = 0
         baselineEnemy = null
         pressIndex = 0
         completed = false
@@ -70,6 +89,7 @@ export function createShinyHuntPlayer({
       if (message.type === 'reset') {
         if (message.huntId !== huntId || message.cycleId !== (cycleId ?? 0) + 1 || !Number.isSafeInteger(message.oddsResetCount) || message.oddsResetCount < 0) return { ok: false, error: 'stale-cycle' }
         releaseA()
+        starterInputIndex = 0
         if (!configureOdds(message.oddsResetCount)) return { ok: false, error: 'odds-clock-rejected' }
         if (!await softReset()) return { ok: false, error: 'soft-reset-failed' }
         let baseline = null
@@ -87,6 +107,17 @@ export function createShinyHuntPlayer({
       if (message.type === 'begin') {
         if (message.huntId !== huntId || completed || (message.afterReset ? message.cycleId !== cycleId : message.cycleId !== (cycleId ?? 0) + 1)) return { ok: false, error: 'stale-cycle' }
         releaseA()
+        if (starterButtons) {
+          if (!message.afterReset) return { ok: false, error: 'invalid-starter-choice' }
+          const state = getState()
+          const existing = inspect(state, layout)
+          if (existing.status === 'normal' || existing.status === 'shiny') return { ok: false, error: 'starter-already-owned' }
+          if (existing.status !== 'pending') return { ok: false, error: 'state-unavailable' }
+          baselineEnemy = captureBaseline(state, layout)
+          if (!baselineEnemy) return { ok: false, error: 'state-unavailable' }
+          starterInputIndex = 0
+          return { ok: true }
+        }
         let existing
         let baseline
         try {
@@ -108,16 +139,39 @@ export function createShinyHuntPlayer({
         return { ok: true }
       }
       if (message.type === 'phase') return completed ? { ok: false, error: 'completed' } : { ok: true, ...inspectPhase(getState(), layout) }
+      if (message.type === 'tap') {
+        if (!starterButtons || completed || heldButton || aDown || !['LEFT', 'RIGHT'].includes(message.button) || starterButtons[starterInputIndex] !== message.button) return { ok: false, error: 'invalid-input-order' }
+        const token = {}
+        const initialFrame = getFrameNumber()
+        pendingTap = token
+        heldButton = message.button
+        try {
+          setButton(heldButton, true)
+          // A timer shorter than a rendered batch can miss every emulated frame.
+          // The bag uses JOY_NEW, so keeping this single edge until sampling is safe.
+          for (let attempt = 0; attempt < 50; attempt += 1) {
+            await wait(HOENN_DIRECTION_TAP_MS)
+            if (!current(message) || pendingTap !== token) return { ok: false, error: 'stale-cycle' }
+            if (initialFrame === null || getFrameNumber() !== initialFrame) break
+            if (attempt === 49) throw new Error('input-frame-timeout')
+          }
+          starterInputIndex += 1
+          return { ok: true }
+        } finally {
+          if (pendingTap === token) releaseA()
+        }
+      }
       if (message.type === 'input') {
         if (message.button !== undefined) {
           if (completed || !['A', 'B', 'UP', 'DOWN', 'LEFT', 'RIGHT'].includes(message.button) || typeof message.down !== 'boolean') return { ok: false, error: 'invalid-input' }
+          if (starterButtons && message.stage === 'encounter' && (message.button !== 'A' || starterButtons[starterInputIndex] !== 'A')) return { ok: false, error: 'invalid-input-order' }
           if (message.down) {
             if (heldButton || aDown) {
               releaseA()
               return { ok: false, error: 'invalid-input-order' }
             }
             if (message.stage === 'navigation' || message.stage === 'encounter') {
-              const result = inspect(getState(), { ...layout, baselineEnemy })
+              const result = inspectCurrent()
               if (result.status !== 'pending') return { ok: false, error: result.status === 'normal' || result.status === 'shiny' ? 'enemy-already-created' : 'unsafe-state' }
             }
             if (message.stage === 'exit') {
@@ -128,6 +182,7 @@ export function createShinyHuntPlayer({
           } else {
             if (heldButton !== message.button) return { ok: false, error: 'invalid-input-order' }
             releaseA()
+            if (starterButtons && message.stage === 'encounter') starterInputIndex += 1
           }
           return { ok: true }
         }
@@ -139,7 +194,7 @@ export function createShinyHuntPlayer({
           return { ok: true }
         }
         if (aDown || message.pressIndex !== pressIndex + 1) return { ok: false, error: 'invalid-input-order' }
-        const result = inspect(getState(), { ...layout, baselineEnemy })
+        const result = inspectCurrent()
         if (result.status !== 'pending') return { ok: false, error: result.status === 'normal' || result.status === 'shiny' ? 'enemy-already-created' : 'unsafe-state' }
         setA(true)
         aDown = true
@@ -147,7 +202,7 @@ export function createShinyHuntPlayer({
       }
       if (message.type === 'inspect') {
         if (completed) return { ok: false, error: 'completed' }
-        if (message.configured) return { ok: true, ...inspect(getState(), { ...layout, baselineEnemy }) }
+        if (message.configured) return { ok: true, ...inspectCurrent() }
         if (pressIndex !== 5 || aDown) return { ok: true, status: 'pending' }
         const result = inspect(getState(), { ...layout, baselineEnemy })
         return { ok: true, ...result }

@@ -34,6 +34,29 @@ database, and exposed no save bytes. Loading the existing fixture into MEMFS
 preserved its SHA-256 exactly. Unit tests also verify that missing saves produce
 no upload and that later changed in-game saves still synchronize to the backend.
 
+## Save-facing consumer: Hoenn starter hunts — 2026-10-03
+
+The approved extension to the existing Spec 076 hunter adds one start method,
+`hoenn-starter`, with one shared Poké Ball position (1/left, 2/center, 3/right)
+for all active players. The existing modal reveals a compact selector only for
+this method; no three separate hunt methods or modal redesign are introduced.
+An explicit ball choice and soft reset are required.
+
+After the existing four-A save-loading sequence, open the bag with A, navigate
+once from the center if needed, then press A twice to select and confirm. A
+presses keep the existing 40 ms holds and at least one-second spacing. The
+directional tap runs inside the iframe for at least 8 ms (40 ms divided by the
+locked 5× speed), then releases as soon as the core frame counter advances.
+Polling is bounded to 50 checks; a stalled core stops the hunt. The bag handles
+JOY_NEW, so this single press does not repeat across frames. Input releases
+locally in a finally block and is never retried blindly.
+Cancellation and stale-cycle guards must prevent a delayed tap from affecting
+a subsequent attempt. Starter hunting reads the selected newly created player
+party record, ignores the opposing Pokémon, waits through the confirmation-to-
+battle delay, and preserves existing stop/state-save behavior. It never modifies
+the canonical in-game save as part of generating a new attempt. Unsupported ROMs,
+wrong starter species, invalid records, and timeout stop the hunt visibly.
+
 ## Problem
 
 Production logs show that the backend returns the correct save on every launch, but reopening a profile can start EmulatorJS without that profile's data. Multiple profiles of the same game currently share `window.EJS_gameID = launch.gameId`, allowing EmulatorJS local state and battery-save paths to collide across profiles and sessions.

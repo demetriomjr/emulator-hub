@@ -1,3 +1,5 @@
+import { getShinyHuntStartSequence } from './shiny-hunt-start-sequence.mjs'
+
 const FIRST_A_DELAY_MS = 2000
 const A_INTERVAL_MS = 1000
 const A_HOLD_MS = 40
@@ -23,7 +25,7 @@ function sleepWithAbort(ms, signal) {
   })
 }
 
-export function createShinyHuntController({ now = () => performance.now(), sleep = sleepWithAbort, prepare, reset, confirmReset, pulse, begin, input, releaseInput, inspect, inspectPhase, saveState, release, onStatus = () => {} }) {
+export function createShinyHuntController({ now = () => performance.now(), sleep = sleepWithAbort, prepare, reset, confirmReset, pulse, begin, input, tap, releaseInput, inspect, inspectPhase, saveState, release, onStatus = () => {} }) {
   let active = null
   let lastStatus = { phase: 'idle', resetCount: 0 }
 
@@ -99,7 +101,9 @@ export function createShinyHuntController({ now = () => performance.now(), sleep
 
   async function runConfigured(sessions, signal, config) {
     const { resetMode, startMode, stopMode } = config
-    if (!['soft-reset', 'exit-encounter'].includes(resetMode) || !['interact-a', 'walk-right', 'walk-left', 'walk-up', 'common'].includes(startMode) || !['first-shiny', 'all-shiny'].includes(stopMode)) throw new Error('Configuração de caça inválida')
+    if (!['soft-reset', 'exit-encounter'].includes(resetMode) || !['interact-a', 'walk-right', 'walk-left', 'walk-up', 'common', 'hoenn-starter'].includes(startMode) || !['first-shiny', 'all-shiny'].includes(stopMode)) throw new Error('Configuração de caça inválida')
+    const startSequence = getShinyHuntStartSequence(config)
+    if (startMode === 'hoenn-starter' && (resetMode !== 'soft-reset' || typeof tap !== 'function')) throw new Error('Inicial de Hoenn requer soft reset e toque direcional local')
     if (typeof begin !== 'function' || typeof input !== 'function' || resetMode === 'exit-encounter' && typeof inspectPhase !== 'function') throw new Error('Entrada de caça indisponível')
     const completed = new Set()
     const foundIds = new Set()
@@ -249,11 +253,19 @@ export function createShinyHuntController({ now = () => performance.now(), sleep
             if (reply.status !== 'pending') return reply
           }
         }
-        const earlyEncounter = startMode === 'interact-a'
-          ? await holdOrReadEncounter('A', A_HOLD_MS)
-          : await holdOrReadEncounter({ 'walk-right': 'RIGHT', 'walk-left': 'LEFT', 'walk-up': 'UP' }[startMode], 1200)
-        if (earlyEncounter) return earlyEncounter
-        if (startMode === 'interact-a') await sleep(ENCOUNTER_WAIT_MS, workerSignal)
+        for (const step of startSequence) {
+          checkWork()
+          const pressedAt = now()
+          if (step.localTap) {
+            // One iframe command owns both edges. Never retry a direction on timeout.
+            await tap(session, step.button, workerSignal, state.cycleId)
+          } else {
+            const earlyEncounter = await holdOrReadEncounter(step.button, step.holdMs)
+            if (earlyEncounter) return earlyEncounter
+          }
+          if (step.intervalMs) await waitAtLeast(pressedAt + step.intervalMs)
+        }
+        if (startMode === 'interact-a' || startMode === 'hoenn-starter') await sleep(ENCOUNTER_WAIT_MS, workerSignal)
         for (let readIndex = 0; readIndex < MAX_PENDING_READS; readIndex += 1) {
           const reply = await read()
           if (reply.status !== 'pending') return reply

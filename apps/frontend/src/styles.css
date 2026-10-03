@@ -465,8 +465,13 @@ button { font: inherit; }
 .hunt-start-options { display: flex; flex-wrap: wrap; }
 .hunt-start-options label { flex: 1 1 170px; min-width: 0; }
 .hunt-choice-group:disabled label { opacity: .7; cursor: default; }
+.hunt-choice-options label:has(input:disabled) { opacity: .7; cursor: default; }
+.hunt-starter-choice { display: grid; gap: 7px; margin-top: 12px; }
+.hunt-starter-choice .ant-select { width: 100%; min-height: 44px; }
+.hunt-starter-choice p { font-size: .85rem; font-weight: 400; }
 .hunt-modal-body p { margin: 0; color: #e8f5ef; }
 .hunt-modal-action { min-height: 42px; border: 1px solid #77e2af; border-radius: 7px; color: #062017; background: #77e2af; font-weight: 700; cursor: pointer; }
+.hunt-modal-action:disabled { opacity: .55; cursor: default; }
 @media (max-width: 620px) { .hunt-binary-options { grid-template-columns: minmax(0, 1fr); } }
 .player-cell.hunt-found { outline: 3px solid #77e2af; outline-offset: -3px; z-index: 1; }
 .player-header .ant-btn.fast-forward-button { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 1px solid #a0dcc4a0; border-radius: 9px; color: #e8f5ef; background: #102b30e8; cursor: pointer; }

@@ -104,6 +104,11 @@ function getShinyHuntPlayer() {
       ? findGen3EncounterLayout(launchDescriptor)
       : null,
     getState: () => window.EJS_emulator?.gameManager?.getState?.(),
+    getFrameNumber: () => {
+      const frame = window.EJS_emulator?.gameManager?.getFrameNum?.()
+      if (!Number.isSafeInteger(frame)) throw new Error('input-frame-unavailable')
+      return frame
+    },
     configureOdds: count => oddsClock.configure({ enabled: true, oddsResetCount: count, virtualTimestamp: count * 60_000 }),
     softReset: () => softResetEmulator(window.EJS_emulator?.gameManager),
     setA: down => {
@@ -112,7 +117,7 @@ function getShinyHuntPlayer() {
     },
     setButton: (button, down) => {
       if (!gamepadInput) throw new Error('Emulator input is unavailable')
-      gamepadInput.setSyntheticPressed({ A: 8, B: 0, UP: 4, DOWN: 5, LEFT: 6, RIGHT: 7 }[button], down)
+      gamepadInput.setSyntheticPressed({ A: 8, B: 0, UP: 4, DOWN: 5, LEFT: 6, RIGHT: 7 }[button], down, 'hunt')
     },
     saveState: () => saveEmulatorState({ kind: 'user-state', reasonCode: 'user-request' }),
   })
@@ -758,6 +763,7 @@ window.addEventListener('message', event => {
     'emulator-hub:hunt-confirm-reset': 'confirm-reset',
     'emulator-hub:hunt-begin': 'begin',
     'emulator-hub:hunt-input': 'input',
+    'emulator-hub:hunt-tap': 'tap',
     'emulator-hub:hunt-release-input': 'release-input',
     'emulator-hub:hunt-inspect': 'inspect',
     'emulator-hub:hunt-phase': 'phase',

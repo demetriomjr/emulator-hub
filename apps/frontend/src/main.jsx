@@ -25,6 +25,7 @@ import { canReconcileLateSnapshotDelete, createSnapshotDeleteWatchdog, restorePr
 import { createPlayerTriggerActions, playerTriggerActionOptions } from '../../packages/player-trigger-actions.mjs'
 import { requestPlayerFrame } from '../../packages/player-frame-request.mjs'
 import { createShinyHuntController } from '../../packages/shiny-hunt-controller.mjs'
+import { hoennStarterChoices } from '../../packages/shiny-hunt-start-sequence.mjs'
 import { createGlobalPlaybackToggle, createPlayerPlaybackToggle, requestPlayerPlaybackState, selectPlayingSessions } from '../../packages/player-playback.mjs'
 import { saveRunningProfileNames } from '../../packages/running-profile-editor.mjs'
 import { findReachablePlayerOriginSlot, findTrustedPlayerFrame, frameOrigin, parsePlayerOriginPorts, playerOriginForSlot } from '../../packages/player-origin-topology.mjs'
@@ -84,6 +85,11 @@ const huntErrorMessages = Object.freeze({
   'unsupported-rom': 'Esta ROM não é compatível com a leitura de encontros da caça.',
   'enemy-already-created': 'O encontro começou antes do próximo comando; a caça foi parada para preservar o Pokémon.',
   'state-unavailable': 'Não foi possível ler o estado deste emulador.',
+  'unsupported-starter': 'Inicial de Hoenn requer Pokémon Ruby, Sapphire ou Emerald compatível.',
+  'invalid-starter-choice': 'Escolha a Poké Bola e use soft reset para caçar um inicial de Hoenn.',
+  'starter-already-owned': 'Salve em frente à bolsa, antes de escolher o inicial.',
+  'input-frame-timeout': 'O emulador não processou o toque direcional; a caça foi parada.',
+  'input-frame-unavailable': 'Não foi possível confirmar o toque direcional neste emulador.',
 })
 const MAX_PLAYER_INSTANCES = 9
 let playerOriginPorts = []
@@ -990,7 +996,7 @@ function App() {
           const ready = await ensureHuntOddsClock(session, session.oddsResetCount ?? 0)
           if (!ready) throw new Error('Relógio do Odds Manipulator não confirmado: ' + (session.profileName ?? session.sessionId))
         }))
-        await Promise.all(selected.map(session => requestHunt(session, 'prepare', null, { resetMode: huntConfig.resetMode })))
+        await Promise.all(selected.map(session => requestHunt(session, 'prepare', null, { ...huntConfig })))
       },
       reset: async (session, _signal, cycleId) => {
         const nextCount = (session.oddsResetCount ?? 0) + 1
@@ -1006,6 +1012,7 @@ function App() {
       },
       begin: (session, _signal, cycleId, details) => requestHunt(session, 'begin', cycleId, details),
       input: (session, button, down, _signal, cycleId, stage) => requestHunt(session, 'input', cycleId, { button, down, stage }, 2000),
+      tap: (session, button, _signal, cycleId) => requestHunt(session, 'tap', cycleId, { button }, 2000),
       releaseInput: (session, _signal, cycleId) => requestHunt(session, 'release-input', cycleId, {}, 5000),
       inspect: async (session, _signal, cycleId) => {
         const reply = await requestHunt(session, 'inspect', cycleId, { configured: true }, 10000)
@@ -1873,7 +1880,7 @@ function App() {
               <legend>1. Tipo de reset</legend>
               <div className="hunt-choice-options">
                 <label><input type="radio" name="hunt-reset-mode" value="soft-reset" checked={huntConfig.resetMode === 'soft-reset'} onChange={() => setHuntConfig(current => ({ ...current, resetMode: 'soft-reset' }))} />Soft reset</label>
-                <label><input type="radio" name="hunt-reset-mode" value="exit-encounter" checked={huntConfig.resetMode === 'exit-encounter'} onChange={() => setHuntConfig(current => ({ ...current, resetMode: 'exit-encounter' }))} />Sair do encounter</label>
+                <label><input type="radio" name="hunt-reset-mode" value="exit-encounter" disabled={huntConfig.startMode === 'hoenn-starter'} checked={huntConfig.resetMode === 'exit-encounter'} onChange={() => setHuntConfig(current => ({ ...current, resetMode: 'exit-encounter' }))} />Sair do encounter</label>
               </div>
             </fieldset>
             <fieldset className="hunt-choice-group" disabled={huntRunning}>
@@ -1892,11 +1899,17 @@ function App() {
               <label><input type="radio" name="hunt-start-mode" value="walk-left" checked={huntConfig.startMode === 'walk-left'} onChange={() => setHuntConfig(current => ({ ...current, startMode: 'walk-left' }))} />Andar para a esquerda</label>
               <label><input type="radio" name="hunt-start-mode" value="walk-up" checked={huntConfig.startMode === 'walk-up'} onChange={() => setHuntConfig(current => ({ ...current, startMode: 'walk-up' }))} />Andar para cima</label>
               <label><input type="radio" name="hunt-start-mode" value="common" checked={huntConfig.startMode === 'common'} onChange={() => setHuntConfig(current => ({ ...current, startMode: 'common' }))} />Encounter comum</label>
+              <label><input type="radio" name="hunt-start-mode" value="hoenn-starter" checked={huntConfig.startMode === 'hoenn-starter'} onChange={() => setHuntConfig(current => ({ ...current, startMode: 'hoenn-starter', resetMode: 'soft-reset' }))} />Inicial de Hoenn</label>
             </div>
+            {huntConfig.startMode === 'hoenn-starter' && <div className="hunt-starter-choice">
+              <label htmlFor="hunt-starter-position">Poké Bola · todos os jogadores</label>
+              <Select id="hunt-starter-position" value={huntConfig.starterPosition} placeholder="Escolha a Poké Bola" options={hoennStarterChoices} disabled={huntRunning} onChange={starterPosition => setHuntConfig(current => ({ ...current, starterPosition }))} aria-describedby="hunt-starter-help" />
+              <p id="hunt-starter-help">Ruby, Sapphire ou Emerald. Salve em frente à bolsa fechada. Requer soft reset.</p>
+            </div>}
           </fieldset>
           {huntStatus.phase === 'error' && <p role="alert">{huntErrorMessages[huntStatus.error] ?? huntStatus.error}</p>}
           {huntStatus.phase === 'found' && <p role="status">Shiny encontrado.</p>}
-          <button className="hunt-modal-action" type="button" onClick={huntRunning ? stopShinyHunt : startShinyHunt}>{huntRunning ? 'Parar' : 'Iniciar'}</button>
+          <button className="hunt-modal-action" type="button" disabled={!huntRunning && huntConfig.startMode === 'hoenn-starter' && !huntConfig.starterPosition} onClick={huntRunning ? stopShinyHunt : startShinyHunt}>{huntRunning ? 'Parar' : 'Iniciar'}</button>
         </div>
       </div>
     </div>)}

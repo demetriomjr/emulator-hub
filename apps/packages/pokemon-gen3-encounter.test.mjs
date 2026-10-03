@@ -43,6 +43,27 @@ function writeMon(state, address, { pid, otid = 0, species = 25, validChecksum =
 
 const layout = { enemyAddress, playerAddress, gameCode: 'AXVE' }
 
+test('Hoenn starter hunts inspect the selected player starter and ignore a shiny opponent', () => {
+  const state = makeState()
+  writeMon(state, playerAddress, { pid: 8, species: 277 })
+  writeMon(state, enemyAddress, { pid: 1, species: 25 })
+  assert.deepEqual(inspectGen3Encounter(state, { ...layout, starterSpecies: 252 }), { status: 'normal', species: 252, pid: 8, otid: 0 })
+  writeMon(state, playerAddress, { pid: 1, species: 277 })
+  assert.equal(inspectGen3Encounter(state, { ...layout, starterSpecies: 252 }).status, 'shiny')
+})
+
+test('a starter must be newly created, valid, and match the selected ball', () => {
+  const state = makeState()
+  const selected = { ...layout, starterSpecies: 255 }
+  assert.deepEqual(inspectGen3Encounter(state, selected), { status: 'pending' })
+  writeMon(state, playerAddress, { pid: 1, species: 280 })
+  const baselineEnemy = state.slice(stateOffset(playerAddress), stateOffset(playerAddress) + 80)
+  assert.deepEqual(inspectGen3Encounter(state, { ...selected, baselineEnemy }), { status: 'pending' })
+  assert.deepEqual(inspectGen3Encounter(state, { ...layout, starterSpecies: 258 }), { status: 'error', reason: 'unexpected-starter' })
+  writeMon(state, playerAddress, { pid: 1, species: 280, validChecksum: false })
+  assert.deepEqual(inspectGen3Encounter(state, selected), { status: 'error', reason: 'invalid-starter-record' })
+})
+
 test('reads the enemy party and ignores a shiny in the player party', () => {
   const state = makeState()
   writeMon(state, playerAddress, { pid: 1 })

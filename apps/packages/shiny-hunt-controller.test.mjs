@@ -23,6 +23,64 @@ function harness(results) {
 
 const sessions = [{ sessionId: 'a' }, { sessionId: 'b' }]
 
+for (const [position, direction] of [[1, 'LEFT'], [2, null], [3, 'RIGHT']]) {
+  test(`Hoenn ball ${position} opens the bag, taps once from the center, and confirms twice`, async () => {
+    let time = 0
+    let confirmations = 0
+    let reads = 0
+    const commands = []
+    const controller = createShinyHuntController({
+      now: () => time, sleep: async ms => { time += ms }, prepare: async () => {}, reset: async () => {},
+      begin: async () => {},
+      input: async (_session, button, down, _signal, _cycle, stage) => {
+        if (stage === 'encounter') {
+          commands.push([button, down, time])
+          if (button === 'A' && !down) confirmations++
+        }
+      },
+      tap: async (_session, button) => { commands.push([button, 'tap', time]); time += 8 },
+      inspect: async () => ({ status: confirmations === 3 && ++reads > 2 ? 'shiny' : 'pending' }),
+      saveState: async () => {}, release: async () => {},
+    })
+    const result = await controller.start([{ sessionId: 'a' }], { resetMode: 'soft-reset', startMode: 'hoenn-starter', starterPosition: position, stopMode: 'first-shiny' })
+    assert.equal(result.phase, 'found')
+    assert.deepEqual(commands.filter(([, down]) => down === true || down === 'tap').map(([button]) => button), direction ? ['A', direction, 'A', 'A'] : ['A', 'A', 'A'])
+    const starts = commands.filter(([, down]) => down === true || down === 'tap')
+    for (let index = 1; index < starts.length; index++) assert.ok(starts[index][2] - starts[index - 1][2] >= 1000)
+    for (let i = 0; i < commands.length - 1; i++) if (commands[i][1] === true) assert.equal(commands[i + 1][2] - commands[i][2], 40)
+    assert.equal(result.attemptCount, 1)
+  })
+}
+
+test('Hoenn hunt refuses a missing ball or encounter-exit reset before preparing players', async () => {
+  let preparations = 0
+  const controller = createShinyHuntController({ prepare: async () => { preparations++ }, release: async () => {} })
+  for (const config of [
+    { resetMode: 'soft-reset', startMode: 'hoenn-starter', stopMode: 'first-shiny' },
+    { resetMode: 'exit-encounter', startMode: 'hoenn-starter', starterPosition: 2, stopMode: 'first-shiny' },
+  ]) assert.equal((await controller.start([{ sessionId: 'a' }], config)).phase, 'error')
+  assert.equal(preparations, 0)
+})
+
+test('a lost Hoenn direction response stops the hunt without retrying or confirming another ball', async () => {
+  let time = 0
+  let taps = 0
+  let resets = 0
+  const encounterButtons = []
+  const controller = createShinyHuntController({
+    now: () => time, sleep: async ms => { time += ms }, prepare: async () => {}, reset: async () => { resets++ }, begin: async () => {},
+    input: async (_session, button, down, _signal, _cycle, stage) => { if (stage === 'encounter' && down) encounterButtons.push(button) },
+    tap: async () => { taps++; throw new Error('Player request timed out') },
+    inspect: async () => ({ status: 'pending' }), release: async () => {},
+    saveState: async () => { assert.fail('no encounter was confirmed') },
+  })
+  const result = await controller.start([{ sessionId: 'a' }], { resetMode: 'soft-reset', startMode: 'hoenn-starter', starterPosition: 1, stopMode: 'first-shiny' })
+  assert.equal(result.phase, 'error')
+  assert.equal(taps, 1)
+  assert.equal(resets, 1)
+  assert.deepEqual(encounterButtons, ['A'])
+})
+
 test('saves every open player and stops before another reset on enemy shiny', async () => {
   const { controller, calls } = harness((_cycle, sessionId) => ({ status: sessionId === 'b' ? 'shiny' : 'normal' }))
   const outcome = await controller.start(sessions)

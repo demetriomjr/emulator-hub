@@ -65,14 +65,17 @@ function decodeRecord(bytes, offset) {
 
 export function inspectGen3Encounter(bytes, layout) {
   if (!stateMatches(bytes, layout)) return { status: 'error', reason: 'state-mismatch' }
-  if ((layout.battle || layout.battleFlag) && !gen3InBattle(bytes, layout.battle ?? layout.battleFlag)) return { status: 'pending' }
-  const offset = gen3StateOffset(layout.enemyAddress)
+  const starter = layout.starterSpecies !== undefined
+  if (starter && (!['AXVE', 'AXPE', 'BPEE'].includes(layout.gameCode) || ![252, 255, 258].includes(layout.starterSpecies))) return { status: 'error', reason: 'unsupported-starter' }
+  if (!starter && (layout.battle || layout.battleFlag) && !gen3InBattle(bytes, layout.battle ?? layout.battleFlag)) return { status: 'pending' }
+  const offset = gen3StateOffset(starter ? layout.playerAddress : layout.enemyAddress)
   if (offset === null || offset + 80 > bytes.length) return { status: 'error', reason: 'state-mismatch' }
   const enemy = bytes.subarray(offset, offset + 80)
   if (layout.baselineEnemy?.length === 80 && enemy.every((value, index) => value === layout.baselineEnemy[index])) return { status: 'pending' }
   const record = decodeRecord(bytes, offset)
   if (!record) return { status: 'pending' }
-  if (record.invalid) return { status: 'error', reason: 'invalid-enemy-record' }
+  if (record.invalid) return { status: 'error', reason: starter ? 'invalid-starter-record' : 'invalid-enemy-record' }
+  if (starter && record.species !== layout.starterSpecies) return { status: 'error', reason: 'unexpected-starter' }
   return { status: record.shiny ? 'shiny' : 'normal', species: record.species, pid: record.pid, otid: record.otid }
 }
 
@@ -100,6 +103,7 @@ export function inspectGen3BattlePhase(bytes, layout) {
 
 export function captureGen3EnemyBaseline(bytes, layout) {
   if (!stateMatches(bytes, layout)) return null
-  const offset = gen3StateOffset(layout.enemyAddress)
+  // The legacy baseline field also guards the selected player record in starter mode.
+  const offset = gen3StateOffset(layout.starterSpecies !== undefined ? layout.playerAddress : layout.enemyAddress)
   return offset === null ? null : bytes.slice(offset, offset + 80)
 }

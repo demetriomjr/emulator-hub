@@ -3,6 +3,111 @@ import test from 'node:test'
 
 import { createShinyHuntPlayer } from './shiny-hunt-player.mjs'
 
+test('Hoenn direction runs as one local 8 ms tap and starter inspection waits for both confirmations', async () => {
+  const buttons = []
+  const durations = []
+  let seenSpecies
+  let inspections = 0
+  const player = createShinyHuntPlayer({
+    getLayout: () => ({ gameCode: 'AXVE' }), getState: () => new Uint8Array([0]),
+    captureBaseline: () => new Uint8Array(80),
+    inspect: (_state, layout) => { inspections++; seenSpecies = layout.starterSpecies; return { status: 'pending' } },
+    configureOdds: () => true, softReset: async () => true,
+    wait: async ms => { durations.push(ms) }, setA() {}, setButton: (button, down) => buttons.push([button, down]), saveState: async () => true,
+  })
+  const request = { huntId: 'starter', cycleId: 1 }
+  assert.deepEqual(await player.handle({ ...request, type: 'prepare', resetMode: 'soft-reset', startMode: 'hoenn-starter', starterPosition: 1 }), { ok: true })
+  await player.handle({ ...request, type: 'reset', oddsResetCount: 1 })
+  await player.handle({ ...request, type: 'begin', afterReset: true })
+  const beforeInputs = inspections
+  const pressA = async () => {
+    assert.deepEqual(await player.handle({ ...request, type: 'input', button: 'A', down: true, stage: 'encounter' }), { ok: true })
+    assert.deepEqual(await player.handle({ ...request, type: 'input', button: 'A', down: false, stage: 'encounter' }), { ok: true })
+  }
+  await pressA()
+  assert.deepEqual(await player.handle({ ...request, type: 'tap', button: 'RIGHT' }), { ok: false, error: 'invalid-input-order' })
+  assert.deepEqual(await player.handle({ ...request, type: 'tap', button: 'LEFT' }), { ok: true })
+  assert.deepEqual(durations, [8])
+  await pressA()
+  assert.deepEqual(await player.handle({ ...request, type: 'inspect', configured: true }), { ok: true, status: 'pending' })
+  assert.equal(inspections, beforeInputs)
+  await pressA()
+  await player.handle({ ...request, type: 'inspect', configured: true })
+  assert.equal(inspections, beforeInputs + 1)
+  assert.equal(seenSpecies, 252)
+  assert.deepEqual(buttons.filter(([button]) => button === 'LEFT'), [['LEFT', true], ['LEFT', false]])
+})
+
+test('canceling a local tap immediately releases the direction and its late completion cannot advance another hunt', async () => {
+  const buttons = []
+  let finishTap
+  const player = createShinyHuntPlayer({
+    getLayout: () => ({ gameCode: 'BPEE' }), getState: () => new Uint8Array([0]),
+    captureBaseline: () => new Uint8Array(80), inspect: () => ({ status: 'pending' }),
+    configureOdds: () => true, softReset: async () => true,
+    wait: () => new Promise(resolve => { finishTap = resolve }), setA() {}, setButton: (button, down) => buttons.push([button, down]), saveState: async () => true,
+  })
+  const request = { huntId: 'starter', cycleId: 1 }
+  await player.handle({ ...request, type: 'prepare', resetMode: 'soft-reset', startMode: 'hoenn-starter', starterPosition: 3 })
+  await player.handle({ ...request, type: 'reset', oddsResetCount: 1 })
+  await player.handle({ ...request, type: 'begin', afterReset: true })
+  for (const down of [true, false]) await player.handle({ ...request, type: 'input', button: 'A', down, stage: 'encounter' })
+  const tapping = player.handle({ ...request, type: 'tap', button: 'RIGHT' })
+  await player.handle({ ...request, type: 'cancel' })
+  assert.deepEqual(buttons.slice(-2), [['RIGHT', true], ['RIGHT', false]])
+  const next = { huntId: 'next', cycleId: 1 }
+  await player.handle({ ...next, type: 'prepare', resetMode: 'soft-reset', startMode: 'hoenn-starter', starterPosition: 2 })
+  await player.handle({ ...next, type: 'reset', oddsResetCount: 1 })
+  await player.handle({ ...next, type: 'begin', afterReset: true })
+  await player.handle({ ...next, type: 'input', button: 'A', down: true, stage: 'encounter' })
+  finishTap()
+  assert.deepEqual(await tapping, { ok: false, error: 'stale-cycle' })
+  assert.deepEqual(buttons.at(-1), ['A', true])
+  assert.deepEqual(await player.handle({ ...next, type: 'input', button: 'A', down: false, stage: 'encounter' }), { ok: true })
+})
+
+test('Hoenn mode rejects a Kanto layout before resetting or pressing anything', async () => {
+  const player = createShinyHuntPlayer({ getLayout: () => ({ gameCode: 'BPRE' }), setA() {} })
+  assert.deepEqual(await player.handle({ type: 'prepare', huntId: 'starter', resetMode: 'soft-reset', startMode: 'hoenn-starter', starterPosition: 2 }), { ok: false, error: 'unsupported-starter' })
+})
+
+test('a short direction stays down until the core has sampled an emulated frame, then releases', async () => {
+  let frame = 100
+  let waits = 0
+  const edges = []
+  const player = createShinyHuntPlayer({
+    getLayout: () => ({ gameCode: 'AXPE' }), getState: () => new Uint8Array([0]), getFrameNumber: () => frame,
+    captureBaseline: () => new Uint8Array(80), inspect: () => ({ status: 'pending' }),
+    configureOdds: () => true, softReset: async () => true,
+    wait: async () => { if (++waits === 2) frame += 5 }, setA() {}, setButton: (button, down) => edges.push([button, down]),
+  })
+  const request = { huntId: 'starter', cycleId: 1 }
+  await player.handle({ ...request, type: 'prepare', resetMode: 'soft-reset', startMode: 'hoenn-starter', starterPosition: 1 })
+  await player.handle({ ...request, type: 'reset', oddsResetCount: 1 })
+  await player.handle({ ...request, type: 'begin', afterReset: true })
+  for (const down of [true, false]) await player.handle({ ...request, type: 'input', button: 'A', down, stage: 'encounter' })
+  assert.deepEqual(await player.handle({ ...request, type: 'tap', button: 'LEFT' }), { ok: true })
+  assert.equal(waits, 2)
+  assert.deepEqual(edges.slice(-2), [['LEFT', true], ['LEFT', false]])
+})
+
+test('a stalled core releases its short direction and stops without repeating the press', async () => {
+  const edges = []
+  const player = createShinyHuntPlayer({
+    getLayout: () => ({ gameCode: 'AXPE' }), getState: () => new Uint8Array([0]), getFrameNumber: () => 100,
+    captureBaseline: () => new Uint8Array(80), inspect: () => ({ status: 'pending' }),
+    configureOdds: () => true, softReset: async () => true, wait: async () => {},
+    setA() {}, setButton: (button, down) => edges.push([button, down]),
+  })
+  const request = { huntId: 'starter', cycleId: 1 }
+  await player.handle({ ...request, type: 'prepare', resetMode: 'soft-reset', startMode: 'hoenn-starter', starterPosition: 1 })
+  await player.handle({ ...request, type: 'reset', oddsResetCount: 1 })
+  await player.handle({ ...request, type: 'begin', afterReset: true })
+  for (const down of [true, false]) await player.handle({ ...request, type: 'input', button: 'A', down, stage: 'encounter' })
+  assert.deepEqual(await player.handle({ ...request, type: 'tap', button: 'LEFT' }), { ok: false, error: 'input-frame-timeout' })
+  assert.deepEqual(edges.slice(-2), [['LEFT', true], ['LEFT', false]])
+})
+
 test('configures odds before soft reset and confirms only after reset finishes', async () => {
   const events = []
   const player = createShinyHuntPlayer({
