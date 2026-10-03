@@ -38,9 +38,19 @@ no upload and that later changed in-game saves still synchronize to the backend.
 
 The approved extension to the existing Spec 076 hunter adds one start method,
 `hoenn-starter`, with one shared Poké Ball position (1/left, 2/center, 3/right)
-for all active players. The existing modal reveals a compact selector only for
-this method; no three separate hunt methods or modal redesign are introduced.
-An explicit Hoenn ball choice and soft reset are required. Mixed-title hunts
+for all active players. The existing modal opens a compact Pokémon chooser
+for this method; no three separate hunt methods or hunt-modal redesign are introduced.
+An explicit Hoenn ball choice and soft reset are required. The approved UI
+correction replaces the dropdown with a compact modal over the hunt settings.
+Every activation of the starter radio option opens the chooser, including when
+that option is already selected. Its three buttons show Treecko, Torchic and
+Mudkip. Clicking one stores the existing shared position, closes the chooser,
+and changes the parent label to `Iniciais (Treecko)`, `Iniciais (Torchic)` or
+`Iniciais (Mudkip)`; before selection it reads `Iniciais (por jogo)`. Escape and
+the close button dismiss the chooser without changing the previous choice.
+The dialog traps focus and restores it to the option when closed. Remove the
+inline FireRed/LeafGreen instructions. Preserve the existing theme, other hunt
+settings, start/stop behavior and game strategy mapping. Mixed-title hunts
 resolve each verified ROM through a shared game-code/strategy registry. Ruby,
 Sapphire and Emerald use the bag sequence below. FireRed and LeafGreen ignore
 the Hoenn ball choice and use timed A interaction with the ball directly in
@@ -51,6 +61,12 @@ timeout. No directional input is sent to these titles. Each player reports its
 verified game code during prepare; every strategy must resolve before any reset.
 Future title support adds registry data/strategies below the presentation layer,
 without title branches in the Hub UI or controller.
+
+The chooser correction passed 66 targeted UI/controller/player tests, frontend
+lint and the frontend production build. Browser validation covered all three
+names, repeated activation of the selected radio, Space/Enter selection,
+focus trapping/restoration, Escape/close preserving the choice, a narrow
+viewport and the unchanged shared start configuration.
 
 After the existing four-A save-loading sequence, open the bag with A, navigate
 once from the center if needed, then press A twice to select and confirm. A

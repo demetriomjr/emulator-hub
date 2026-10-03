@@ -36,6 +36,7 @@ import { describeRestoreCandidate } from './restore-candidate-view.mjs'
 import { createSnapshotTelemetry } from '../../packages/snapshot-telemetry.mjs'
 import hubLayout from './hub-layout.json'
 import { ProfileEditor } from './profile-editor.jsx'
+import { HuntStarterPicker } from './hunt-starter-picker.jsx'
 import './styles.css'
 
 const PokemonHub = React.lazy(() => import('../../packages/pokemon-hub-ui.jsx'))
@@ -327,6 +328,7 @@ function App() {
   const [oddsManipulatorEnabled, setOddsManipulatorEnabled] = useState(false)
   const [huntStatus, setHuntStatus] = useState({ phase: 'idle', running: false, attemptCount: 0, completedSessionIds: [] })
   const [huntModalOpen, setHuntModalOpen] = useState(false)
+  const [huntStarterPickerOpen, setHuntStarterPickerOpen] = useState(false)
   const [huntConfig, setHuntConfig] = useState({ resetMode: 'soft-reset', startMode: 'interact-a', stopMode: 'first-shiny' })
   const huntControllerRef = useRef(null)
   const huntActiveRef = useRef(false)
@@ -956,6 +958,7 @@ function App() {
     huntParticipantsRef.current = participantKey
     setHuntHeaderStopRequested(false)
     huntActiveRef.current = true
+    setHuntStarterPickerOpen(false)
     setHuntModalOpen(false)
     globalGamepadGateRef.current.lock()
     const frameFor = session => [...document.querySelectorAll('.player-grid iframe')]
@@ -1058,6 +1061,7 @@ function App() {
       stopShinyHunt()
       return
     }
+    setHuntStarterPickerOpen(false)
     setHuntModalOpen(true)
   }
 
@@ -1878,7 +1882,7 @@ function App() {
     </div>)}
     {huntModalOpen && activeSessions.length > 0 && renderLayer(<div className="profile-overlay hunt-overlay" role="dialog" aria-modal="true" aria-labelledby="hunt-modal-title">
       <div className="profile-panel hunt-panel">
-        <div className="profile-header"><h2 id="hunt-modal-title">Caça shiny</h2><button className="dialog-close" type="button" aria-label="Fechar configuração da caça" onClick={() => setHuntModalOpen(false)}>×</button></div>
+        <div className="profile-header"><h2 id="hunt-modal-title">Caça shiny</h2><button className="dialog-close" type="button" aria-label="Fechar configuração da caça" onClick={() => { setHuntStarterPickerOpen(false); setHuntModalOpen(false) }}>×</button></div>
         <div className="hunt-modal-body">
           <div className="hunt-binary-options">
             <fieldset className="hunt-choice-group" disabled={huntRunning}>
@@ -1904,14 +1908,10 @@ function App() {
               <label><input type="radio" name="hunt-start-mode" value="walk-left" checked={huntConfig.startMode === 'walk-left'} onChange={() => setHuntConfig(current => ({ ...current, startMode: 'walk-left' }))} />Andar para a esquerda</label>
               <label><input type="radio" name="hunt-start-mode" value="walk-up" checked={huntConfig.startMode === 'walk-up'} onChange={() => setHuntConfig(current => ({ ...current, startMode: 'walk-up' }))} />Andar para cima</label>
               <label><input type="radio" name="hunt-start-mode" value="common" checked={huntConfig.startMode === 'common'} onChange={() => setHuntConfig(current => ({ ...current, startMode: 'common' }))} />Encounter comum</label>
-              <label><input type="radio" name="hunt-start-mode" value="hoenn-starter" checked={huntConfig.startMode === 'hoenn-starter'} onChange={() => setHuntConfig(current => ({ ...current, startMode: 'hoenn-starter', resetMode: 'soft-reset' }))} />Iniciais (por jogo)</label>
+              <label><input type="radio" name="hunt-start-mode" value="hoenn-starter" checked={huntConfig.startMode === 'hoenn-starter'} aria-haspopup="dialog" onClick={() => setHuntStarterPickerOpen(true)} onKeyDown={event => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); event.currentTarget.click() } }} onChange={() => setHuntConfig(current => ({ ...current, startMode: 'hoenn-starter', resetMode: 'soft-reset' }))} />{`Iniciais (${hoennStarterChoices.find(choice => choice.value === huntConfig.starterPosition)?.name ?? 'por jogo'})`}</label>
             </div>
-            {huntConfig.startMode === 'hoenn-starter' && <div className="hunt-starter-choice">
-              <label htmlFor="hunt-starter-position">Poké Bola em Hoenn · todos os jogadores</label>
-              <Select id="hunt-starter-position" value={huntConfig.starterPosition} placeholder="Escolha a Poké Bola" options={hoennStarterChoices} disabled={huntRunning} onChange={starterPosition => setHuntConfig(current => ({ ...current, starterPosition }))} aria-describedby="hunt-starter-help" />
-              <p id="hunt-starter-help">Hoenn: salve em frente à bolsa fechada. FireRed/LeafGreen: em frente à Poké Bola desejada. Requer soft reset.</p>
-            </div>}
           </fieldset>
+          {huntStarterPickerOpen && !huntRunning && <HuntStarterPicker selectedPosition={huntConfig.starterPosition} onSelect={starterPosition => { setHuntConfig(current => ({ ...current, starterPosition })); setHuntStarterPickerOpen(false) }} onClose={() => setHuntStarterPickerOpen(false)} />}
           {huntStatus.phase === 'error' && <p role="alert">{huntErrorMessages[huntStatus.error] ?? huntStatus.error}</p>}
           {huntStatus.phase === 'found' && <p role="status">Shiny encontrado.</p>}
           <button className="hunt-modal-action" type="button" disabled={!huntRunning && huntConfig.startMode === 'hoenn-starter' && !huntConfig.starterPosition} onClick={huntRunning ? stopShinyHunt : startShinyHunt}>{huntRunning ? 'Parar' : 'Iniciar'}</button>

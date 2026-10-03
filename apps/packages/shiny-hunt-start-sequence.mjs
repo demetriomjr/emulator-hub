@@ -1,7 +1,7 @@
 export const hoennStarterChoices = Object.freeze([
-  { value: 1, label: '1ª — Esquerda · Treecko', species: 252, direction: 'LEFT' },
-  { value: 2, label: '2ª — Centro · Torchic', species: 255, direction: null },
-  { value: 3, label: '3ª — Direita · Mudkip', species: 258, direction: 'RIGHT' },
+  { value: 1, name: 'Treecko', label: '1ª — Esquerda · Treecko', species: 252, direction: 'LEFT' },
+  { value: 2, name: 'Torchic', label: '2ª — Centro · Torchic', species: 255, direction: null },
+  { value: 3, name: 'Mudkip', label: '3ª — Direita · Mudkip', species: 258, direction: 'RIGHT' },
 ])
 
 export const HOENN_DIRECTION_TAP_MS = 8

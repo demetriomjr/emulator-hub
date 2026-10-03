@@ -13,8 +13,10 @@ assert.ok(start > 0 && end > action)
 const transformed = await transformWithOxc('globalThis.Controls = () => <div>' + hub.slice(start, end) + '</div>', 'hunt-controls.jsx', { jsx: { runtime: 'classic' } })
 const context = {
   React: { createElement: (type, props, ...children) => ({ type, props: { ...props, children } }) },
-  Select() {}, hoennStarterChoices, huntErrorMessages: {}, huntStatus: { phase: 'idle' },
+  Select() {}, HuntStarterPicker() {}, hoennStarterChoices, huntErrorMessages: {}, huntStatus: { phase: 'idle' },
   stopShinyHunt() {}, startShinyHunt() {},
+  huntStarterPickerOpen: false,
+  setHuntStarterPickerOpen(value) { context.huntStarterPickerOpen = value },
 }
 vm.runInNewContext(transformed.code, context)
 
@@ -33,33 +35,55 @@ function render(config, running = false) {
   return nodes
 }
 
-test('one Hoenn method reveals one shared ball selector and requires an explicit choice', () => {
+test('the starter method opens a named picker on every click and requires an explicit choice', () => {
+  context.huntStarterPickerOpen = false
   let view = render({ resetMode: 'exit-encounter', startMode: 'common', stopMode: 'first-shiny' })
   const methods = view.filter(node => node.props.name === 'hunt-start-mode')
   assert.equal(methods.length, 6)
   assert.equal(view.filter(node => node.type === context.Select).length, 0)
-  methods.find(node => node.props.value === 'hoenn-starter').props.onChange()
+  const starter = methods.find(node => node.props.value === 'hoenn-starter')
+  starter.props.onClick()
+  starter.props.onChange()
   assert.equal(context.huntConfig.resetMode, 'soft-reset')
   view = render(context.huntConfig)
-  const selector = view.find(node => node.type === context.Select)
-  assert.equal(selector.props.id, 'hunt-starter-position')
-  assert.deepEqual(selector.props.options.map(option => option.value), [1, 2, 3])
-  assert.equal(selector.props.value, undefined)
+  const picker = view.find(node => node.type === context.HuntStarterPicker)
+  assert.equal(picker.props.selectedPosition, undefined)
+  assert.equal(view.filter(node => node.type === context.Select).length, 0)
   assert.equal(view.find(node => node.props.className === 'hunt-modal-action').props.disabled, true)
   assert.equal(view.find(node => node.props.value === 'exit-encounter').props.disabled, true)
-  selector.props.onChange(3)
+  picker.props.onSelect(3)
+  assert.equal(context.huntStarterPickerOpen, false)
   view = render(context.huntConfig)
-  assert.equal(view.find(node => node.type === context.Select).props.value, 3)
   assert.equal(view.find(node => node.props.className === 'hunt-modal-action').props.disabled, false)
+  const label = view.find(node => node.type === 'label' && node.props.children.some(child => child?.props?.value === 'hoenn-starter'))
+  assert.ok(label.props.children.includes('Iniciais (Mudkip)'))
+  view.find(node => node.props.value === 'hoenn-starter').props.onClick()
+  assert.equal(context.huntStarterPickerOpen, true)
+  view = render(context.huntConfig)
+  const reopened = view.find(node => node.type === context.HuntStarterPicker)
+  assert.equal(reopened.props.selectedPosition, 3)
+  reopened.props.onClose()
+  assert.equal(context.huntStarterPickerOpen, false)
+  assert.equal(context.huntConfig.starterPosition, 3)
 })
 
 test('a running Hoenn hunt locks settings and keeps Stop available', () => {
   const view = render({ resetMode: 'soft-reset', startMode: 'hoenn-starter', starterPosition: 2, stopMode: 'all-shiny' }, true)
   assert.ok(view.filter(node => node.type === 'fieldset').every(node => node.props.disabled))
-  assert.equal(view.find(node => node.type === context.Select).props.disabled, true)
+  assert.equal(view.filter(node => node.type === context.Select).length, 0)
   const action = view.find(node => node.props.className === 'hunt-modal-action')
   assert.equal(action.props.disabled, false)
   assert.equal(action.props.onClick, context.stopShinyHunt)
+})
+
+test('starter choice uses each full Pokémon name and removes the game instructions', () => {
+  for (const [starterPosition, name] of [[1, 'Treecko'], [2, 'Torchic'], [3, 'Mudkip']]) {
+    const view = render({ resetMode: 'soft-reset', startMode: 'hoenn-starter', starterPosition, stopMode: 'first-shiny' })
+    const label = view.find(node => node.type === 'label' && node.props.children.some(child => child?.props?.value === 'hoenn-starter'))
+    assert.ok(label.props.children.includes(`Iniciais (${name})`))
+  }
+  assert.ok(!hub.includes('FireRed/LeafGreen:'))
+  assert.ok(!hub.includes('id="hunt-starter-position"'))
 })
 
 test('the hub sends the shared choice and a single tap command through the player protocol', () => {

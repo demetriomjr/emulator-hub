@@ -466,9 +466,14 @@ button { font: inherit; }
 .hunt-start-options label { flex: 1 1 170px; min-width: 0; }
 .hunt-choice-group:disabled label { opacity: .7; cursor: default; }
 .hunt-choice-options label:has(input:disabled) { opacity: .7; cursor: default; }
-.hunt-starter-choice { display: grid; gap: 7px; margin-top: 12px; }
-.hunt-starter-choice .ant-select { width: 100%; min-height: 44px; }
-.hunt-starter-choice p { font-size: .85rem; font-weight: 400; }
+.hunt-starter-picker { width: min(380px, calc(100% - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 0; overflow: auto; border: 1px solid #398269; border-radius: 12px; color: #e8f5ef; background: #0d2026; box-shadow: 0 24px 64px #0008; }
+.hunt-starter-picker::backdrop { background: #071015a8; }
+.hunt-starter-picker .profile-header { width: auto; min-height: 64px; padding: 12px 16px; }
+.hunt-starter-picker .dialog-close { width: 44px; height: 44px; flex: none; }
+.hunt-starter-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 16px; }
+.hunt-starter-option { min-width: 0; min-height: 48px; padding: 8px 4px; border: 1px solid #397c67; border-radius: 7px; color: #e8f5ef; background: #0d2026; font: inherit; font-weight: 650; cursor: pointer; }
+.hunt-starter-option:hover, .hunt-starter-option[aria-pressed="true"] { border-color: #77e2af; background: #22624f; }
+.hunt-starter-option:focus-visible { outline: 2px solid #ddffe9; outline-offset: 2px; }
 .hunt-modal-body p { margin: 0; color: #e8f5ef; }
 .hunt-modal-action { min-height: 42px; border: 1px solid #77e2af; border-radius: 7px; color: #062017; background: #77e2af; font-weight: 700; cursor: pointer; }
 .hunt-modal-action:disabled { opacity: .55; cursor: default; }
