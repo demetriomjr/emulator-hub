@@ -325,7 +325,6 @@ export function createShinyHuntController({ now = () => performance.now(), sleep
               else await sleep(PENDING_INTERVAL_MS, workerSignal)
             }
           }
-          if (!fallbackReset) state.attemptCount += 1
           status('exiting', session.sessionId)
         }
         state.cycleId += 1
@@ -335,7 +334,6 @@ export function createShinyHuntController({ now = () => performance.now(), sleep
             status('resetting', session.sessionId)
             await resetWithConfirmation(session, workerSignal, state.cycleId)
             checkWork()
-            state.attemptCount += 1
             status('pressing', session.sessionId)
           }
           inputStage = 'navigation'
@@ -365,6 +363,8 @@ export function createShinyHuntController({ now = () => performance.now(), sleep
         inputStage = 'encounter'
         status(startMode === 'common' ? 'walking' : 'pressing', session.sessionId)
         const reply = await resultOf()
+        // Resets and navigation only prepare a hunt; count a checked Pokemon.
+        state.attemptCount += 1
         if (reply.status === 'shiny' && !signal.aborted) {
           foundIds.add(session.sessionId)
           if (stopMode === 'first-shiny') {
@@ -396,7 +396,6 @@ export function createShinyHuntController({ now = () => performance.now(), sleep
       check(signal)
       const failedReset = initialResets.find(result => result.status === 'rejected')
       if (failedReset) throw failedReset.reason
-      for (const item of progress.values()) item.attemptCount = 1
       initialResetAt = now()
       status('pressing')
       const tasks = sessions.map(session => runSession(session).catch(error => {

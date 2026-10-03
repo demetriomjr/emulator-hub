@@ -23,6 +23,67 @@ function harness(results) {
 
 const sessions = [{ sessionId: 'a' }, { sessionId: 'b' }]
 
+for (const resetMode of ['soft-reset', 'exit-encounter']) {
+  test(`${resetMode}: nine startup resets count zero until nine Pokemon are checked`, async () => {
+    const players = Array.from({ length: 9 }, (_, index) => ({ sessionId: `player-${index}` }))
+    const startupCounts = []
+    let checks = 0
+    const controller = createShinyHuntController({
+      sleep: async () => {}, prepare: async () => {}, reset: async () => {},
+      begin: async () => { startupCounts.push(controller.getStatus().attemptCount) },
+      input: async () => {}, inspectPhase: async () => ({ status: 'map' }),
+      inspect: async () => { checks++; return { status: 'shiny' } },
+      saveState: async () => {}, release: async () => {},
+    })
+    const result = await controller.start(players, { resetMode, startMode: 'interact-a', stopMode: 'all-shiny' })
+    assert.deepEqual(startupCounts, Array(9).fill(0))
+    assert.equal(checks, 9)
+    assert.equal(result.attemptCount, 9)
+  })
+
+  test(`${resetMode}: resets and exits leave the count unchanged until the next checked Pokemon`, async () => {
+    const resetCounts = []
+    const beginCounts = []
+    const controller = createShinyHuntController({
+      sleep: async () => {}, prepare: async () => {},
+      reset: async () => { resetCounts.push(controller.getStatus().attemptCount) },
+      begin: async () => { beginCounts.push(controller.getStatus().attemptCount) },
+      input: async () => {}, inspectPhase: async () => ({ status: 'map' }),
+      inspect: async (_session, _signal, cycleId) => ({ status: cycleId === 1 ? 'normal' : 'shiny' }),
+      saveState: async () => {}, release: async () => {},
+    })
+    const result = await controller.start([{ sessionId: 'a' }], { resetMode, startMode: 'interact-a', stopMode: 'first-shiny' })
+    assert.deepEqual(resetCounts, resetMode === 'soft-reset' ? [0, 1] : [0])
+    assert.deepEqual(beginCounts, [0, 1])
+    assert.equal(result.attemptCount, 2)
+  })
+}
+
+test('nine startup resets followed by pending encounters do not count an attempt', async () => {
+  const controller = createShinyHuntController({
+    sleep: async () => {}, prepare: async () => {}, reset: async () => {},
+    begin: async () => {}, input: async () => {},
+    inspect: async () => ({ status: 'pending' }), release: async () => {},
+  })
+  const result = await controller.start(Array.from({ length: 9 }, (_, index) => ({ sessionId: `player-${index}` })), { resetMode: 'soft-reset', startMode: 'interact-a', stopMode: 'first-shiny' })
+  assert.equal(result.phase, 'error')
+  assert.equal(result.attemptCount, 0)
+})
+
+test('stopping after nine initial resets and before inspection leaves the count at zero', async () => {
+  let resets = 0
+  const controller = createShinyHuntController({
+    prepare: async () => {}, reset: async () => { resets++ },
+    sleep: async () => { controller.stop() },
+    begin: async () => {}, input: async () => {}, release: async () => {},
+    inspect: async () => { assert.fail('startup was stopped before inspection') },
+  })
+  const result = await controller.start(Array.from({ length: 9 }, (_, index) => ({ sessionId: `player-${index}` })), { resetMode: 'soft-reset', startMode: 'interact-a', stopMode: 'first-shiny' })
+  assert.equal(resets, 9)
+  assert.equal(result.phase, 'stopped')
+  assert.equal(result.attemptCount, 0)
+})
+
 for (const [position, direction] of [[1, 'LEFT'], [2, null], [3, 'RIGHT']]) {
   test(`Hoenn ball ${position} opens the bag, taps once from the center, and confirms twice`, async () => {
     let time = 0
@@ -78,6 +139,7 @@ test('a lost Hoenn direction response stops the hunt without retrying or confirm
   assert.equal(result.phase, 'error')
   assert.equal(taps, 1)
   assert.equal(resets, 1)
+  assert.equal(result.attemptCount, 0)
   assert.deepEqual(encounterButtons, ['A'])
 })
 
@@ -778,6 +840,7 @@ test('first shiny stops another player mid-search and saves both states', async 
   const result = await controller.start(sessions, { resetMode: 'soft-reset', startMode: 'common', stopMode: 'first-shiny' })
   assert.equal(result.phase, 'found')
   assert.equal(result.foundSessionId, 'a')
+  assert.equal(result.attemptCount, 1)
   assert.deepEqual(saved.sort(), ['a', 'b'])
 })
 

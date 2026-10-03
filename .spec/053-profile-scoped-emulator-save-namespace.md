@@ -83,6 +83,15 @@ battle delay, and preserves existing stop/state-save behavior. It never modifies
 the canonical in-game save as part of generating a new attempt. Unsupported ROMs,
 wrong starter species, invalid records, and timeout stop the hunt visibly.
 
+The configured hunt counter counts checked Pokémon per player, rather than
+reset operations. Initial resets, subsequent resets, encounter exits and
+navigation do not increment it. Each confirmed normal or shiny result counts
+once; pending/invalid reads, timeouts and canceled unchecked attempts do not.
+Nine initial resets therefore leave the counter at zero, and nine checked
+Pokémon count as nine attempts. Preserve cycle IDs and the separate persistent
+odds-clock reset count, which still advances on actual reset operations.
+This counter correction is authorized for commit and push only, without deploy.
+
 Deployment validation exposed an existing Docker overlayfs EXDEV error when
 the sprite synchronizer renamed an asset directory inherited from an image
 layer. Recreate only the generated build asset directory in the synchronization
