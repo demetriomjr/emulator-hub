@@ -23,7 +23,7 @@ function harness(results) {
 
 const sessions = [{ sessionId: 'a' }, { sessionId: 'b' }]
 
-test('Fossil completes five A and two B at 120 ms plus 400 ms idle, resets a normal and saves a shiny', async () => {
+test('Fossil completes six A and two B at 120 ms plus 400 ms idle, resets a normal and saves a shiny', async () => {
   let time = 0
   let presses = 0
   let resets = 0
@@ -35,7 +35,7 @@ test('Fossil completes five A and two B at 120 ms plus 400 ms idle, resets a nor
     input: async (_session, button, down, _signal, cycleId, stage) => {
       if (stage === 'encounter') { inputs.push([button, down, time, cycleId]); if (!down) presses++ }
     },
-    inspect: async (_session, _signal, cycleId) => ({ status: presses >= 7 ? cycleId === 1 ? 'normal' : 'shiny' : 'pending' }),
+    inspect: async (_session, _signal, cycleId) => ({ status: presses >= 8 ? cycleId === 1 ? 'normal' : 'shiny' : 'pending' }),
     saveState: async (_session, _signal, cycleId) => { saved.push([cycleId, time]) }, release: async () => {},
   })
   const result = await controller.start([{ sessionId: 'a' }], { resetMode: 'soft-reset', startMode: 'fossil', stopMode: 'first-shiny' })
@@ -44,10 +44,10 @@ test('Fossil completes five A and two B at 120 ms plus 400 ms idle, resets a nor
   assert.equal(resets, 2)
   for (const cycle of [1, 2]) {
     const events = inputs.filter(event => event[3] === cycle)
-    assert.deepEqual(events.filter(([, down]) => down).map(([button]) => button), ['A', 'A', 'A', 'A', 'A', 'B', 'B'])
-    for (let index = 0; index < 14; index += 2) {
+    assert.deepEqual(events.filter(([, down]) => down).map(([button]) => button), ['A', 'A', 'A', 'A', 'A', 'A', 'B', 'B'])
+    for (let index = 0; index < 16; index += 2) {
       assert.equal(events[index + 1][2] - events[index][2], 120)
-      if (index < 12) assert.equal(events[index + 2][2] - events[index + 1][2], 400)
+      if (index < 14) assert.equal(events[index + 2][2] - events[index + 1][2], 400)
     }
   }
   assert.equal(saved.length, 1)

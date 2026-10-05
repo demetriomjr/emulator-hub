@@ -76,7 +76,7 @@ test('Fossil rejects a full baseline party and a mismatched state', () => {
   assert.equal(inspectGen3Encounter(state, { ...selected, gameCode: 'BPRE' }).reason, 'state-mismatch')
 })
 
-test('Fossil player finishes five A and two B before reading a new shiny and re-arms each cycle', async () => {
+test('Fossil player finishes six A and two B before reading a new shiny and re-arms each cycle', async () => {
   const state = makeState()
   writeMon(state, playerAddress, { pid: 1 })
   const buttons = []
@@ -94,14 +94,14 @@ test('Fossil player finishes five A and two B before reading a new shiny and re-
     assert.deepEqual(await player.handle({ ...request, type: 'reset', oddsResetCount: cycleId }), { ok: true })
     assert.deepEqual(await player.handle({ ...request, type: 'begin', afterReset: true }), { ok: true })
     assert.deepEqual(await player.handle({ ...request, type: 'input', button: 'B', down: true, stage: 'encounter' }), { ok: false, error: 'invalid-input-order' })
-    for (const [index, button] of ['A', 'A', 'A', 'A', 'A', 'B', 'B'].entries()) {
+    for (const [index, button] of ['A', 'A', 'A', 'A', 'A', 'A', 'B', 'B'].entries()) {
       for (const down of [true, false]) assert.deepEqual(await player.handle({ ...request, type: 'input', button, down, stage: 'encounter' }), { ok: true })
       if (index === 0) writeMon(state, playerAddress + 100, { pid: 1, species: 138 })
-      if (index < 6) assert.deepEqual(await player.handle({ ...request, type: 'inspect', configured: true }), { ok: true, status: 'pending' })
+      if (index < 7) assert.deepEqual(await player.handle({ ...request, type: 'inspect', configured: true }), { ok: true, status: 'pending' })
     }
     assert.equal((await player.handle({ ...request, type: 'inspect', configured: true })).status, 'shiny')
   }
-  assert.equal(buttons.length, 28)
+  assert.equal(buttons.length, 32)
   assert.equal(reports.length, 2)
   await player.handle({ ...request, type: 'reset', cycleId: 3, oddsResetCount: 3 })
   await player.handle({ ...request, type: 'begin', cycleId: 3, afterReset: true })
@@ -178,8 +178,8 @@ for (const stopMode of ['first-shiny', 'all-shiny']) test(`Fossil controller/pla
     assert.equal(result.completedSessionIds.length, 9)
     for (const session of sessions) {
       const rounds = (session.index % 2) + 1
-      assert.equal(counts.get(session.sessionId).length, rounds * 7)
-      for (let cycle = 1; cycle <= rounds; cycle++) assert.deepEqual(counts.get(session.sessionId).filter(([round]) => round === cycle).map(([, button]) => button), ['A', 'A', 'A', 'A', 'A', 'B', 'B'])
+      assert.equal(counts.get(session.sessionId).length, rounds * 8)
+      for (let cycle = 1; cycle <= rounds; cycle++) assert.deepEqual(counts.get(session.sessionId).filter(([round]) => round === cycle).map(([, button]) => button), ['A', 'A', 'A', 'A', 'A', 'A', 'B', 'B'])
     }
   } else {
     assert.ok(result.foundSessionId)

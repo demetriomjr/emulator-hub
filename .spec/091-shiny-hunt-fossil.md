@@ -8,7 +8,7 @@ Acrescentar somente **Fossil** ao grupo **2. Iniciar encounter** do modal existe
 
 Selecionar Fossil define `startMode: 'fossil'` e `resetMode: 'soft-reset'`; desabilitar **Sair do encounter** enquanto Fossil estiver selecionado. Rejeitar a combinação incompatível também no controlador e no player. Preservar condições de parada **Apenas um shiny** / **Todos shiny**, 1–9 players, RNG, navegação de boot e persistência existentes.
 
-Depois do soft reset e dos quatro A existentes de navegação, capturar uma baseline do grupo no comando `begin`. Executar **A, A, A, A, A, B, B**, com down/up explícitos: **120 ms** pressionado e **400 ms de espera após soltar**, inclusive após o último B antes da leitura. O intervalo é uma espera real mínima; atrasos não geram rajadas. Não ler/encerrar antecipadamente quando o NPC criar o Pokémon durante um A: completar os dois B primeiro.
+Depois do soft reset e dos quatro A existentes de navegação, capturar uma baseline do grupo no comando `begin`. Executar **A, A, A, A, A, A, B, B**, com down/up explícitos: **120 ms** pressionado e **400 ms de espera após soltar**, inclusive após o último B antes da leitura. O intervalo é uma espera real mínima; atrasos não geram rajadas. Não ler/encerrar antecipadamente quando o NPC criar o Pokémon durante um A: completar os dois B primeiro.
 
 Ler o último registro ocupado do grupo do jogador, nunca o adversário. Os layouts de ROM/runtime verificados já fornecem `playerAddress`; seis registros PartyPokemon têm passo de 100 bytes e núcleo de 80 bytes. Decodificar o grupo contíguo até o primeiro registro vazio, como a contagem de grupo dos jogos. Verificar estado, espécie e checksum com o decoder existente. Capturar cópia dos seis registros como baseline; só aceitar um registro acrescentado ao final do grupo desde `begin`. Alterações de HP/nickname/registro de Pokémon antigos não comprovam recebimento. Grupo cheio bloqueia a caça Fossil antes da conversa; registro inválido ou estado incompatível falha com segurança.
 
@@ -33,7 +33,7 @@ Resultado shiny usa a parada e o salvamento existentes. Resultado normal conta u
 Execução nesta sessão, no checkout original `D:/PROJETOS/emulator-hub`, branch `master`, HEAD inicial `bfd0722255e632b0abe19ffd4fa2f936d4a39d83`. Existem alterações locais preexistentes, inclusive main.jsx, player e encounter; preservá-las. Sem commit, push, build ou deploy pedidos nesta tarefa.
 
 - [x] Escrever regressões do leitor para os cinco game codes, grupos de 1–5 antes do recebimento, último Pokémon normal/shiny, adversário shiny ignorado, grupo antigo inalterado/alterado, checksum inválido e grupo cheio.
-- [x] Escrever testes de player para rejeição de combinação inválida, baseline em begin, ordem A×5/B×2, inspeção bloqueada antes do último release e cancelamento.
+- [x] Escrever testes de player para rejeição de combinação inválida, baseline em begin, ordem A×6/B×2, inspeção bloqueada antes do último release e cancelamento.
 - [x] Escrever testes de controlador para timing 120/400, normal→reset→shiny, timeout sem contagem e parada durante B; testar seleção Fossil na interface existente.
 - [x] Executar testes novos em Ubuntu WSL2 e confirmar falhas pela ausência do recurso. Os testes de packages falharam pelos contratos ausentes; o primeiro ensaio frontend encontrou binding Linux ausente, reparado antes da validação da UI.
 - [x] Implementar os contratos acima nos cinco arquivos de produção, mantendo os fluxos anteriores.
