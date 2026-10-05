@@ -1,11 +1,13 @@
-const endpoint = '/api/debug/client-events'
+import { getFrontendEventTransport } from './frontend-event-transport.mjs'
 const repeatWindowMs = 60_000
 const stringFields = new Set(['snapshotKind', 'candidateId', 'reason', 'phase', 'code', 'error'])
 const integerFields = new Set(['revision', 'saveRevision', 'candidateCount', 'status'])
 
 export function createSnapshotTelemetry({ browser = window, source, sessionId, gameId, profileId, now = Date.now } = {}) {
+  const transport = getFrontendEventTransport(browser)
   const lastRepeat = new Map()
   const emit = (level, event, context = {}, { repeating = false, once = false } = {}) => {
+    if (!transport.enabled) return
     if (repeating || once) {
       const key = `${event}:${context.snapshotKind ?? ''}:${context.phase ?? ''}:${context.reason ?? ''}:${context.code ?? ''}`
       const previous = lastRepeat.get(key)
@@ -19,9 +21,7 @@ export function createSnapshotTelemetry({ browser = window, source, sessionId, g
       else if (integerFields.has(key) && Number.isSafeInteger(value) && value >= 0) record[key] = value
     }
     try { browser.console?.[level]?.('[snapshot-flow]', record) } catch {}
-    void Promise.resolve().then(() => browser.fetch(endpoint, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(record), keepalive: true,
-    })).catch(() => {})
+    transport.send(record)
   }
   return {
     info(event, context, options) { emit('info', event, context, options) },

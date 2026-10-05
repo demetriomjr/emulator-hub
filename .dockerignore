@@ -6,3 +6,5 @@ apps/backend/data
 deploy/.env
 deploy/roms
 graphify-out
+backups
+test-data

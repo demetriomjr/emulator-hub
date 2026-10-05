@@ -2,6 +2,7 @@ import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { frontendEventsMiddleware } from './server/frontend-events-vite.mjs'
 
 const requireFromFrontend = createRequire(import.meta.url)
 const packageUiDependencies = new Set([
@@ -26,6 +27,11 @@ const playerDocumentIsolation = {
   configureServer(server) { server.middlewares.use(addPlayerIsolationHeader) },
   configurePreviewServer(server) { server.middlewares.use(addPlayerIsolationHeader) },
 }
+const frontendEvents = {
+  name: 'frontend-events',
+  configureServer(server) { server.middlewares.use(frontendEventsMiddleware()) },
+  configurePreviewServer(server) { server.middlewares.use(frontendEventsMiddleware()) },
+}
 
 function addPlayerIsolationHeader(request, response, next) {
   if (new URL(request.url ?? '/', 'http://localhost').pathname === '/player.html') {
@@ -39,7 +45,7 @@ export function createFrontendViteConfiguration(environment) {
 
   return {
     base: './',
-    plugins: [workspacePackageDependencyResolver, playerDocumentIsolation, react()],
+    plugins: [workspacePackageDependencyResolver, playerDocumentIsolation, frontendEvents, react()],
     build: {
       rollupOptions: {
         input: {

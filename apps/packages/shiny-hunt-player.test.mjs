@@ -3,6 +3,41 @@ import test from 'node:test'
 
 import { createShinyHuntPlayer } from './shiny-hunt-player.mjs'
 
+test('arms RNG observation with cycle identity before reset and cancels with hunt', async () => {
+  const order = []
+  const player = createShinyHuntPlayer({
+    getLayout: () => ({ gameCode: 'BPEE' }), getState: () => new Uint8Array(80), captureBaseline: () => new Uint8Array(80),
+    configureOdds: () => { order.push('clock'); return true },
+    observeReset: context => order.push(context), cancelObservation: () => order.push('cancel'),
+    softReset: async () => { order.push('reset'); return true }, setA() {}, saveState: async () => true,
+  })
+  await player.handle({ type: 'prepare', huntId: 'hunt' })
+  await player.handle({ type: 'reset', huntId: 'hunt', cycleId: 1, oddsResetCount: 7 })
+  assert.deepEqual(order.slice(-3), ['clock', { huntId: 'hunt', cycleId: 1, oddsResetCount: 7, virtualTimestamp: 420000, resetType: 'soft' }, 'reset'])
+  await player.handle({ type: 'cancel', huntId: 'hunt' })
+  assert.equal(order.at(-1), 'cancel')
+})
+test('encounter diagnostics report PID once per cycle and throwing observers cannot stop hunt or save', async () => {
+  let pid = 123; let saves = 0; const events = []
+  const player = createShinyHuntPlayer({
+    getLayout: () => ({ gameCode: 'BPEE' }), getState: () => new Uint8Array(80), captureBaseline: () => new Uint8Array(80),
+    inspect: () => ({ status: 'shiny', pid }), configureOdds: () => true, softReset: async () => true,
+    observeReset() { throw new Error('diagnostic failed') }, cancelObservation() { throw new Error('diagnostic failed') },
+    reportEncounter: event => { events.push(event); throw new Error('report failed') },
+    setA() {}, saveState: async () => { saves++; return true },
+  })
+  assert.deepEqual(await player.handle({ type: 'prepare', huntId: 'hunt' }), { ok: true })
+  for (const cycleId of [1, 2]) {
+    pid += 1
+    assert.deepEqual(await player.handle({ type: 'reset', huntId: 'hunt', cycleId, oddsResetCount: cycleId }), { ok: true })
+    for (let i = 0; i < 2; i++) assert.equal((await player.handle({ type: 'inspect', huntId: 'hunt', cycleId, configured: true })).status, 'shiny')
+  }
+  assert.deepEqual(events, [{ huntId: 'hunt', cycleId: 1, pid: 124, shiny: true }, { huntId: 'hunt', cycleId: 2, pid: 125, shiny: true }])
+  assert.deepEqual(await player.handle({ type: 'save', huntId: 'hunt', cycleId: 2, complete: true }), { ok: true })
+  assert.equal(saves, 1)
+  assert.deepEqual(await player.handle({ type: 'cancel', huntId: 'hunt' }), { ok: true })
+})
+
 test('Hoenn direction runs as one local 8 ms tap and starter inspection waits for both confirmations', async () => {
   const buttons = []
   const durations = []

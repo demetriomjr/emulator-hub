@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { inspectGen3BattlePhase, inspectGen3Encounter, findGen3EncounterLayout } from './pokemon-gen3-encounter.mjs'
+import { captureGen3EnemyBaseline, inspectGen3BattlePhase, inspectGen3Encounter, findGen3EncounterLayout } from './pokemon-gen3-encounter.mjs'
+import { createShinyHuntPlayer } from './shiny-hunt-player.mjs'
+import { createShinyHuntController } from './shiny-hunt-controller.mjs'
 
 const playerAddress = 0x03004360
 const enemyAddress = 0x030045c0
@@ -42,6 +44,148 @@ function writeMon(state, address, { pid, otid = 0, species = 25, validChecksum =
 }
 
 const layout = { enemyAddress, playerAddress, gameCode: 'AXVE' }
+
+for (const gameCode of ['AXVE', 'AXPE', 'BPEE', 'BPRE', 'BPGE']) {
+  test(`${gameCode}: Fossil reads only the newly appended last party member`, () => {
+    const selected = { gameCode, fossil: true, playerAddress: gameCode.startsWith('AX') ? playerAddress : gameCode === 'BPEE' ? 0x020244ec : 0x02024284, enemyAddress }
+    for (let count = 1; count <= 5; count++) {
+      const state = makeState(gameCode)
+      for (let slot = 0; slot < count; slot++) writeMon(state, selected.playerAddress + slot * 100, { pid: 1, species: 25 })
+      const baselineEnemy = captureGen3EnemyBaseline(state, selected)
+      assert.equal(baselineEnemy.length, 600)
+      writeMon(state, enemyAddress, { pid: 1, species: 142 })
+      assert.equal(inspectGen3Encounter(state, { ...selected, baselineEnemy }).status, 'pending')
+      writeMon(state, selected.playerAddress + (count - 1) * 100, { pid: 2, species: 25 })
+      assert.equal(inspectGen3Encounter(state, { ...selected, baselineEnemy }).status, 'pending')
+      const address = selected.playerAddress + count * 100
+      writeMon(state, address, { pid: 8, species: 138 })
+      assert.deepEqual(inspectGen3Encounter(state, { ...selected, baselineEnemy }), { status: 'normal', species: 138, pid: 8, otid: 0 })
+      writeMon(state, address, { pid: 1, species: 138 })
+      assert.equal(inspectGen3Encounter(state, { ...selected, baselineEnemy }).status, 'shiny')
+      writeMon(state, address, { pid: 1, species: 138, validChecksum: false })
+      assert.deepEqual(inspectGen3Encounter(state, { ...selected, baselineEnemy }), { status: 'error', reason: 'invalid-party-record' })
+    }
+  })
+}
+
+test('Fossil rejects a full baseline party and a mismatched state', () => {
+  const state = makeState()
+  const selected = { ...layout, fossil: true }
+  for (let slot = 0; slot < 6; slot++) writeMon(state, playerAddress + slot * 100, { pid: 1 })
+  assert.deepEqual(inspectGen3Encounter(state, selected), { status: 'error', reason: 'fossil-party-full' })
+  assert.equal(inspectGen3Encounter(state, { ...selected, gameCode: 'BPRE' }).reason, 'state-mismatch')
+})
+
+test('Fossil player finishes five A and two B before reading a new shiny and re-arms each cycle', async () => {
+  const state = makeState()
+  writeMon(state, playerAddress, { pid: 1 })
+  const buttons = []
+  const reports = []
+  const player = createShinyHuntPlayer({
+    getLayout: () => layout, getState: () => state,
+    configureOdds: () => true, softReset: async () => { state.fill(0, stateOffset(playerAddress) + 100, stateOffset(playerAddress) + 600); return true },
+    setA() {}, setButton: (button, down) => buttons.push([button, down]), saveState: async () => true,
+    reportEncounter: result => reports.push(result),
+  })
+  const request = { huntId: 'fossil', cycleId: 1 }
+  assert.deepEqual(await player.handle({ ...request, type: 'prepare', startMode: 'fossil', resetMode: 'soft-reset' }), { ok: true })
+  for (const cycleId of [1, 2]) {
+    request.cycleId = cycleId
+    assert.deepEqual(await player.handle({ ...request, type: 'reset', oddsResetCount: cycleId }), { ok: true })
+    assert.deepEqual(await player.handle({ ...request, type: 'begin', afterReset: true }), { ok: true })
+    assert.deepEqual(await player.handle({ ...request, type: 'input', button: 'B', down: true, stage: 'encounter' }), { ok: false, error: 'invalid-input-order' })
+    for (const [index, button] of ['A', 'A', 'A', 'A', 'A', 'B', 'B'].entries()) {
+      for (const down of [true, false]) assert.deepEqual(await player.handle({ ...request, type: 'input', button, down, stage: 'encounter' }), { ok: true })
+      if (index === 0) writeMon(state, playerAddress + 100, { pid: 1, species: 138 })
+      if (index < 6) assert.deepEqual(await player.handle({ ...request, type: 'inspect', configured: true }), { ok: true, status: 'pending' })
+    }
+    assert.equal((await player.handle({ ...request, type: 'inspect', configured: true })).status, 'shiny')
+  }
+  assert.equal(buttons.length, 28)
+  assert.equal(reports.length, 2)
+  await player.handle({ ...request, type: 'reset', cycleId: 3, oddsResetCount: 3 })
+  await player.handle({ ...request, type: 'begin', cycleId: 3, afterReset: true })
+  await player.handle({ ...request, type: 'input', cycleId: 3, button: 'A', down: true, stage: 'encounter' })
+  await player.handle({ ...request, type: 'cancel' })
+  assert.deepEqual(buttons.slice(-2), [['A', true], ['A', false]])
+  assert.equal((await player.handle({ ...request, type: 'input', cycleId: 3, button: 'A', down: false, stage: 'encounter' })).ok, false)
+})
+
+test('Fossil player rejects battle-exit reset and a full party before NPC inputs', async () => {
+  const state = makeState()
+  const player = createShinyHuntPlayer({ getLayout: () => layout, getState: () => state, configureOdds: () => true, softReset: async () => true, setA() {}, setButton() {} })
+  const request = { huntId: 'fossil', cycleId: 1 }
+  assert.deepEqual(await player.handle({ ...request, type: 'prepare', startMode: 'fossil', resetMode: 'exit-encounter' }), { ok: false, error: 'invalid-fossil-reset' })
+  await player.handle({ ...request, type: 'prepare', startMode: 'fossil', resetMode: 'soft-reset' })
+  await player.handle({ ...request, type: 'reset', oddsResetCount: 1 })
+  for (let slot = 0; slot < 6; slot++) writeMon(state, playerAddress + slot * 100, { pid: 1 })
+  assert.deepEqual(await player.handle({ ...request, type: 'begin', afterReset: true }), { ok: false, error: 'fossil-party-full' })
+})
+
+for (const stopMode of ['first-shiny', 'all-shiny']) test(`Fossil controller/player integration preserves ${stopMode} across nine players`, async () => {
+  let time = 0
+  const config = { startMode: 'fossil', resetMode: 'soft-reset', stopMode }
+  const sessions = Array.from({ length: 9 }, (_, index) => ({ sessionId: `fossil-${index}`, index }))
+  const games = ['AXVE', 'AXPE', 'BPEE', 'BPRE', 'BPGE']
+  const players = new Map()
+  const counts = new Map()
+  const saved = []
+  for (const session of sessions) {
+    const gameCode = games[session.index % games.length]
+    const selected = { gameCode, playerAddress: gameCode.startsWith('AX') ? playerAddress : gameCode === 'BPEE' ? 0x020244ec : 0x02024284, enemyAddress }
+    const state = makeState(gameCode)
+    let cycle = 0
+    let inputCount = 0
+    counts.set(session.sessionId, [])
+    const player = createShinyHuntPlayer({
+      getLayout: () => selected, getState: () => state, configureOdds: () => true,
+      softReset: async () => { cycle++; inputCount = 0; state.fill(0, stateOffset(selected.playerAddress), stateOffset(selected.playerAddress) + 600); return true },
+      setA() {},
+      setButton: (button, down) => {
+        if (!down && stage === 'encounter') { inputCount++; counts.get(session.sessionId).push([cycle, button]) }
+        if (down && stage === 'encounter' && inputCount === 0) writeMon(state, selected.playerAddress + 100, { pid: cycle >= (session.index % 2) + 1 ? 1 : 8, species: 138 })
+      },
+      saveState: async () => { saved.push(session.sessionId); return true },
+    })
+    let stage = null
+    players.set(session.sessionId, {
+      async send(type, cycleId, details = {}) {
+        stage = details.stage ?? null
+        const reply = await player.handle({ type, huntId: 'integration', cycleId, ...details })
+        if (!reply.ok) throw new Error(reply.error)
+        return reply
+      },
+      // Boot loads an existing shiny before begin. It must not end the hunt.
+      ready() { writeMon(state, selected.playerAddress, { pid: 1, species: 25 }) },
+    })
+  }
+  const send = (session, type, cycleId, details) => players.get(session.sessionId).send(type, cycleId, details)
+  const controller = createShinyHuntController({
+    now: () => time, sleep: async ms => { time += ms },
+    prepare: async sessions => { for (const session of sessions) await send(session, 'prepare', null, config) },
+    reset: (session, _signal, cycleId) => send(session, 'reset', cycleId, { oddsResetCount: cycleId }),
+    begin: (session, _signal, cycleId, details) => { players.get(session.sessionId).ready(); return send(session, 'begin', cycleId, details) },
+    input: (session, button, down, _signal, cycleId, stage) => send(session, 'input', cycleId, { button, down, stage }),
+    inspect: (session, _signal, cycleId) => send(session, 'inspect', cycleId, { configured: true }),
+    saveState: (session, _signal, cycleId) => send(session, 'save', cycleId, { complete: true }),
+    release: async sessions => { for (const session of sessions) await send(session, 'cancel') },
+  })
+  const result = await controller.start(sessions, config)
+  assert.equal(result.phase, 'found')
+  assert.equal(saved.length, 9)
+  if (stopMode === 'all-shiny') {
+    assert.equal(result.attemptCount, 13)
+    assert.equal(result.completedSessionIds.length, 9)
+    for (const session of sessions) {
+      const rounds = (session.index % 2) + 1
+      assert.equal(counts.get(session.sessionId).length, rounds * 7)
+      for (let cycle = 1; cycle <= rounds; cycle++) assert.deepEqual(counts.get(session.sessionId).filter(([round]) => round === cycle).map(([, button]) => button), ['A', 'A', 'A', 'A', 'A', 'B', 'B'])
+    }
+  } else {
+    assert.ok(result.foundSessionId)
+    assert.ok(result.attemptCount >= 1)
+  }
+})
 
 test('Hoenn starter hunts inspect the selected player starter and ignore a shiny opponent', () => {
   const state = makeState()

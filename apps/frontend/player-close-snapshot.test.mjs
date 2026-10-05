@@ -9,12 +9,17 @@ const closeSource = source.slice(source.indexOf('async function closeEmulator()'
 function closeHarness({ ready, deleteFails = false }) {
   const actions = []
   let macroStops = 0
+  let rngCancels = 0
   const pendingRestoreRequests = new Map([['choice', { resolve(value) { actions.push(['choice-resolved', value]) } }]])
   const context = {
     Uint8Array,
     runtimeReady: ready,
     closeRequested: false,
+    playerAssetClient: { dispose() { actions.push('dispose-assets') } },
+    romObjectUrl: 'blob:player-rom',
+    URL: { revokeObjectURL(value) { actions.push(['revoke-rom', value]) } },
     stopMacro() { macroStops += 1 },
+    rngResetObserver: { cancel() { rngCancels += 1 } },
     stopThreadStartupMonitor() {},
     stopEmulatedFpsOverlay() {},
     pendingRestoreRequests,
@@ -52,23 +57,28 @@ function closeHarness({ ready, deleteFails = false }) {
     },
   }
   if (deleteFails) context.deleteEmulatorSnapshot = async () => { actions.push('delete-cloud'); throw new Error('delete unavailable') }
-  return { close: runInNewContext(`${closeSource}\ncloseEmulator`, context), context, actions, getMacroStops: () => macroStops }
+  runInNewContext(source.slice(source.indexOf('function disposePlayerAssets()'), source.indexOf('async function loadPlayerLaunch()')), context)
+  return { close: runInNewContext(`${closeSource}\ncloseEmulator`, context), context, actions, getMacroStops: () => macroStops, getRngCancels: () => rngCancels }
 }
 
 test('closing before the restore choice preserves candidates and does not flush an unselected runtime', async () => {
-  const { close, context, actions, getMacroStops } = closeHarness({ ready: false })
+  const { close, context, actions, getMacroStops, getRngCancels } = closeHarness({ ready: false })
   assert.equal((await close()).preserveRecovery, true)
   assert.equal(getMacroStops(), 1)
-  assert.equal(actions[0][0], 'choice-resolved')
-  assert.equal(actions[0][1].candidateId, null)
-  assert.equal(actions[0][1].explicit, false)
+  assert.equal(getRngCancels(), 1)
+  const resolved = actions.find(action => Array.isArray(action) && action[0] === 'choice-resolved')
+  assert.equal(resolved[1].candidateId, null)
+  assert.equal(resolved[1].explicit, false)
+  assert.ok(actions.includes('dispose-assets'))
+  assert.ok(actions.some(action => Array.isArray(action) && action[0] === 'revoke-rom'))
   assert.equal(context.pendingRestoreRequests.size, 0)
 })
 
 test('normal close flushes the game save and deletes automatic cloud recovery', async () => {
-  const { close, actions, getMacroStops } = closeHarness({ ready: true })
+  const { close, actions, getMacroStops, getRngCancels } = closeHarness({ ready: true })
   assert.equal((await close()).preserveRecovery, false)
   assert.equal(getMacroStops(), 1)
+  assert.equal(getRngCancels(), 1)
   assert.ok(actions.includes('read-final-save'))
   assert.ok(actions.includes('upload-save'))
   assert.equal(actions.includes('write-cloud'), false)

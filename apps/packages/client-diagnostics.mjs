@@ -1,11 +1,12 @@
-export const clientDiagnosticEndpoint = '/api/debug/client-events'
+import { frontendEventEndpoint } from './frontend-events.mjs'
+import { getFrontendEventTransport } from './frontend-event-transport.mjs'
+export const clientDiagnosticEndpoint = frontendEventEndpoint
 
 export function getClientDiagnosticsOptions(debugValue, search = '', createSessionId = defaultSessionId) {
   const parameters = new URLSearchParams(search)
-  const enabled = String(debugValue ?? '').trim() === '1'
-  if (!enabled) return { enabled: false, sessionId: null }
+  const verbose = String(debugValue ?? '').trim() === '1'
   const supplied = parameters.get('debugSession')
-  return { enabled: true, sessionId: isSessionId(supplied) ? supplied : createSessionId() }
+  return { enabled: true, verbose, sessionId: isSessionId(supplied) ? supplied : createSessionId() }
 }
 
 export function appendClientDiagnosticsParameters(parameters, options) {
@@ -14,16 +15,19 @@ export function appendClientDiagnosticsParameters(parameters, options) {
   return parameters
 }
 
-export function createClientDiagnostics({ browser = window, source = 'player', sessionId, endpoint = clientDiagnosticEndpoint, report } = {}) {
+export function createClientDiagnostics({ browser = window, source = 'player', sessionId, report, enabled = true } = {}) {
   if (!isSessionId(sessionId)) throw new TypeError('A client diagnostic session ID is required.')
   const originalFetch = browser.fetch?.bind(browser)
-  const send = report ?? createReporter({ browser, endpoint, fetch: originalFetch })
+  const transport = report ? null : getFrontendEventTransport(browser)
+  transport?.setEnabled(enabled)
+  const send = report ?? (event => transport.send(event))
   const common = () => ({ sessionId, source, page: browser.location.pathname, userAgent: browser.navigator?.userAgent ?? '', viewport: { width: browser.innerWidth, height: browser.innerHeight } })
   const capture = event => {
+    if (!enabled) return
     const record = { ...common(), ...event }
     const output = event.kind === 'uncaught-error' || event.kind === 'unhandled-rejection' || event.kind === 'network-error' ? 'error' : event.message?.includes('rejected') || event.message?.includes('failed') ? 'warn' : 'info'
-    browser.console?.[output]?.('[client-diagnostics]', record)
-    void Promise.resolve(send(record)).catch(() => {})
+    try { browser.console?.[output]?.('[client-diagnostics]', record) } catch {}
+    try { void Promise.resolve(send(record)).catch(() => {}) } catch {}
   }
   const onError = event => {
     const error = event.error ?? event
@@ -31,6 +35,7 @@ export function createClientDiagnostics({ browser = window, source = 'player', s
   }
   const onUnhandledRejection = event => capture(errorEvent('unhandled-rejection', event.reason))
   const wrappedFetch = originalFetch && (async (input, init) => {
+    if (!enabled) return originalFetch(input, init)
     const request = requestDetails(input, init, browser.location.origin)
     try {
       const response = await originalFetch(input, init)
@@ -47,10 +52,12 @@ export function createClientDiagnostics({ browser = window, source = 'player', s
   if (wrappedFetch) browser.fetch = wrappedFetch
   const restorePermissionDiagnostics = instrumentPermissionRejections(browser, capture)
   return {
-    enabled: true,
+    get enabled() { return enabled },
+    setEnabled(value) { enabled = value === true; transport?.setEnabled(enabled) },
     sessionId,
     capture,
     dispose() {
+      enabled = false; transport?.setEnabled(false)
       browser.removeEventListener('error', onError)
       browser.removeEventListener('unhandledrejection', onUnhandledRejection)
       if (browser.fetch === wrappedFetch) browser.fetch = originalFetch
@@ -91,18 +98,6 @@ function wrapPromiseMethod(target, method, label, capture) {
   return () => { if (target[method] === wrapped) target[method] = original }
 }
 
-function createReporter({ browser, endpoint, fetch }) {
-  return async event => {
-    if (!fetch) return
-    await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(event),
-      keepalive: true,
-    })
-  }
-}
-
 function requestDetails(input, init, origin) {
   const rawUrl = typeof input === 'string' ? input : input?.url
   if (!rawUrl) return null
@@ -115,9 +110,9 @@ function requestDetails(input, init, origin) {
 function errorEvent(kind, error) {
   return {
     kind,
-    message: errorMessage(error),
-    ...(typeof error?.name === 'string' ? { name: error.name } : {}),
-    ...(typeof error?.stack === 'string' ? { stack: error.stack } : {}),
+    message: errorMessage(error).slice(0, 512),
+    ...(typeof error?.name === 'string' ? { name: error.name.slice(0, 128) } : {}),
+    ...(typeof error?.stack === 'string' ? { stack: error.stack.slice(0, 2048) } : {}),
   }
 }
 

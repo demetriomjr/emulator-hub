@@ -23,6 +23,56 @@ function harness(results) {
 
 const sessions = [{ sessionId: 'a' }, { sessionId: 'b' }]
 
+test('Fossil completes five A and two B at 120 ms plus 400 ms idle, resets a normal and saves a shiny', async () => {
+  let time = 0
+  let presses = 0
+  let resets = 0
+  const inputs = []
+  const saved = []
+  const controller = createShinyHuntController({
+    now: () => time, sleep: async ms => { time += ms }, prepare: async () => {},
+    reset: async () => { resets++; presses = 0 }, begin: async () => {},
+    input: async (_session, button, down, _signal, cycleId, stage) => {
+      if (stage === 'encounter') { inputs.push([button, down, time, cycleId]); if (!down) presses++ }
+    },
+    inspect: async (_session, _signal, cycleId) => ({ status: presses >= 7 ? cycleId === 1 ? 'normal' : 'shiny' : 'pending' }),
+    saveState: async (_session, _signal, cycleId) => { saved.push([cycleId, time]) }, release: async () => {},
+  })
+  const result = await controller.start([{ sessionId: 'a' }], { resetMode: 'soft-reset', startMode: 'fossil', stopMode: 'first-shiny' })
+  assert.equal(result.phase, 'found')
+  assert.equal(result.attemptCount, 2)
+  assert.equal(resets, 2)
+  for (const cycle of [1, 2]) {
+    const events = inputs.filter(event => event[3] === cycle)
+    assert.deepEqual(events.filter(([, down]) => down).map(([button]) => button), ['A', 'A', 'A', 'A', 'A', 'B', 'B'])
+    for (let index = 0; index < 14; index += 2) {
+      assert.equal(events[index + 1][2] - events[index][2], 120)
+      if (index < 12) assert.equal(events[index + 2][2] - events[index + 1][2], 400)
+    }
+  }
+  assert.equal(saved.length, 1)
+  assert.equal(saved[0][1] - inputs.at(-1)[2], 400)
+})
+
+test('Fossil pending timeout and cancellation during B never count or save', async () => {
+  for (const cancel of [false, true]) {
+    let time = 0
+    let held = null
+    const inputs = []
+    const controller = createShinyHuntController({
+      now: () => time, sleep: async ms => { time += ms; if (cancel && held === 'B') controller.stop() },
+      prepare: async () => {}, reset: async () => {}, begin: async () => {},
+      input: async (_session, button, down, _signal, _cycle, stage) => { held = down ? button : null; if (stage === 'encounter') inputs.push([button, down]) },
+      inspect: async () => ({ status: 'pending' }), saveState: async () => assert.fail('unconfirmed fossil cannot save'), release: async () => {},
+    })
+    const result = await controller.start([{ sessionId: 'a' }], { resetMode: 'soft-reset', startMode: 'fossil', stopMode: 'first-shiny' })
+    assert.equal(result.phase, cancel ? 'stopped' : 'error')
+    assert.equal(result.attemptCount, 0)
+    assert.equal(held, null)
+    if (cancel) assert.deepEqual(inputs.slice(-2), [['B', true], ['B', false]])
+  }
+})
+
 for (const resetMode of ['soft-reset', 'exit-encounter']) {
   test(`${resetMode}: nine startup resets count zero until nine Pokemon are checked`, async () => {
     const players = Array.from({ length: 9 }, (_, index) => ({ sessionId: `player-${index}` }))

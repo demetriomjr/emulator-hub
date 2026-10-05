@@ -23,7 +23,7 @@ function harness({ fail = false } = {}) {
       { id: 'red', title: 'Pokémon Red', profiles: [{ id: 'p1', createdAt: '2026-01-01T00:00:00Z' }] },
       { id: 'blue', title: 'Pokémon Blue', profiles: [{ id: 'p2', createdAt: '2026-01-01T00:00:00Z' }] },
     ],
-    focusedSessionId: 'b', profileInfoSessionId: null, profileInfoName: '', profileInfoBusy: false,
+    profileInfoSessionId: null, profileInfoName: '', profileInfoBusy: false,
     multiProfileRows: null, multiProfileBusy: false,
     getGameProfileNumber, saveRunningProfileNames,
     profileInfoGamepadGatesRef: { current: new Map() },
@@ -52,9 +52,9 @@ function harness({ fail = false } = {}) {
   return { api, context, calls }
 }
 
-test('information button edits the focused running profile and persists it immediately', async () => {
+test('information overlay edits its explicit running profile and persists it immediately', async () => {
   const { api, context, calls } = harness()
-  api.openProfileInfo()
+  api.openProfileInfo('b')
   assert.equal(context.profileInfoSessionId, 'b')
   assert.equal(context.profileInfoName, 'Blue')
   assert.deepEqual(context.profileInfoGamepadGatesRef.current.get('b').filter(['BUTTON_1']), [])
@@ -70,7 +70,7 @@ test('information button edits the focused running profile and persists it immed
 
 test('closing the editor discards the draft and releases held buttons individually', () => {
   const { api, context } = harness()
-  api.openProfileInfo()
+  api.openProfileInfo('b')
   assert.deepEqual(context.profileInfoGamepadGatesRef.current.get('b').filter(['BUTTON_1']), [])
   context.profileInfoName = 'Unsaved'
   api.closeProfileInfo()
@@ -81,10 +81,9 @@ test('closing the editor discards the draft and releases held buttons individual
 
 test('switching the editor to another running session unlocks the prior session', () => {
   const { api, context } = harness()
-  api.openProfileInfo()
+  api.openProfileInfo('b')
   const formerGate = context.profileInfoGamepadGatesRef.current.get('b')
-  context.focusedSessionId = 'a'
-  api.openProfileInfo()
+  api.openProfileInfo('a')
   assert.equal(context.profileInfoSessionId, 'a')
   assert.deepEqual(formerGate.filter(['BUTTON_1', 'BUTTON_2']), ['BUTTON_2'])
   assert.deepEqual(context.profileInfoGamepadGatesRef.current.get('a').filter(['BUTTON_1']), [])
@@ -129,7 +128,7 @@ test('header information keeps the single player editor when only one is open', 
 
 test('failed profile save keeps its editor open with the entered name', async () => {
   const { api, context } = harness({ fail: true })
-  api.openProfileInfo()
+  api.openProfileInfo('b')
   context.profileInfoName = 'Blue II'
   await api.submitProfileInfo({ preventDefault() {} })
   assert.equal(context.profileInfoSessionId, 'b')

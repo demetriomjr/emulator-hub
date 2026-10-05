@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { createRoot } from 'react-dom/client'
 import { Button, ConfigProvider, Input, Select } from 'antd'
 import { AudioMutedOutlined, CloseOutlined, FastForwardOutlined, FullscreenExitOutlined, FullscreenOutlined, InfoCircleOutlined, NumberOutlined, PlusOutlined, PoweroffOutlined, RedoOutlined, SaveOutlined, SearchOutlined, SoundOutlined, ThunderboltOutlined, UploadOutlined } from '@ant-design/icons'
-import { acquirePlayerLease, createProfile, deleteProfile as deleteProfileRequest, getControlProfile, getGames, getProfiles, getUserPreferences, listMacros, releasePlayerLease, saveMacro as saveMacroRequest, syncOddsResetCount, updateControlProfile, updateProfile, updateUserPreferences } from '../../packages/hub-client.js'
+import { acquirePlayerLease, createProfile, deleteProfile as deleteProfileRequest, getControlProfile, getGames, getPlayerLeaseLaunch, getProfiles, getUserPreferences, listMacros, releasePlayerLease, saveMacro as saveMacroRequest, syncOddsResetCount, updateControlProfile, updateProfile, updateUserPreferences } from '../../packages/hub-client.js'
 import { createMacro, migrateMacro, normalizeKeyboardKey, validateMacro } from '../../packages/input-macro-simulator.mjs'
 import { createMacroRunCoordinator } from '../../packages/macro-run-coordinator.mjs'
 import { createLastMacroAction } from '../../packages/last-macro-action.mjs'
@@ -16,6 +16,7 @@ import { groupGamesByLayout } from '../../packages/hub-layout.mjs'
 import { getProfilePickerPlacement } from '../../packages/profile-picker-placement.mjs'
 import { createHubPerformanceRecorder } from '../../packages/emulator-performance-probe.mjs'
 import { appendClientDiagnosticsParameters, createClientDiagnostics, getClientDiagnosticsOptions } from '../../packages/client-diagnostics.mjs'
+import { loadDebuggingEnvironment } from '../../packages/debugging-environment-client.mjs'
 import { createMultiSaveCloseCoordinator } from '../../packages/multi-save-close-coordinator.mjs'
 import { isMobileLandscapeViewport, isNarrowPortraitViewport } from '../../packages/mobile-viewport.mjs'
 import { shouldReloadForFrontendRevision } from '../../packages/frontend-revision.mjs'
@@ -30,6 +31,11 @@ import { createGlobalPlaybackToggle, createPlayerPlaybackToggle, requestPlayerPl
 import { saveRunningProfileNames } from '../../packages/running-profile-editor.mjs'
 import { findReachablePlayerOriginSlot, findTrustedPlayerFrame, frameOrigin, parsePlayerOriginPorts, playerOriginForSlot } from '../../packages/player-origin-topology.mjs'
 import { respondToPlayerStorageRequest } from '../../packages/player-origin-storage-bridge.mjs'
+import { createPlayerAssetRequestHandler } from '../../packages/player-origin-asset-bridge.mjs'
+import { createGameAssetCache } from '../../packages/game-asset-cache.mjs'
+import { createGameAssetStorage } from '../../packages/game-asset-storage.mjs'
+import { createGameAssetService } from '../../packages/game-asset-service.mjs'
+import { createGameAssetWorkerClient } from '../../packages/game-asset-worker-client.mjs'
 import { getInstallationIdentity } from '../../packages/restore-candidate.mjs'
 import { createOddsManipulatorSync } from '../../packages/odds-manipulator-sync.mjs'
 import { describeRestoreCandidate } from './restore-candidate-view.mjs'
@@ -45,12 +51,20 @@ const MacroEditor = React.lazy(() => import('../../packages/input-macro-simulato
 // The Hub document owns the session lifecycle: every full load/F5 gets a new ID.
 // Player iframes receive that ID explicitly through their launch query string.
 const clientDiagnosticsOptions = getClientDiagnosticsOptions(import.meta.env.VITE_DEBUG)
-const hubPerformance = clientDiagnosticsOptions.enabled
+const hubPerformance = clientDiagnosticsOptions.verbose
   ? createHubPerformanceRecorder({ browser: window, getFrames: () => document.querySelectorAll('.player-grid iframe') })
   : null
 const clientDiagnostics = clientDiagnosticsOptions.enabled
-  ? createClientDiagnostics({ browser: window, source: 'hub', sessionId: clientDiagnosticsOptions.sessionId })
+  ? createClientDiagnostics({ browser: window, source: 'hub', sessionId: clientDiagnosticsOptions.sessionId, enabled: false })
   : null
+void loadDebuggingEnvironment().then(environment => clientDiagnostics?.setEnabled(environment.rngDebugLogging))
+const reportGameAsset = event => clientDiagnostics?.capture({ kind: 'game-asset', message: `asset.${event.phase}`, ...event })
+const gameAssetStorage = createGameAssetStorage()
+const fallbackGameAssets = createGameAssetService({ assets: createGameAssetCache({ storage: gameAssetStorage, onEvent: reportGameAsset }), onEvent: reportGameAsset })
+let gameAssetWorker
+try { gameAssetWorker = new Worker(new URL('../../packages/game-asset-worker.mjs', import.meta.url), { type: 'module' }) } catch (error) { reportGameAsset({ phase: 'worker-unavailable', reason: error.message }) }
+const gameAssets = createGameAssetWorkerClient({ worker: gameAssetWorker, fallback: fallbackGameAssets, onEvent: reportGameAsset })
+window.addEventListener('pagehide', event => { if (!event.persisted) { gameAssets.dispose(); gameAssetStorage.close() } })
 
 function readViewport() {
   return { width: window.innerWidth, height: window.innerHeight }
@@ -89,6 +103,10 @@ const huntErrorMessages = Object.freeze({
   'unsupported-starter': 'Caça de iniciais requer uma ROM compatível de Ruby, Sapphire, Emerald, FireRed ou LeafGreen.',
   'invalid-starter-choice': 'Escolha a Poké Bola de Hoenn e use soft reset para caçar iniciais.',
   'starter-already-owned': 'Salve antes de escolher o inicial, em frente à bolsa ou à Poké Bola desejada.',
+  'invalid-fossil-reset': 'Fossil requer soft reset.',
+  'fossil-party-full': 'Deixe uma vaga no grupo e salve diante do NPC antes de receber o fóssil.',
+  'invalid-party-record': 'Não foi possível validar o último Pokémon do grupo.',
+  'party-count-changed': 'O grupo mudou de forma inesperada; a caça foi parada.',
   'input-frame-timeout': 'O emulador não processou o toque direcional; a caça foi parada.',
   'input-frame-unavailable': 'Não foi possível confirmar o toque direcional neste emulador.',
 })
@@ -261,8 +279,12 @@ function App() {
   const [activeSessions, setActiveSessions] = useState([])
   const activeSessionsRef = useRef(activeSessions)
   activeSessionsRef.current = activeSessions
-  const [focusedSessionId, setFocusedSessionId] = useState(null)
-  const selectedPlayerSessionId = activeSessions.some(session => session.sessionId === focusedSessionId) ? focusedSessionId : activeSessions[0]?.sessionId
+  const assetRequestHandlerRef = useRef(null)
+  if (!assetRequestHandlerRef.current) assetRequestHandlerRef.current = createPlayerAssetRequestHandler({
+    launchLoader: session => getPlayerLeaseLaunch(session.sessionId, { profileId: session.profileId, gameId: session.gameId, generation: session.leaseGeneration }),
+    preparation: gameAssets,
+    isCurrent: (session, frame) => frame.isConnected && activeSessionsRef.current.some(current => current.sessionId === session.sessionId && current.leaseGeneration === session.leaseGeneration),
+  })
 
   function getPlayerPlaybackState(sessionId) {
     const frame = playerFrameForSession(sessionId)
@@ -397,6 +419,7 @@ function App() {
 
   useEffect(() => {
     const live = new Set(activeSessions.map(session => session.sessionId))
+    assetRequestHandlerRef.current.retainSessions(live)
     for (const sessionId of profileInfoGamepadGatesRef.current.keys()) if (!live.has(sessionId)) profileInfoGamepadGatesRef.current.delete(sessionId)
     if (profileInfoSessionId && !activeSessions.some(session => session.sessionId === profileInfoSessionId)) setProfileInfoSessionId(null)
     if (multiProfileRows && multiProfileRows.some(row => !live.has(row.sessionId))) setMultiProfileRows(null)
@@ -480,6 +503,7 @@ function App() {
       .then(catalog => {
         if (!active) return
         setGames(catalog)
+        for (const game of catalog) if (game.status === 'ready' && game.assets) void gameAssets.prefetch(game.assets).catch(error => reportGameAsset({ phase: 'prefetch-failed', gameId: game.id, reason: error.message }))
         setCatalogError('')
       })
       .catch(cause => {
@@ -507,6 +531,11 @@ function App() {
     const receive = event => {
       const trustedFrame = findTrustedPlayerFrame(event, document.querySelectorAll('.player-cell iframe'), window.location.origin)
       if (!trustedFrame) return
+      if (event.data?.type === 'emulator-hub:game-asset-request') {
+        const session = activeSessionsRef.current.find(candidate => trustedFrame.closest('.player-cell')?.dataset.sessionId === candidate.sessionId)
+        if (session) void assetRequestHandlerRef.current(event, { frame: trustedFrame, session, origin: event.origin })
+        return
+      }
       if (event.data?.type === 'emulator-hub:macro-ended') {
         const participant = trustedFrame.closest('.player-cell')?.dataset.sessionId
         if (participant && event.data.sessionId === participant && typeof event.data.runId === 'string' && ['completed', 'stopped', 'failed'].includes(event.data.outcome)) macroCoordinatorRef.current.ended(participant, event.data.runId, event.data.outcome)
@@ -554,12 +583,6 @@ function App() {
         const message = playerActionFailureMessages[event.data.action]
         if (!message) return
         setPlayerActionErrors(current => ({ ...current, [session.sessionId]: [...(current[session.sessionId] ?? []), message].slice(-3) }))
-        return
-      }
-      if (event.data?.type === 'emulator-hub:player-focused') {
-        const frame = [...document.querySelectorAll('.player-cell iframe')].find(candidate => candidate.contentWindow === event.source)
-        const session = activeSessions.find(candidate => frame?.closest('.player-cell')?.dataset.sessionId === candidate.sessionId)
-        if (session && event.data.sessionId === session.sessionId && event.data.gameId === session.gameId && event.data.profileId === session.profileId) setFocusedSessionId(session.sessionId)
         return
       }
       if (event.data?.type === 'emulator-hub:snapshot-restore-settled' || event.data?.type === 'emulator-hub:snapshot-restore-stale') {
@@ -766,18 +789,9 @@ function App() {
   useEffect(() => {
     if (!activeSessions.length) return
     let current = true
-    const whenSelectedPlaying = action => {
-      if (!selectedPlayerSessionId) return
-      void getPlayerPlaybackState(selectedPlayerSessionId).then(reply => {
-        if (current && reply.paused === false && activeSessionsRef.current.some(session => session.sessionId === selectedPlayerSessionId)) action()
-      }).catch(() => {})
-    }
     const triggerActions = createPlayerTriggerActions({ dispatch: message => {
-      whenSelectedPlaying(() => {
-        if (message === 'emulator-hub:reset' || message === 'emulator-hub:soft-reset') dispatchReset(message)
-        else broadcastPlayerMessage(message)
-      })
-    }, toggleFastForward: () => whenSelectedPlaying(() => { void toggleFastForwardFromFirstFrame() }), toggleLastMacro: () => whenSelectedPlaying(() => { void lastMacroActionRef.current.toggle().catch(cause => setMacroError(cause.message)) }) })
+      if (current) void dispatchPlayingPlayerMessage(message)
+    }, toggleFastForward: () => { if (current) void toggleFastForwardFromFirstFrame() }, toggleLastMacro: () => { if (current) void lastMacroActionRef.current.toggle().catch(cause => setMacroError(cause.message)) } })
     const broadcast = bindings => {
       for (const frame of document.querySelectorAll('.player-grid iframe')) {
         const sessionId = frame.closest('.player-cell')?.dataset.sessionId
@@ -793,8 +807,8 @@ function App() {
       const observedBindings = activeGamepadBindings(readGamepadSnapshot())
       const globallyAllowed = globalGamepadGateRef.current.filter(observedBindings)
       const bindings = huntActiveRef.current || controlPanelOpen || profileGame || instancePicker || closeLockRef.current ? [] : globallyAllowed
-      const selectedGate = profileInfoGamepadGatesRef.current.get(selectedPlayerSessionId)
-      const actionBindings = selectedPlayerSessionId === profileInfoSessionId ? [] : selectedGate ? selectedGate.filter(bindings) : bindings
+      let actionBindings = bindings
+      for (const gate of profileInfoGamepadGatesRef.current.values()) actionBindings = gate.filter(actionBindings)
       triggerActions.update(actionBindings, { l2: l2TriggerAction, r2: r2TriggerAction }, triggerBindings)
       broadcast(bindings)
       hubPerformance?.recordGamepad(performance.now() - startedAt)
@@ -808,7 +822,7 @@ function App() {
       document.removeEventListener('visibilitychange', poll)
       for (const frame of document.querySelectorAll('.player-grid iframe')) configurePlayerFrame(frame, { type: 'emulator-hub:gamepad', bindings: [] })
     }
-  }, [activeSessions.length, controlPanelOpen, profileGame, instancePicker, l2TriggerAction, r2TriggerAction, triggerBindings, oddsManipulatorEnabled, profileInfoSessionId, selectedPlayerSessionId])
+  }, [activeSessions.length, controlPanelOpen, profileGame, instancePicker, l2TriggerAction, r2TriggerAction, triggerBindings, oddsManipulatorEnabled, profileInfoSessionId])
 
   useEffect(() => {
     const message = { type: 'emulator-hub:fast-forward', enabled: fastForwardEnabled, speed: fastForwardSpeed }
@@ -1040,7 +1054,6 @@ function App() {
         const running = status.running === true
         huntActiveRef.current = running
         if (!running) globalGamepadGateRef.current.unlock(activeGamepadBindings(readGamepadSnapshot()))
-        if (status.phase === 'found' && status.foundSessionId) setFocusedSessionId(status.foundSessionId)
       },
     })
     huntControllerRef.current = controller
@@ -1193,7 +1206,6 @@ function App() {
     setUserStateAvailable(removeClosed)
     setPlayerPaused(removeClosed)
     setPlayerActionErrors(removeClosed)
-    setFocusedSessionId(current => remaining.some(session => session.sessionId === current) ? current : remaining[0]?.sessionId ?? null)
     setCloseChooserOpen(false)
     setSelectedCloseSessionIds(new Set())
     closeBatchSessionIdsRef.current = []
@@ -1306,7 +1318,6 @@ function App() {
       } else {
         setActiveSessions([session])
       }
-      setFocusedSessionId(sessionId)
     } catch (cause) {
       setProfileError(cause.message)
     } finally {
@@ -1411,8 +1422,8 @@ function App() {
       : session))
   }
 
-  function openProfileInfo(sessionId = null) {
-    const session = activeSessions.find(candidate => candidate.sessionId === (sessionId ?? focusedSessionId)) ?? (sessionId === null ? activeSessions[0] : null)
+  function openProfileInfo(sessionId) {
+    const session = activeSessions.find(candidate => candidate.sessionId === sessionId)
     if (!session) return
     if (profileInfoSessionId && profileInfoSessionId !== session.sessionId) {
       profileInfoGamepadGatesRef.current.get(profileInfoSessionId)?.unlock(activeGamepadBindings(readGamepadSnapshot()))
@@ -1457,7 +1468,7 @@ function App() {
   }
 
   function openHeaderProfileInfo() {
-    if (activeSessions.length < 2) { openProfileInfo(); return }
+    if (activeSessions.length < 2) { openProfileInfo(activeSessions[0]?.sessionId); return }
     setMultiProfileRows(activeSessions.map(session => {
       const game = games.find(candidate => candidate.id === session.gameId)
       return {
@@ -1553,17 +1564,20 @@ function App() {
     }
   }
 
-  function sendPlayerMessage(type, sessionId, stopGlobalMacro = false) {
-    if (!activeSessions.some(session => session.sessionId === sessionId)) return
-    if (type === 'emulator-hub:load-state' && stopGlobalMacro) void stopMacro()
+  function sendPlayerMessage(type, sessionId) {
+    if (!activeSessionsRef.current.some(session => session.sessionId === sessionId)) return
     setPlayerActionErrors(current => { const next = { ...current }; delete next[sessionId]; return next })
     configurePlayerFrame(playerFrameForSession(sessionId), { type, sessionId })
   }
 
-  function sendSelectedPlayerMessage(type) {
-    const sessionId = activeSessions.some(session => session.sessionId === focusedSessionId) ? focusedSessionId : activeSessions[0]?.sessionId
-    if (!sessionId) return
-    sendPlayerMessage(type, sessionId, true)
+  async function dispatchPlayingPlayerMessage(type) {
+    if (huntActiveRef.current) return
+    if (type === 'emulator-hub:reset' || type === 'emulator-hub:soft-reset') return dispatchReset(type)
+    const sessions = await getPlayingSessions()
+    if (huntActiveRef.current) return
+    const participants = sessions.filter(session => !snapshotRestoreRequestsRef.current[session.sessionId])
+    if (type === 'emulator-hub:load-state' && participants.length) void stopMacro()
+    for (const session of participants) sendPlayerMessage(type, session.sessionId)
   }
 
   async function refreshMacros() {
@@ -1889,7 +1903,7 @@ function App() {
               <legend>1. Tipo de reset</legend>
               <div className="hunt-choice-options">
                 <label><input type="radio" name="hunt-reset-mode" value="soft-reset" checked={huntConfig.resetMode === 'soft-reset'} onChange={() => setHuntConfig(current => ({ ...current, resetMode: 'soft-reset' }))} />Soft reset</label>
-                <label><input type="radio" name="hunt-reset-mode" value="exit-encounter" disabled={huntConfig.startMode === 'hoenn-starter'} checked={huntConfig.resetMode === 'exit-encounter'} onChange={() => setHuntConfig(current => ({ ...current, resetMode: 'exit-encounter' }))} />Sair do encounter</label>
+                <label><input type="radio" name="hunt-reset-mode" value="exit-encounter" disabled={['hoenn-starter', 'fossil'].includes(huntConfig.startMode)} checked={huntConfig.resetMode === 'exit-encounter'} onChange={() => setHuntConfig(current => ({ ...current, resetMode: 'exit-encounter' }))} />Sair do encounter</label>
               </div>
             </fieldset>
             <fieldset className="hunt-choice-group" disabled={huntRunning}>
@@ -1908,6 +1922,7 @@ function App() {
               <label><input type="radio" name="hunt-start-mode" value="walk-left" checked={huntConfig.startMode === 'walk-left'} onChange={() => setHuntConfig(current => ({ ...current, startMode: 'walk-left' }))} />Andar para a esquerda</label>
               <label><input type="radio" name="hunt-start-mode" value="walk-up" checked={huntConfig.startMode === 'walk-up'} onChange={() => setHuntConfig(current => ({ ...current, startMode: 'walk-up' }))} />Andar para cima</label>
               <label><input type="radio" name="hunt-start-mode" value="common" checked={huntConfig.startMode === 'common'} onChange={() => setHuntConfig(current => ({ ...current, startMode: 'common' }))} />Encounter comum</label>
+              <label><input type="radio" name="hunt-start-mode" value="fossil" checked={huntConfig.startMode === 'fossil'} onChange={() => { setHuntStarterPickerOpen(false); setHuntConfig(current => ({ ...current, startMode: 'fossil', resetMode: 'soft-reset' })) }} />Fossil</label>
               <label><input type="radio" name="hunt-start-mode" value="hoenn-starter" checked={huntConfig.startMode === 'hoenn-starter'} aria-haspopup="dialog" onClick={() => setHuntStarterPickerOpen(true)} onKeyDown={event => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); event.currentTarget.click() } }} onChange={() => setHuntConfig(current => ({ ...current, startMode: 'hoenn-starter', resetMode: 'soft-reset' }))} />{`Iniciais (${hoennStarterChoices.find(choice => choice.value === huntConfig.starterPosition)?.name ?? 'por jogo'})`}</label>
             </div>
           </fieldset>
@@ -1931,8 +1946,8 @@ function App() {
             </div>
             <span className="player-header-separator" aria-hidden="true" />
             <div className="player-header-group">
-              <Button className="player-control-button" htmlType="button" icon={<SaveOutlined />} aria-label="Salvar estado" title="Salvar estado" disabled={huntRunning || Boolean(snapshotRestoreRequests[selectedPlayerSessionId])} onClick={() => sendSelectedPlayerMessage('emulator-hub:save-state')} />
-              <Button className="player-control-button" htmlType="button" icon={<UploadOutlined />} aria-label="Carregar estado" title="Carregar estado" disabled={huntRunning || !userStateAvailable[selectedPlayerSessionId] || Boolean(snapshotRestoreRequests[selectedPlayerSessionId])} onClick={() => sendSelectedPlayerMessage('emulator-hub:load-state')} />
+              <Button className="player-control-button" htmlType="button" icon={<SaveOutlined />} aria-label="Salvar estado" title="Salvar estado" disabled={huntRunning || !activeSessions.some(session => !snapshotRestoreRequests[session.sessionId])} onClick={() => dispatchPlayingPlayerMessage('emulator-hub:save-state')} />
+              <Button className="player-control-button" htmlType="button" icon={<UploadOutlined />} aria-label="Carregar estado" title="Carregar estado" disabled={huntRunning || !activeSessions.some(session => userStateAvailable[session.sessionId] && !snapshotRestoreRequests[session.sessionId])} onClick={() => dispatchPlayingPlayerMessage('emulator-hub:load-state')} />
               <Button className="player-control-button" htmlType="button" icon={<RedoOutlined />} aria-label="Soft Reset" title="Soft Reset" disabled={huntRunning} onClick={() => dispatchReset('emulator-hub:soft-reset')} />
               <Button className="player-control-button global-reset-button" htmlType="button" icon={<PoweroffOutlined />} aria-label="Hard Reset" title="Hard Reset" disabled={huntRunning} onClick={() => dispatchReset('emulator-hub:reset')} />
             </div>
@@ -1964,7 +1979,7 @@ function App() {
         </header>
         <div className={`player-panel player-panel-${activeSessions.length}`} inert={huntRunning || closeChooserOpen || saveCloseRows !== null || multiProfileRows !== null ? true : undefined}>
           <div className="player-grid">
-            {activeSessions.map(session => <div className={`player-cell${(huntStatus.completedSessionIds?.includes(session.sessionId) || huntStatus.foundSessionIds?.includes(session.sessionId) || huntStatus.phase === 'found' && huntStatus.foundSessionId === session.sessionId) ? ' hunt-found' : ''}`} data-session-id={session.sessionId} key={`${session.gameId}:${session.profileId}`} onPointerDown={() => setFocusedSessionId(session.sessionId)} onMouseEnter={() => requestPlaybackStatus(session.sessionId)}>
+            {activeSessions.map(session => <div className={`player-cell${(huntStatus.completedSessionIds?.includes(session.sessionId) || huntStatus.foundSessionIds?.includes(session.sessionId) || huntStatus.phase === 'found' && huntStatus.foundSessionId === session.sessionId) ? ' hunt-found' : ''}`} data-session-id={session.sessionId} key={`${session.gameId}:${session.profileId}`} onMouseEnter={() => requestPlaybackStatus(session.sessionId)}>
               <iframe src={playerFrameUrl(session)} title="EmulatorJS" allow="fullscreen; gamepad" inert={profileInfoSessionId === session.sessionId ? true : undefined} onLoad={event => configurePlayerFrameOnLoad(event.currentTarget, session)} />
               <div className="player-cell-controls" role="group" aria-label={`Controles de ${session.profileName ?? session.gameTitle ?? 'emulador'}`}>
                 <Button className="player-cell-playback" htmlType="button" icon={<PlaybackGlyph paused={playerPaused[session.sessionId]} className="player-cell-play-icon" />} aria-label={playerPaused[session.sessionId] ? 'Reproduzir este emulador' : 'Pausar este emulador'} title={playerPaused[session.sessionId] ? 'Reproduzir' : 'Pausar'} disabled={huntRunning} onClick={() => void togglePlayerPlayback(session.sessionId)} />

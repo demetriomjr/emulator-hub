@@ -72,19 +72,18 @@ test('refreshes lease availability every three seconds only while the profile pi
   assert.match(source, /if \(!profileGame\) return undefined[\s\S]*getProfiles\(profileGame\.id\)[\s\S]*window\.setInterval\(refreshProfiles, 3_000\)[\s\S]*window\.clearInterval\(interval\)/)
 })
 
-test('verifies an optional launch IPS and provides it to EmulatorJS as a Blob URL', async () => {
+test('provides verified prepared ROM bytes without a second runtime IPS path', async () => {
   const player = await readFile(new URL('./src/player.js', import.meta.url), 'utf8')
 
-  assert.match(player, /launch\.patchUrl[\s\S]*fetch\(launch\.patchUrl, \{ cache: 'no-store' \}\)/)
-  assert.match(player, /patch bytes did not match launch descriptor/i)
-  assert.match(player, /window\.EJS_gamePatchUrl = URL\.createObjectURL\(new Blob\(\[patchBytes\]\)\)/)
+  assert.match(player, /hashSave\(result\.bytes\) !== result\.effectiveRomSha256/)
+  assert.match(player, /window\.EJS_gameUrl = URL\.createObjectURL\(new Blob\(\[preparedRom\.bytes\]\)\)/)
+  assert.doesNotMatch(player, /window\.EJS_gamePatchUrl = /)
 })
 
 test('continues without a failed optional IPS or an incompatible snapshot', async () => {
   const player = await readFile(new URL('./src/player.js', import.meta.url), 'utf8')
 
-  assert.match(player, /fetch\(launch\.patchUrl, \{ cache: 'no-store' \}\)\.catch\(error => \(\{ ok: false, status: 0, error \}\)\)/)
-  assert.match(player, /event: 'patch-fetch-failed'/)
+  assert.match(player, /if \(!preparedRom\.patchApplied\) \{/)
   assert.match(player, /launch\.patchUrl = undefined[\s\S]*launch\.patchSha256 = undefined/)
   assert.match(player, /if \(snapshot && !snapshotCompatible\) \{/)
   assert.match(player, /stored snapshot is incompatible with this launch/)

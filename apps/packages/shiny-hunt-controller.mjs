@@ -101,9 +101,10 @@ export function createShinyHuntController({ now = () => performance.now(), sleep
 
   async function runConfigured(sessions, signal, config) {
     const { resetMode, startMode, stopMode } = config
-    if (!['soft-reset', 'exit-encounter'].includes(resetMode) || !['interact-a', 'walk-right', 'walk-left', 'walk-up', 'common', 'hoenn-starter'].includes(startMode) || !['first-shiny', 'all-shiny'].includes(stopMode)) throw new Error('Configuração de caça inválida')
+    if (!['soft-reset', 'exit-encounter'].includes(resetMode) || !['interact-a', 'walk-right', 'walk-left', 'walk-up', 'common', 'hoenn-starter', 'fossil'].includes(startMode) || !['first-shiny', 'all-shiny'].includes(stopMode)) throw new Error('Configuração de caça inválida')
     getShinyHuntStartSequence(config)
     if (startMode === 'hoenn-starter' && resetMode !== 'soft-reset') throw new Error('Caça de iniciais requer soft reset')
+    if (startMode === 'fossil' && resetMode !== 'soft-reset') throw new Error('invalid-fossil-reset')
     if (typeof begin !== 'function' || typeof input !== 'function' || resetMode === 'exit-encounter' && typeof inspectPhase !== 'function') throw new Error('Entrada de caça indisponível')
     const completed = new Set()
     const plans = new Map()
@@ -240,8 +241,10 @@ export function createShinyHuntController({ now = () => performance.now(), sleep
         }
       }
       const resultOf = async () => {
-        const existing = await read()
-        if (existing.status !== 'pending') return existing
+        if (startMode !== 'fossil') {
+          const existing = await read()
+          if (existing.status !== 'pending') return existing
+        }
         if (startMode === 'common') {
           let movements = 0
           while (true) {
@@ -273,11 +276,15 @@ export function createShinyHuntController({ now = () => performance.now(), sleep
           if (step.localTap) {
             // One iframe command owns both edges. Never retry a direction on timeout.
             await tap(session, step.button, workerSignal, state.cycleId)
+          } else if (startMode === 'fossil') {
+            // Complete the NPC dialogue, including both B, before inspection.
+            await hold(step.button, step.holdMs)
           } else {
             const earlyEncounter = await holdOrReadEncounter(step.button, step.holdMs)
             if (earlyEncounter) return earlyEncounter
           }
           if (step.intervalMs) await waitAtLeast(pressedAt + step.intervalMs)
+          if (step.releaseIntervalMs) await sleep(step.releaseIntervalMs, workerSignal)
         }
         if (startMode === 'interact-a' || startMode === 'hoenn-starter') await sleep(ENCOUNTER_WAIT_MS, workerSignal)
         for (let readIndex = 0; readIndex < MAX_PENDING_READS; readIndex += 1) {

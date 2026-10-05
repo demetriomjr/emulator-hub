@@ -10,6 +10,9 @@ export function createShinyHuntPlayer({
   inspectPhase = inspectGen3BattlePhase,
   configureOdds,
   softReset,
+  observeReset = () => {},
+  cancelObservation = () => {},
+  reportEncounter = () => {},
   wait = ms => new Promise(resolve => setTimeout(resolve, ms)),
   setA,
   setButton = (button, down) => { if (button !== 'A') throw new Error('unsupported-button'); setA(down) },
@@ -30,6 +33,12 @@ export function createShinyHuntPlayer({
   let starterRepeat = false
   let starterStarted = false
   let pendingTap = null
+  let reportedCycle = null
+  let fossilButtons = null
+  let fossilInputIndex = 0
+  let fossilStarted = false
+
+  function diagnostic(callback, context) { try { callback(context) } catch {} }
 
   function releaseA() {
     pendingTap = null
@@ -47,8 +56,14 @@ export function createShinyHuntPlayer({
   }
 
   function inspectCurrent() {
+    if (fossilButtons && (!fossilStarted || fossilInputIndex < fossilButtons.length || heldButton)) return { status: 'pending' }
     if (starterButtons && (!starterStarted || !starterRepeat && starterInputIndex < starterButtons.length)) return { status: 'pending' }
-    return inspect(getState(), { ...layout, baselineEnemy })
+    const result = inspect(getState(), { ...layout, baselineEnemy })
+    if ((result.status === 'normal' || result.status === 'shiny') && reportedCycle !== cycleId) {
+      reportedCycle = cycleId
+      diagnostic(reportEncounter, { huntId, cycleId, pid: result.pid, shiny: result.status === 'shiny' })
+    }
+    return result
   }
 
   async function handle(message) {
@@ -57,6 +72,7 @@ export function createShinyHuntPlayer({
         if (typeof message.huntId !== 'string' || !message.huntId) return { ok: false, error: 'invalid-hunt' }
         const nextLayout = getLayout()
         if (!nextLayout) return { ok: false, error: 'unsupported-rom' }
+        if (message.startMode === 'fossil' && message.resetMode !== 'soft-reset') return { ok: false, error: 'invalid-fossil-reset' }
         let plan = null
         if (message.startMode === 'hoenn-starter') {
           const choice = hoennStarterChoices.find(candidate => candidate.value === message.starterPosition)
@@ -64,9 +80,14 @@ export function createShinyHuntPlayer({
           plan = resolveShinyHuntStartPlan(message, nextLayout.gameCode)
         }
         releaseA()
+        diagnostic(cancelObservation)
+        reportedCycle = null
         huntId = message.huntId
         cycleId = null
-        layout = plan ? { ...nextLayout, starterSpecies: plan.starterSpecies } : nextLayout
+        layout = message.startMode === 'fossil' ? { ...nextLayout, fossil: true } : plan ? { ...nextLayout, starterSpecies: plan.starterSpecies } : nextLayout
+        fossilButtons = message.startMode === 'fossil' ? resolveShinyHuntStartPlan(message, nextLayout.gameCode).startSequence.map(step => step.button) : null
+        fossilInputIndex = 0
+        fossilStarted = false
         starterButtons = plan ? plan.startSequence.map(step => step.button) : null
         starterInputIndex = 0
         starterRepeat = plan?.repeatUntilEncounter ?? false
@@ -81,6 +102,7 @@ export function createShinyHuntPlayer({
       if (message.type === 'cancel') {
         if (message.huntId === huntId) {
           releaseA()
+          diagnostic(cancelObservation)
           huntId = null
           cycleId = null
         }
@@ -96,6 +118,9 @@ export function createShinyHuntPlayer({
         starterInputIndex = 0
         starterStarted = false
         if (!configureOdds(message.oddsResetCount)) return { ok: false, error: 'odds-clock-rejected' }
+        fossilInputIndex = 0
+        fossilStarted = false
+        diagnostic(observeReset, { huntId, cycleId: message.cycleId, oddsResetCount: message.oddsResetCount, virtualTimestamp: message.oddsResetCount * 60000, resetType: 'soft' })
         if (!await softReset()) return { ok: false, error: 'soft-reset-failed' }
         let baseline = null
         for (let attempt = 0; attempt < 3 && !baseline; attempt += 1) {
@@ -112,6 +137,17 @@ export function createShinyHuntPlayer({
       if (message.type === 'begin') {
         if (message.huntId !== huntId || completed || (message.afterReset ? message.cycleId !== cycleId : message.cycleId !== (cycleId ?? 0) + 1)) return { ok: false, error: 'stale-cycle' }
         releaseA()
+        if (fossilButtons) {
+          if (!message.afterReset) return { ok: false, error: 'invalid-fossil-reset' }
+          const state = getState()
+          const existing = inspect(state, layout)
+          if (existing.status !== 'pending') return { ok: false, error: existing.reason ?? 'state-unavailable' }
+          baselineEnemy = captureBaseline(state, layout)
+          if (!baselineEnemy) return { ok: false, error: 'state-unavailable' }
+          fossilInputIndex = 0
+          fossilStarted = true
+          return { ok: true }
+        }
         if (starterButtons) {
           if (!message.afterReset) return { ok: false, error: 'invalid-starter-choice' }
           const state = getState()
@@ -170,6 +206,7 @@ export function createShinyHuntPlayer({
       if (message.type === 'input') {
         if (message.button !== undefined) {
           if (completed || !['A', 'B', 'UP', 'DOWN', 'LEFT', 'RIGHT'].includes(message.button) || typeof message.down !== 'boolean') return { ok: false, error: 'invalid-input' }
+          if (fossilButtons && message.stage === 'encounter' && (!fossilStarted || fossilButtons[fossilInputIndex] !== message.button)) return { ok: false, error: 'invalid-input-order' }
           if (starterButtons && message.stage === 'encounter' && (!starterStarted || message.button !== 'A' || !starterRepeat && starterButtons[starterInputIndex] !== 'A')) return { ok: false, error: 'invalid-input-order' }
           if (message.down) {
             if (heldButton || aDown) {
@@ -189,6 +226,7 @@ export function createShinyHuntPlayer({
             if (heldButton !== message.button) return { ok: false, error: 'invalid-input-order' }
             releaseA()
             if (starterButtons && message.stage === 'encounter') starterInputIndex += 1
+            if (fossilButtons && message.stage === 'encounter') fossilInputIndex += 1
           }
           return { ok: true }
         }
@@ -208,7 +246,7 @@ export function createShinyHuntPlayer({
       }
       if (message.type === 'inspect') {
         if (completed) return { ok: false, error: 'completed' }
-        if (message.configured) return { ok: true, ...inspectCurrent() }
+        if (message.configured || fossilButtons) return { ok: true, ...inspectCurrent() }
         if (pressIndex !== 5 || aDown) return { ok: true, status: 'pending' }
         const result = inspect(getState(), { ...layout, baselineEnemy })
         return { ok: true, ...result }

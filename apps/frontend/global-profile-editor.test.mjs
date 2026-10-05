@@ -12,7 +12,7 @@ test('profile detail client addresses one game profile and validates the respons
       return { ok: true, json: async () => ({ id: 'profile/one', name: 'Leaf' }) }
     }
     assert.deepEqual(await getProfile('game one', 'profile/one'), { id: 'profile/one', name: 'Leaf' })
-    assert.deepEqual(calls, [['/api/games/game%20one/profiles/profile%2Fone', { cache: 'no-store' }]])
+    assert.deepEqual(calls, [['/api/games/game%20one/profiles/profile%2Fone', { cache: 'no-store', signal: undefined }]])
 
     globalThis.fetch = async () => ({ ok: true, json: async () => ({ profile: {} }) })
     await assert.rejects(getProfile('game', 'profile'), /Invalid profile response/)

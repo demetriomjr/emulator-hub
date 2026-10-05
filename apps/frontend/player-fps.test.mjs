@@ -20,7 +20,7 @@ function harness(enabled) {
   const sent = []
   const overlay = { textContent: '', setAttribute() {}, remove() { removed = true } }
   const context = {
-    clientDiagnosticsOptions: { enabled },
+    clientDiagnosticsOptions: { enabled: true, verbose: enabled },
     emulatedFpsTimer: null, emulatedFpsOverlay: null,
     fastForwardRequest: { enabled: true, speed: 5 },
     launchDescriptor: { core: 'gba' },

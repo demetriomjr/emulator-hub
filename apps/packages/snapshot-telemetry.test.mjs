@@ -20,7 +20,7 @@ test('forwards only bounded snapshot decisions and failures to container diagnos
   telemetry.error('restore-load-failed', { snapshotKind: 'cloud-recovery', code: 'LOAD_FAILED', error: 'invalid state' })
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(requests.length, 2)
-  assert.equal(requests[0].url, '/api/debug/client-events')
+  assert.equal(requests[0].url, '/_frontend/events')
   assert.equal(requests[0].options.keepalive, true)
   assert.deepEqual(JSON.parse(requests[0].options.body), {
     sessionId: 'session-1', source: 'player', kind: 'snapshot-flow', level: 'info', page: '/player.html', message: 'restore-choice',

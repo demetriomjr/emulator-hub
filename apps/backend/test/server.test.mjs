@@ -487,6 +487,10 @@ describe('hub backend HTTP contract', () => {
     }))
 
     const launch = await jsonResponse(await fetch(`${baseUrl}/api/games/custom-adventure/launch?profileId=${profile.id}`))
+    const catalog = await jsonResponse(await fetch(`${baseUrl}/api/games`))
+    assert.equal(catalog.games[0].assets.romSha256, sha256(rom))
+    assert.equal(catalog.games[0].assets.patchSha256, sha256(ips))
+    assert.equal(catalog.games[0].assets.romUrl, '/roms/custom-adventure')
     assert.equal(launch.patchUrl, '/roms/custom-adventure/patch')
     assert.equal(launch.patchSha256, sha256(ips))
     const patchResponse = await fetch(`${baseUrl}${launch.patchUrl}`)
@@ -2077,7 +2081,7 @@ describe('hub backend HTTP contract', () => {
     const id = `rom-${sha1}`
 
     assert.deepEqual(await jsonResponse(await fetch(`${baseUrl}/api/games`)), {
-      games: [{ id, title: 'Pokémon FireRed Version', system: 'gba', core: 'gba', status: 'ready', region: 'wor', coverUrl: 'https://retrocollection.example/firered.png', pokemonHubSaveSupported: true, profiles: [] }],
+      games: [{ id, title: 'Pokémon FireRed Version', system: 'gba', core: 'gba', status: 'ready', region: 'wor', coverUrl: 'https://retrocollection.example/firered.png', pokemonHubSaveSupported: true, profiles: [], assets: { romUrl: `/roms/${id}`, romSha256: sha256(rom) } }],
     })
     const profile = await jsonResponse(await fetch(`${baseUrl}/api/games/${id}/profiles`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Leaf' }),
@@ -2118,6 +2122,7 @@ describe('hub backend HTTP contract', () => {
           core: 'gambatte',
           status: 'ready',
           pokemonHubSaveSupported: false,
+          assets: { romUrl: '/roms/pokemon-red', romSha256: sha256(rom) },
           profiles: [],
         },
         {

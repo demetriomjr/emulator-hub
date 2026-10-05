@@ -42,6 +42,7 @@ import { pokemonHubLocationKey } from '../packages/pokemon-hub-location-key.mjs'
 import { createRomDiscovery } from '../packages/rom-discovery.mjs'
 import { createRedisRomRegistry } from '../packages/rom-registry.mjs'
 import { createRedisPersistence } from '../packages/redis-persistence.mjs'
+import { createDebuggingEnvironmentStore } from '../packages/debugging-environment-store.mjs'
 import { migrateLegacyJsonData } from '../packages/redis-legacy-migration.mjs'
 import { createClientDiagnosticStore } from '../packages/client-diagnostic-store.mjs'
 import { createPlayerLeaseCoordinator } from '../packages/player-lease-coordinator.mjs'
@@ -93,6 +94,7 @@ export function createHubServer(options = {}) {
   const gameSaveLeases = options.gameSaveLeases ?? createGameSaveLeaseCoordinator({ persistence })
   const config = {
     persistence,
+    debuggingEnvironment: options.debuggingEnvironment ?? createDebuggingEnvironmentStore({ persistence }),
     catalogPath: options.catalogPath ?? defaultCatalogPath,
     romsDirectory: options.romsDirectory ?? options.romsDir ?? defaultRomsDirectory,
     patchesDirectory: options.patchesDirectory ?? options.patchesDir ?? defaultPatchesDirectory,
@@ -319,6 +321,7 @@ async function handleRequest(request, response, config) {
   const pokemonHubProfilesRoute = route.pathname === '/api/pokemon-hub/profiles'
   const pokemonHubProfileRoute = parsePokemonHubProfileRoute(route.pathname)
   const isClientDiagnosticsRoute = route.pathname === '/api/debug/client-events'
+  const isDebuggingEnvironmentRoute = route.pathname === '/api/debug/environment'
   const isBackupRoute = route.pathname === '/api/ops/backups/backend-state'
   const isEventBatchRoute = route.pathname === '/api/ops/gen3-events/deliver'
   const supportedMethod = (request.method === 'GET' && !isBackupRoute && !isEventBatchRoute)
@@ -331,6 +334,7 @@ async function handleRequest(request, response, config) {
     || (request.method === 'PUT' && (isControlProfileRoute || saveRoute || snapshotRoute))
     || (request.method === 'DELETE' && snapshotRoute)
     || (request.method === 'PATCH' && isUserPreferencesRoute)
+    || (request.method === 'PATCH' && isDebuggingEnvironmentRoute)
     || (playerLeaseRoute && ((request.method === 'POST' && ['acquire', 'heartbeat'].includes(playerLeaseRoute.kind)) || (request.method === 'DELETE' && playerLeaseRoute.kind === 'release') || (request.method === 'GET' && playerLeaseRoute.kind === 'launch')))
     || (request.method === 'POST' && ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute?.kind))
     || (pokemonHubSessionRoute && ((request.method === 'GET' && ['open', 'backups'].includes(pokemonHubSessionRoute.kind)) || (request.method === 'POST' && ['open', 'attach', 'pane-load', 'heartbeat', 'snapshot', 'close-command', 'item-reorder', 'item-transfer'].includes(pokemonHubSessionRoute.kind)) || (request.method === 'DELETE' && ['detach', 'close'].includes(pokemonHubSessionRoute.kind))))
@@ -340,9 +344,22 @@ async function handleRequest(request, response, config) {
     || (isClientDiagnosticsRoute && request.method === 'POST')
     || ((isBackupRoute || isEventBatchRoute) && request.method === 'POST')
   if (!supportedMethod) {
+    if (isDebuggingEnvironmentRoute) { response.setHeader('Allow', 'GET, PATCH'); return json(response, 405, { error: 'Method is not supported for this route.' }) }
     response.setHeader('Allow', isBackupRoute || isEventBatchRoute ? 'POST' : isClientDiagnosticsRoute ? 'GET, POST' : isUserPreferencesRoute ? 'GET, PATCH' : macroRoute ? 'DELETE' : isMacrosRoute ? 'GET, POST' : pokemonHubSessionRoute ? pokemonHubSessionRoute.kind === 'detach' || pokemonHubSessionRoute.kind === 'close' ? 'DELETE' : 'POST' : pokemonHubRoute ? ['transfer', 'snapshot-acquire', 'snapshot-renew', 'snapshot-sync', 'snapshot-release'].includes(pokemonHubRoute.kind) ? 'POST' : 'GET' : pokemonHubProfileRoute ? 'GET, PATCH, DELETE' : pokemonHubProfilesRoute || gameProfilesRoute ? 'GET, POST' : snapshotRoute ? 'GET, PUT, DELETE' : saveRoute || isControlProfileRoute ? 'GET, PUT' : gameProfileRoute ? 'GET, PATCH, DELETE' : patchRoute ? 'GET' : isRomRoute ? 'GET, HEAD' : 'GET')
     json(response, 405, { error: 'Method is not supported for this route.' })
     return
+  }
+
+  if (isDebuggingEnvironmentRoute) {
+    response.setHeader('Cache-Control', 'no-store')
+    if (request.method === 'PATCH') {
+      if (!config.backupToken || request.headers.authorization !== `Bearer ${config.backupToken}`) return json(response, 401, { error: 'Operator authorization is required.' })
+      let body
+      try { body = await readJsonBody(request); return json(response, 200, await config.debuggingEnvironment.set(body)) }
+      catch (error) { return json(response, error instanceof TypeError || error instanceof SyntaxError ? 400 : 503, { error: error.message }) }
+    }
+    try { return json(response, 200, await config.debuggingEnvironment.get()) }
+    catch { return json(response, 503, { error: 'Debugging configuration is unavailable.' }) }
   }
 
   if (isBackupRoute) {
@@ -754,6 +771,10 @@ async function listGames(response, config) {
     }
 
     if (verification.ok) {
+      let patch = null
+      try { patch = (await verifyGamePatch(entry, config)).patch } catch (error) { optionalPatchUnavailable(entry, error.message) }
+      game.assets = { romUrl: `/roms/${encodeURIComponent(entry.id)}`, romSha256: entry.sha256,
+        ...(patch ? { patchUrl: `/roms/${encodeURIComponent(entry.id)}/patch`, patchSha256: patch.sha256 } : {}) }
       if (entry.coverUrl) game.coverUrl = entry.coverUrl
       if (entry.region && entry.region !== 'legacy') game.region = entry.region
       if (entry.language) game.language = entry.language

@@ -49,7 +49,6 @@ function harness(sessions, { preferenceFailure = false } = {}) {
     clearRestoreChoiceTimer() {},
     setSnapshotRestoreRequests() {}, snapshotRestoreRequestsRef: { current: {} },
     setUserStateAvailable() {}, setPlayerPaused() {}, setPlayerActionErrors() {},
-    setFocusedSessionId(value) { context.focusUpdate = value },
     setActiveSessions(value) { context.activeSessions = typeof value === 'function' ? value(context.activeSessions) : value; context.activeSessionsRef.current = context.activeSessions },
     setOddsManipulatorEnabled(value) { calls.push(['odds', value]) },
     setFullscreen() {},
@@ -93,7 +92,7 @@ test('partial completion keeps survivor and global odds state', async () => {
   await api.finishSelectedPlayerClose()
   assert.deepEqual(context.activeSessions.map(session => session.sessionId), ['a'])
   assert.equal(calls.some(call => call[0] === 'odds'), false)
-  assert.equal(context.focusUpdate('b'), 'a')
+  assert.deepEqual(context.activeSessionsRef.current.map(session => session.sessionId), ['a'])
 })
 
 test('closing every emulator confirms the visible header preferences while partial close does not', async () => {

@@ -8,6 +8,9 @@ import { createPlayerMacroController } from './player-macro-controller.mjs'
 import { INPUT_CORE_IDS, addItem, createMacro, macroUsesKeyboardKey, normalizeKeyboardKey } from './input-macro-simulator.mjs'
 import { selectPlayerThreadMode } from './player-thread-policy.mjs'
 import { isEmulatorPlaying } from './player-playback.mjs'
+import { createRngResetObserver } from './rng-reset-observer.mjs'
+import { createShinyHuntPlayer } from './shiny-hunt-player.mjs'
+import { loadDebuggingEnvironment } from './debugging-environment-client.mjs'
 
 const pad = (buttons = [], axes = [], index = 0) => ({ index, buttons: buttons.map(value => ({ pressed: value === 1, value })), axes })
 
@@ -168,6 +171,15 @@ test('player boot keeps backend controls authoritative and applies pre-start par
     monitorEmulatorFrameProgress: () => () => {},
     instrumentEmulatorLifecycle: () => () => {},
     createEmulatorGamepadInput,
+    createRngResetObserver,
+    createShinyHuntPlayer,
+    loadDebuggingEnvironment,
+    createPlayerOriginAssetClient: () => ({
+      async getLaunch() { throw Object.assign(new Error('No Hub in input harness'), { code: 'ASSET_BRIDGE_UNAVAILABLE' }) },
+      dispose() {},
+    }),
+    createGameAssetCache: () => ({}),
+    createGameAssetService: () => ({ async prepare() { return { bytes: new Uint8Array(0), patchApplied: false, effectiveRomSha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855' } } }),
     createPlayerMacroController,
     INPUT_CORE_IDS,
     macroUsesKeyboardKey,

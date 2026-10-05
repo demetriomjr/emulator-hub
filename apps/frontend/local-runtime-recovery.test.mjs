@@ -10,7 +10,8 @@ test('captures local recovery immediately and every 10 seconds, preserving it on
   assert.match(player, /window\.setInterval\(\(\) => void captureLocalRecovery\(\)\.catch\([\s\S]*?\), 10_000\)/)
   assert.match(player, /\), 10_000\)\s+void captureLocalRecovery\(\)\.catch\(/)
   assert.match(player, /markRuntimeBreak\(profileId, id\)/)
-  assert.doesNotMatch(player, /addEventListener\('pagehide'[\s\S]*clearLocalRecovery/)
+  const pagehideHandler = player.match(/addEventListener\('pagehide',([^\n]+)/)?.[1] ?? ''
+  assert.doesNotMatch(pagehideHandler, /clearLocalRecovery/)
 })
 
 test('offers a matching recovery candidate inside a scoped emulator session', async () => {

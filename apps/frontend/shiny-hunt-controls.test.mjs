@@ -39,7 +39,7 @@ test('the starter method opens a named picker on every click and requires an exp
   context.huntStarterPickerOpen = false
   let view = render({ resetMode: 'exit-encounter', startMode: 'common', stopMode: 'first-shiny' })
   const methods = view.filter(node => node.props.name === 'hunt-start-mode')
-  assert.equal(methods.length, 6)
+  assert.equal(methods.length, 7)
   assert.equal(view.filter(node => node.type === context.Select).length, 0)
   const starter = methods.find(node => node.props.value === 'hoenn-starter')
   starter.props.onClick()
@@ -65,6 +65,20 @@ test('the starter method opens a named picker on every click and requires an exp
   reopened.props.onClose()
   assert.equal(context.huntStarterPickerOpen, false)
   assert.equal(context.huntConfig.starterPosition, 3)
+})
+
+test('Fossil selection uses soft reset and locks battle exit while preserving stop choices', () => {
+  let view = render({ resetMode: 'exit-encounter', startMode: 'common', stopMode: 'all-shiny' })
+  const fossil = view.find(node => node.props.name === 'hunt-start-mode' && node.props.value === 'fossil')
+  assert.ok(fossil)
+  fossil.props.onChange()
+  assert.equal(context.huntConfig.startMode, 'fossil')
+  assert.equal(context.huntConfig.resetMode, 'soft-reset')
+  assert.equal(context.huntConfig.stopMode, 'all-shiny')
+  view = render(context.huntConfig)
+  assert.equal(view.find(node => node.props.value === 'exit-encounter').props.disabled, true)
+  assert.equal(view.find(node => node.props.value === 'fossil').props.checked, true)
+  assert.equal(view.find(node => node.props.className === 'hunt-modal-action').props.disabled, false)
 })
 
 test('a running Hoenn hunt locks settings and keeps Stop available', () => {

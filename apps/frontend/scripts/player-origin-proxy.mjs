@@ -9,7 +9,7 @@ export function createPlayerOriginProxyServer({ targetOrigin }) {
       port: Number(target.port),
       method: incoming.method,
       path: incoming.url,
-      headers: { ...incoming.headers, host: target.host },
+      headers: { ...incoming.headers },
     }, response => {
       outgoing.writeHead(response.statusCode ?? 502, response.headers)
       response.pipe(outgoing)

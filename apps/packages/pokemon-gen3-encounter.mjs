@@ -37,7 +37,7 @@ function readHalf(bytes, offset) {
   return new DataView(bytes.buffer, bytes.byteOffset + offset, 2).getUint16(0, true)
 }
 
-function stateMatches(bytes, layout) {
+export function stateMatches(bytes, layout) {
   if (!(bytes instanceof Uint8Array) || bytes.length < 0x61010 || !layout) return false
   if ('RASTATE\x01' !== String.fromCharCode(...bytes.subarray(0, 8))) return false
   if (readWord(bytes, 0x10) !== 0x01000007) return false
@@ -64,8 +64,38 @@ function decodeRecord(bytes, offset) {
   return { species, shiny, pid, otid }
 }
 
+function readParty(bytes, offset) {
+  const records = []
+  for (let slot = 0; slot < 6; slot++) {
+    const record = decodeRecord(bytes, offset + slot * 100)
+    if (!record) break
+    if (record.invalid) return { error: 'invalid-party-record' }
+    records.push(record)
+  }
+  return { records }
+}
+
+function inspectFossil(bytes, layout) {
+  const offset = gen3StateOffset(layout.playerAddress)
+  if (offset === null || offset + 600 > bytes.length) return { status: 'error', reason: 'state-mismatch' }
+  const party = readParty(bytes, offset)
+  if (party.error) return { status: 'error', reason: party.error }
+  const baseline = layout.baselineEnemy
+  if (!(baseline instanceof Uint8Array) || baseline.length !== 600) {
+    return party.records.length === 6 ? { status: 'error', reason: 'fossil-party-full' } : { status: 'pending' }
+  }
+  const before = readParty(baseline, 0)
+  if (before.error) return { status: 'error', reason: before.error }
+  if (before.records.length === 6) return { status: 'error', reason: 'fossil-party-full' }
+  if (party.records.length <= before.records.length) return { status: 'pending' }
+  if (party.records.length !== before.records.length + 1) return { status: 'error', reason: 'party-count-changed' }
+  const record = party.records.at(-1)
+  return { status: record.shiny ? 'shiny' : 'normal', species: record.species, pid: record.pid, otid: record.otid }
+}
+
 export function inspectGen3Encounter(bytes, layout) {
   if (!stateMatches(bytes, layout)) return { status: 'error', reason: 'state-mismatch' }
+  if (layout.fossil) return inspectFossil(bytes, layout)
   const starter = layout.starterSpecies !== undefined
   if (starter && !isShinyHuntStarterSpecies(layout.gameCode, layout.starterSpecies)) return { status: 'error', reason: 'unsupported-starter' }
   if (!starter && (layout.battle || layout.battleFlag) && !gen3InBattle(bytes, layout.battle ?? layout.battleFlag)) return { status: 'pending' }
@@ -104,6 +134,10 @@ export function inspectGen3BattlePhase(bytes, layout) {
 
 export function captureGen3EnemyBaseline(bytes, layout) {
   if (!stateMatches(bytes, layout)) return null
+  if (layout.fossil) {
+    const offset = gen3StateOffset(layout.playerAddress)
+    return offset === null || offset + 600 > bytes.length ? null : bytes.slice(offset, offset + 600)
+  }
   // The legacy baseline field also guards the selected player record in starter mode.
   const offset = gen3StateOffset(layout.starterSpecies !== undefined ? layout.playerAddress : layout.enemyAddress)
   return offset === null ? null : bytes.slice(offset, offset + 80)

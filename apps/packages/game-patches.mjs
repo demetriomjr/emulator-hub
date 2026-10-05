@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto'
 import { lstat, readFile } from 'node:fs/promises'
 import { extname, isAbsolute, relative, resolve, sep } from 'node:path'
+import { isValidIps } from './ips-patch.mjs'
+export { isValidIps } from './ips-patch.mjs'
 
 const manifestFilename = 'manifest.json'
 const manifestVersion = 1
 const patchExtension = '.ips'
-const ipsHeader = Buffer.from('PATCH')
-const ipsEnd = Buffer.from('EOF')
 
 export function createIpsPatchRegistry({ patchesDirectory }) {
   if (typeof patchesDirectory !== 'string' || patchesDirectory.length === 0) throw new TypeError('A patches directory is required.')
@@ -25,36 +25,6 @@ export function createIpsPatchRegistry({ patchesDirectory }) {
       return readRegisteredPatch(directory, candidates[0])
     },
   }
-}
-
-export function isValidIps(input) {
-  if (!(input instanceof Uint8Array)) return false
-  const bytes = Buffer.from(input.buffer, input.byteOffset, input.byteLength)
-  if (bytes.length < ipsHeader.length + ipsEnd.length || !bytes.subarray(0, ipsHeader.length).equals(ipsHeader)) return false
-
-  let offset = ipsHeader.length
-  while (offset + ipsEnd.length <= bytes.length) {
-    if (bytes.subarray(offset, offset + ipsEnd.length).equals(ipsEnd)) {
-      const trailingBytes = bytes.length - (offset + ipsEnd.length)
-      return trailingBytes === 0 || trailingBytes === 3
-    }
-    if (offset + 5 > bytes.length) return false
-
-    offset += 3 // 24-bit ROM offset
-    const recordSize = bytes.readUInt16BE(offset)
-    offset += 2
-    if (recordSize === 0) {
-      if (offset + 3 > bytes.length) return false
-      const repeatCount = bytes.readUInt16BE(offset)
-      if (repeatCount === 0) return false
-      offset += 3 // repeat count and repeated byte
-    } else {
-      offset += recordSize
-      if (offset > bytes.length) return false
-    }
-  }
-
-  return false
 }
 
 async function readPatchManifest(directory) {

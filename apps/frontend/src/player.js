@@ -1,4 +1,5 @@
 import { deleteEmulatorSnapshot, getCloudSave, getControlProfile, getEmulatorSnapshot, getPlayerLeaseLaunch, heartbeatPlayerLease, putCloudSave, putEmulatorSnapshot } from '../../packages/hub-client.js'
+import { loadDebuggingEnvironment } from '../../packages/debugging-environment-client.mjs'
 import { createCloudSaveSynchronizer } from '../../packages/cloud-save-sync.mjs'
 import { startEmulatorWithMemorySaves } from '../../packages/emulator-save-filesystem.mjs'
 import { observeEmulatorSaveFiles } from '../../packages/emulator-save-events.mjs'
@@ -25,8 +26,12 @@ import { configureEmulatorNotifications } from '../../packages/emulator-notifica
 import { createPlayerInteractionLock } from '../../packages/player-interaction-lock.mjs'
 import { playerThreadFallbackUrl, selectPlayerThreadMode } from '../../packages/player-thread-policy.mjs'
 import { createPlayerOriginStorageClient } from '../../packages/player-origin-storage-bridge.mjs'
+import { createPlayerOriginAssetClient } from '../../packages/player-origin-asset-bridge.mjs'
+import { createGameAssetCache } from '../../packages/game-asset-cache.mjs'
+import { createGameAssetService } from '../../packages/game-asset-service.mjs'
 import { findGen3EncounterLayout } from '../../packages/pokemon-gen3-encounter.mjs'
 import { createShinyHuntPlayer } from '../../packages/shiny-hunt-player.mjs'
+import { createRngResetObserver } from '../../packages/rng-reset-observer.mjs'
 import { createPlayerMacroController } from '../../packages/player-macro-controller.mjs'
 import { INPUT_CORE_IDS, macroUsesKeyboardKey, normalizeKeyboardKey } from '../../packages/input-macro-simulator.mjs'
 
@@ -62,9 +67,9 @@ const mobileGamepadLayout = Object.freeze([
 // the known iPhone WebKit rendering stall.
 const dataUrl = 'https://cdn.emulatorjs.org/4.2.3/data/'
 const clientDiagnosticsOptions = getClientDiagnosticsOptions(import.meta.env.VITE_DEBUG, location.search)
-const performanceTimings = clientDiagnosticsOptions.enabled ? createPerformanceTimingCollector() : null
+const performanceTimings = clientDiagnosticsOptions.verbose ? createPerformanceTimingCollector() : null
 const clientDiagnostics = clientDiagnosticsOptions.enabled
-  ? createClientDiagnostics({ browser: window, source: 'player', sessionId: clientDiagnosticsOptions.sessionId })
+  ? createClientDiagnostics({ browser: window, source: 'player', sessionId: clientDiagnosticsOptions.sessionId, enabled: false })
   : null
 let fastForwardRequest = {
   enabled: parameters.get('fastForward') === '1',
@@ -93,11 +98,37 @@ let threadStartupTimeout = null
 let lastInteractionLockRevision = -1
 let lastGamepadBindings = new Set()
 let launchDescriptor = null
+let preparedRom = null
+let romObjectUrl = null
 let emulatorGameId = null
 let gamepadInput = null
 let macroKeyboardBindings = null
 let gamepadBindings = []
 let shinyHuntPlayer = null
+const rngResetObserver = createRngResetObserver({
+  enabled: false,
+  getManager: () => window.EJS_emulator?.gameManager,
+  getDescriptor: () => launchDescriptor,
+  emit: event => clientDiagnostics.capture({ ...rngContext(), ...event }),
+})
+const debuggingEnvironmentReady = loadDebuggingEnvironment().then(environment => {
+  clientDiagnostics?.setEnabled(environment.rngDebugLogging)
+  rngResetObserver.setEnabled(environment.rngDebugLogging)
+})
+function rngContext() {
+  return { sessionId, profileId, gameId: emulatorGameId, romSha256: launchDescriptor?.romSha256,
+    patchSha256: launchDescriptor?.patchSha256 ?? null, patchApplied: preparedRom?.patchApplied === true,
+    effectiveRomSha256: preparedRom?.effectiveRomSha256,
+    runtimeId: launchDescriptor?.runtimeId, threaded: threadDecision?.enabled === true,
+    fastForward: fastForwardRequest.enabled, virtualTimestamp: oddsClock.enabled ? oddsClock.virtualTimestamp : undefined,
+  }
+}
+async function observedSoftReset() {
+  const result = await softResetEmulator(window.EJS_emulator?.gameManager)
+  rngResetObserver.released()
+  return result
+}
+window.addEventListener('pagehide', () => rngResetObserver.cancel())
 function getShinyHuntPlayer() {
   if (!shinyHuntPlayer) shinyHuntPlayer = createShinyHuntPlayer({
     getLayout: () => launchDescriptor && isEmulatorPlaying(window.EJS_emulator, runtimeReady) && !leaseLost && !closeRequested
@@ -110,7 +141,10 @@ function getShinyHuntPlayer() {
       return frame
     },
     configureOdds: count => oddsClock.configure({ enabled: true, oddsResetCount: count, virtualTimestamp: count * 60_000 }),
-    softReset: () => softResetEmulator(window.EJS_emulator?.gameManager),
+    softReset: observedSoftReset,
+    observeReset: context => rngResetObserver.arm(context),
+    cancelObservation: () => rngResetObserver.cancel(),
+    reportEncounter: event => { if (clientDiagnostics?.enabled) clientDiagnostics.capture({ ...rngContext(), ...event, kind: 'rng-encounter', message: 'hunt.rng-encounter' }) },
     setA: down => {
       if (!gamepadInput) throw new Error('Emulator input is unavailable')
       gamepadInput.setSyntheticPressed(8, down, 'hunt')
@@ -162,6 +196,33 @@ let localRecoveryCapture = null
 let localRecovery = null
 let restoreCandidates = []
 const originStorageClient = hubOrigin === location.origin ? null : createPlayerOriginStorageClient({ browser: window, parent: window.parent, hubOrigin, sessionId, profileId, gameId: id })
+const playerAssetClient = window.parent && window.parent !== window ? createPlayerOriginAssetClient({ browser: window, parent: window.parent, hubOrigin, sessionId, profileId, gameId: id, generation: leaseGeneration, timeoutMs: 120000 }) : null
+let assetLaunchToken = null
+const reportGameAsset = event => clientDiagnostics?.capture({ kind: 'game-asset', message: `asset.${event.phase}`, gameId: id, profileId, ...event })
+const fallbackGameAssets = createGameAssetService({ assets: createGameAssetCache({ onEvent: reportGameAsset }), onEvent: reportGameAsset })
+window.addEventListener('pagehide', () => disposePlayerAssets())
+function disposePlayerAssets() {
+  playerAssetClient?.dispose()
+  if (romObjectUrl) { URL.revokeObjectURL(romObjectUrl); romObjectUrl = null }
+}
+async function loadPlayerLaunch() {
+  if (playerAssetClient) {
+    try { const result = await playerAssetClient.getLaunch(); assetLaunchToken = result.launchToken; return result.launch }
+    catch (error) { if (error.code !== 'ASSET_BRIDGE_UNAVAILABLE') throw error; reportGameAsset({ phase: 'bridge-unavailable', reason: error.message }) }
+  }
+  return getPlayerLeaseLaunch(sessionId, { profileId, gameId: id, generation: leaseGeneration })
+}
+async function loadPlayerRom(launch) {
+  let result
+  if (assetLaunchToken) {
+    try { result = await playerAssetClient.prepareRom(assetLaunchToken) }
+    catch (error) { if (error.code !== 'ASSET_BRIDGE_UNAVAILABLE') throw error; reportGameAsset({ phase: 'bridge-unavailable', reason: error.message }) }
+  }
+  result ??= await fallbackGameAssets.prepare(launch)
+  if (!(result.bytes instanceof Uint8Array) || typeof result.patchApplied !== 'boolean' || await hashSave(result.bytes) !== result.effectiveRomSha256 || result.patchApplied && result.patchSha256 !== launch.patchSha256) throw new Error('Prepared ROM integrity check failed.')
+  reportGameAsset({ phase: 'player-rom-ready', romSha256: launch.romSha256, patchSha256: result.patchSha256, patchApplied: result.patchApplied, effectiveRomSha256: result.effectiveRomSha256, assetBytes: result.bytes.length, assetSource: result.assetSource, reason: result.reason })
+  return result
+}
 const localRecoveryStore = originStorageClient ? createLocalRuntimeRecoveryStore({ storage: originStorageClient.storage }) : createLocalRuntimeRecoveryStore()
 const snapshotTelemetry = createSnapshotTelemetry({ browser: window, source: 'player', sessionId, gameId: id, profileId })
 let removeAudioResumeGesture = null
@@ -270,7 +331,7 @@ function failPlayerStartup(error, phase) {
 }
 
 function startEmulatedFpsOverlay() {
-  if (!clientDiagnosticsOptions.enabled || emulatedFpsTimer) return
+  if (!clientDiagnosticsOptions.verbose || emulatedFpsTimer) return
   const overlay = document.createElement('output')
   overlay.className = 'emulator-fps-overlay'
   overlay.setAttribute('aria-label', 'FPS emulados deste emulador')
@@ -702,6 +763,8 @@ async function closeEmulator() {
   localRecoveryDeleteTimer = null
   if (!runtimeReady) {
     closeRequested = true
+    disposePlayerAssets()
+    rngResetObserver.cancel()
     for (const pending of pendingRestoreRequests.values()) {
       pending.resolve({ candidateId: null, explicit: false })
     }
@@ -710,6 +773,8 @@ async function closeEmulator() {
     return { preserveRecovery: true }
   }
   closeRequested = true
+  disposePlayerAssets()
+  rngResetObserver.cancel()
   if (cloudSaveInterval) window.clearInterval(cloudSaveInterval)
   if (localRecoveryInterval) window.clearInterval(localRecoveryInterval)
   stopBatterySavePolling?.()
@@ -875,7 +940,9 @@ window.addEventListener('message', event => {
       const accepted = oddsClock.configure({ enabled: true, oddsResetCount: event.data.oddsResetCount, virtualTimestamp: event.data.virtualTimestamp })
       clientDiagnostics?.capture({ kind: 'odds-manipulator', message: accepted ? 'odds.hard-reset.clock-applied' : 'odds.hard-reset.clock-rejected', oddsResetCount: event.data.oddsResetCount ?? null, virtualTimestamp: event.data.virtualTimestamp ?? null, dateNow: Date.now(), managerReady: Boolean(window.EJS_emulator?.gameManager) })
     }
+    rngResetObserver.arm({ resetType: 'hard', oddsResetCount: event.data.oddsResetCount })
     window.EJS_emulator?.gameManager?.restart()
+    rngResetObserver.released()
     return
   }
   if (event.data?.type === 'emulator-hub:soft-reset') {
@@ -885,7 +952,8 @@ window.addEventListener('message', event => {
       const accepted = oddsClock.configure({ enabled: true, oddsResetCount: event.data.oddsResetCount, virtualTimestamp: event.data.virtualTimestamp })
       clientDiagnostics?.capture({ kind: 'odds-manipulator', message: accepted ? 'odds.soft-reset.clock-applied' : 'odds.soft-reset.clock-rejected', oddsResetCount: event.data.oddsResetCount ?? null, virtualTimestamp: event.data.virtualTimestamp ?? null, dateNow: Date.now(), managerReady: Boolean(window.EJS_emulator?.gameManager) })
     }
-    void softResetEmulator(window.EJS_emulator?.gameManager)
+    rngResetObserver.arm({ resetType: 'soft', oddsResetCount: event.data.oddsResetCount })
+    void observedSoftReset()
     return
   }
   if (event.data?.type === 'emulator-hub:macro-prepare') {
@@ -980,7 +1048,7 @@ async function start() {
   if (!sessionId || !Number.isInteger(leaseGeneration)) throw new Error('Missing active player lease')
   if (originStorageClient) installationIdentity = await originStorageClient.getInstallationIdentity()
   startLeaseHeartbeat()
-  const [launch, controlProfile] = await Promise.all([getPlayerLeaseLaunch(sessionId, { profileId, gameId: id, generation: leaseGeneration }), getControlProfile()])
+  const [launch, controlProfile] = await Promise.all([loadPlayerLaunch(), getControlProfile(), debuggingEnvironmentReady])
   if (!launch.romUrl || !launch.core) throw new Error('Incomplete launch configuration')
   launchDescriptor = launch
   emulatorGameId = createEmulatorGameId(launch.gameId, profileId)
@@ -1003,33 +1071,17 @@ async function start() {
     hash: hashSave,
     logger: logSavePipeline,
   })
-  if (Boolean(launch.patchUrl) !== Boolean(launch.patchSha256)) throw new Error('Incomplete patch configuration.')
-  const [, receivedSnapshot, receivedUserSnapshot, romResponse, initialPatchResponse] = await Promise.all([
+  const [, receivedSnapshot, receivedUserSnapshot, receivedPreparedRom] = await Promise.all([
     cloudSaveSynchronizer.load(),
     getEmulatorSnapshot(launch.snapshotUrl, { sessionId, generation: leaseGeneration }),
     getEmulatorSnapshot(snapshotUrlForKind(launch.snapshotUrl, 'user-state'), { sessionId, generation: leaseGeneration }),
-    fetch(launch.romUrl, { cache: 'no-store' }),
-    launch.patchUrl ? fetch(launch.patchUrl, { cache: 'no-store' }).catch(error => ({ ok: false, status: 0, error })) : Promise.resolve(null),
+    loadPlayerRom(launch),
   ])
-  if (!romResponse.ok) throw new Error(`ROM request failed (${romResponse.status})`)
-  const romBytes = new Uint8Array(await romResponse.arrayBuffer())
-  if (await hashSave(romBytes) !== launch.romSha256) throw new Error('ROM bytes did not match the launch descriptor.')
-  let patchBytes = null
-  const patchResponse = initialPatchResponse
-  if (patchResponse) {
-    if (patchResponse.ok) {
-      try {
-        const candidatePatchBytes = new Uint8Array(await patchResponse.arrayBuffer())
-        if (await hashSave(candidatePatchBytes) === launch.patchSha256) patchBytes = candidatePatchBytes
-        else console.warn('[game-patch] patch bytes did not match launch descriptor; starting without patch')
-      } catch (error) {
-        console.warn('[game-patch]', { event: 'patch-read-failed', gameId: id, error: error.message })
-      }
-    } else console.warn('[game-patch]', { event: 'patch-fetch-failed', status: patchResponse.status, gameId: id, error: patchResponse.error?.message })
-    if (!patchBytes) {
-      launch.patchUrl = undefined
-      launch.patchSha256 = undefined
-    }
+  if (closeRequested || leaseLost || threadFallbackRequested) return
+  preparedRom = receivedPreparedRom
+  if (!preparedRom.patchApplied) {
+    launch.patchUrl = undefined
+    launch.patchSha256 = undefined
   }
   let snapshot = receivedSnapshot
   let snapshotCompatible = snapshot && snapshot.metadata.profileId === profileId && snapshot.metadata.gameId === id && snapshotMatchesLaunch(snapshot, launch)
@@ -1050,8 +1102,9 @@ async function start() {
   console.info('[emulator-threads] core mode selected', { core: launch.core, threaded: threadDecision.enabled, reason: threadDecision.reason, sessionId })
   window.EJS_player = '#game'
   window.EJS_core = launch.core
-  window.EJS_gameUrl = URL.createObjectURL(new Blob([romBytes]))
-  if (patchBytes) window.EJS_gamePatchUrl = URL.createObjectURL(new Blob([patchBytes]))
+  window.EJS_gameUrl = URL.createObjectURL(new Blob([preparedRom.bytes]))
+  romObjectUrl = window.EJS_gameUrl
+  window.EJS_CacheLimit = 0
   window.EJS_gameName = launch.title
   window.EJS_gameID = emulatorGameId
   window.EJS_defaultControls = { 0: controlProfile.bindings, 1: {}, 2: {}, 3: {} }
@@ -1238,5 +1291,5 @@ async function start() {
 }
 
 start().catch(error => {
-  failPlayerStartup(error, 'initialization')
+  if (!closeRequested) failPlayerStartup(error, 'initialization')
 })

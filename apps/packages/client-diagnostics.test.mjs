@@ -20,11 +20,25 @@ function createWindow(search = '') {
   }
 }
 
-test('enables diagnostics only when VITE_DEBUG is 1', () => {
-  assert.deepEqual(getClientDiagnosticsOptions('1', '', () => 'generated'), { enabled: true, sessionId: 'generated' })
-  assert.deepEqual(getClientDiagnosticsOptions('1', '?debugSession=shared-session', () => 'generated'), { enabled: true, sessionId: 'shared-session' })
-  assert.deepEqual(getClientDiagnosticsOptions('0', '?debug=1', () => 'generated'), { enabled: false, sessionId: null })
-  assert.deepEqual(getClientDiagnosticsOptions('?debug=1', '', () => 'generated'), { enabled: false, sessionId: null })
+test('live debugging switch suppresses diagnostics and console, and can resume', () => {
+  const browser = createWindow(), reported = []
+  const diagnostics = createClientDiagnostics({ browser, sessionId: 'live-switch', report: event => reported.push(event), enabled: false })
+  diagnostics.capture({ kind: 'rng-reset', message: 'disabled' })
+  assert.equal(reported.length, 0); assert.equal(browser.consoleEvents.length, 0)
+  diagnostics.setEnabled(true)
+  diagnostics.capture({ kind: 'rng-reset', message: 'enabled' })
+  assert.equal(reported.length, 1)
+  diagnostics.setEnabled(false)
+  diagnostics.capture({ kind: 'rng-reset', message: 'disabled-again' })
+  assert.equal(reported.length, 1)
+  diagnostics.dispose()
+})
+
+test('basic production diagnostics stay enabled while verbose sampling requires VITE_DEBUG', () => {
+  assert.deepEqual(getClientDiagnosticsOptions('1', '', () => 'generated'), { enabled: true, verbose: true, sessionId: 'generated' })
+  assert.deepEqual(getClientDiagnosticsOptions('1', '?debugSession=shared-session', () => 'generated'), { enabled: true, verbose: true, sessionId: 'shared-session' })
+  assert.deepEqual(getClientDiagnosticsOptions('0', '?debug=1', () => 'generated'), { enabled: true, verbose: false, sessionId: 'generated' })
+  assert.deepEqual(getClientDiagnosticsOptions(undefined, '', () => 'generated'), { enabled: true, verbose: false, sessionId: 'generated' })
 })
 
 test('adds the shared debug session to a player URL only when diagnostics are enabled', () => {
@@ -87,5 +101,14 @@ test('attributes a rejected audio-resume permission to the browser API that reje
   assert.deepEqual(reported.map(event => ({ kind: event.kind, message: event.message, name: event.name })), [
     { kind: 'emulator-failure', message: 'Permission denied at AudioContext.resume', name: 'NotAllowedError' },
   ])
+  diagnostics.dispose()
+})
+test('synchronous console and reporter failures do not change API response or caller behavior', async () => {
+  const browser = createWindow()
+  browser.console.error = () => { throw new Error('console unavailable') }
+  browser.fetch = async () => ({ ok: false, status: 503 })
+  const diagnostics = createClientDiagnostics({ browser, sessionId: 'fail-open', report: () => { throw new Error('report unavailable') } })
+  assert.doesNotThrow(() => diagnostics.capture({ kind: 'uncaught-error', message: 'test' }))
+  assert.equal((await browser.fetch('/api/games')).status, 503)
   diagnostics.dispose()
 })

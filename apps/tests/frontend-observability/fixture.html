@@ -1,0 +1,53 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Frontend RNG E2E</title></head>
+<body><div id="game" style="width:320px;height:240px"></div>
+<script type="module">
+import { createRngResetObserver } from '/apps/packages/rng-reset-observer.mjs'
+import { createShinyHuntPlayer } from '/apps/packages/shiny-hunt-player.mjs'
+import { createClientDiagnostics } from '/apps/packages/client-diagnostics.mjs'
+import { createOddsManipulatorClock } from '/apps/packages/odds-manipulator-clock.mjs'
+import { softResetEmulator } from '/apps/packages/player-reset.mjs'
+import { findGen3EncounterLayout } from '/apps/packages/pokemon-gen3-encounter.mjs'
+const parameters = new URLSearchParams(location.search)
+const patched = parameters.get('patched') !== '0'
+const sessionId = parameters.get('session') ?? crypto.randomUUID()
+const descriptor = { core: 'gba', runtimeId: 'emulatorjs-4.2.3', romSha256: 'a9dec84dfe7f62ab2220bafaef7479da0929d066ece16a6885f6226db19085af', ...(patched ? { patchSha256: 'e12480bad322c9bbb20ebba943ab5d1987001657e0f69d74f5cd94d6ba20a6b3' } : {}) }
+const diagnostics = createClientDiagnostics({ browser: window, source: 'player', sessionId })
+const clock = createOddsManipulatorClock(); clock.install()
+clock.configure({ enabled: true, oddsResetCount: 1, virtualTimestamp: 60000 })
+const events = []
+const observer = createRngResetObserver({ getManager: () => window.EJS_emulator?.gameManager, getDescriptor: () => descriptor, emit: event => {
+  const record = { sessionId, profileId: 'fixture', gameId: 'emerald', ...descriptor, patchApplied: patched, ...event }
+  events.push(record); diagnostics.capture(record)
+} })
+let cycle = 0
+let manager
+let resolveReady
+const ready = new Promise(resolve => { resolveReady = resolve })
+const player = createShinyHuntPlayer({ getLayout: () => findGen3EncounterLayout(descriptor), getState: () => manager.getState(), configureOdds: minute => clock.configure({ enabled: true, oddsResetCount: minute, virtualTimestamp: minute * 60000 }), observeReset: context => observer.arm(context), cancelObservation: () => observer.cancel(), softReset: async () => { const result = await softResetEmulator(manager); observer.released(); return result }, setA: () => {}, saveState: async () => true })
+window.__rngE2E = { events, ready, observer, diagnostics,
+  async reset(minute, type = 'soft', speed = 1) {
+    await ready
+    manager.setFastForwardRatio(speed); manager.toggleFastForward(speed > 1 ? 1 : 0)
+    if (type === 'hard') {
+      clock.configure({ enabled: true, oddsResetCount: minute, virtualTimestamp: minute * 60000 })
+      observer.arm({ cycleId: ++cycle, resetType: 'hard', oddsResetCount: minute, virtualTimestamp: minute * 60000 }); manager.restart(); observer.released()
+    } else {
+      if (cycle === 0) await player.handle({ type: 'prepare', huntId: sessionId })
+      const reply = await player.handle({ type: 'reset', huntId: sessionId, cycleId: ++cycle, oddsResetCount: minute })
+      if (!reply.ok) throw new Error(reply.error)
+    }
+    return cycle
+  },
+  cancel() { observer.cancel() },
+}
+window.EJS_player = '#game'; window.EJS_core = 'gba'; window.EJS_gameUrl = '/fixture/emerald.gba'
+window.EJS_threads = parameters.get('threads') === '1'
+if (patched) window.EJS_gamePatchUrl = '/fixture/emerald.ips'
+window.EJS_pathtodata = 'https://cdn.emulatorjs.org/4.2.3/data/'
+window.EJS_startOnLoaded = true; window.EJS_disableLocalStorage = true; window.EJS_cacheConfig = { enabled: false }
+window.EJS_gameName = 'frontend-rng-e2e'; window.EJS_gameID = sessionId
+window.EJS_defaultOptions = { 'pause_nonactive': false }
+window.EJS_onGameStart = () => { manager = window.EJS_emulator.gameManager; window.__rngE2E.manager = manager; resolveReady(true) }
+const loader = document.createElement('script'); loader.src = `${window.EJS_pathtodata}loader.js`; document.body.append(loader)
+</script></body></html>

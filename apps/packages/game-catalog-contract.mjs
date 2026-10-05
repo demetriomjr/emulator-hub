@@ -26,6 +26,11 @@ function validateGame(game, index) {
   for (const field of ['core', 'reason', 'region', 'coverUrl', 'language']) {
     if (game[field] !== undefined) assertString(game[field], `Game catalog entry ${index} ${field}`)
   }
+  if (game.assets !== undefined) {
+    const assets = game.assets, romUrl = `/roms/${encodeURIComponent(game.id)}`
+    if (!assets || assets.romUrl !== romUrl || !/^[a-f0-9]{64}$/.test(assets.romSha256 ?? '') ||
+      Boolean(assets.patchUrl) !== Boolean(assets.patchSha256) || assets.patchUrl && (assets.patchUrl !== `${romUrl}/patch` || !/^[a-f0-9]{64}$/.test(assets.patchSha256 ?? ''))) throw contractError('Invalid game asset metadata.')
+  }
 }
 
 function validateProfile(profile, gameIndex, profileIndex) {

@@ -2,6 +2,22 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import test from 'node:test'
 import { closePlayerOriginProxies, createPlayerOriginProxyServer, startPlayerOriginProxies } from './scripts/player-origin-proxy.mjs'
+import { frontendEventsMiddleware } from './server/frontend-events-vite.mjs'
+
+test('player proxy preserves the player Host so its frontend collector accepts its Origin', async () => {
+  const events = []
+  const handler = frontendEventsMiddleware({ output: value => events.push(JSON.parse(value)) })
+  const upstream = createServer((request, response) => handler(request, response, () => response.writeHead(404).end()))
+  await new Promise(done => upstream.listen(0, '127.0.0.1', done))
+  const proxy = createPlayerOriginProxyServer({ targetOrigin: `http://127.0.0.1:${upstream.address().port}` })
+  await new Promise(done => proxy.listen(0, '127.0.0.1', done))
+  try {
+    const origin = `http://127.0.0.1:${proxy.address().port}`
+    const response = await fetch(`${origin}/_frontend/events`, { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'game-asset', source: 'player', sessionId: 'session', phase: 'player-rom-ready' }) })
+    assert.equal(response.status, 204)
+    assert.equal(events.length, 1)
+  } finally { await new Promise(done => proxy.close(done)); await new Promise(done => upstream.close(done)) }
+})
 
 test('player origin proxy serves the same document and forwards cookies', async () => {
   const upstream = createServer((request, response) => {

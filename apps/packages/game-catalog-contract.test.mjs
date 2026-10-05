@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+test('asset metadata must match game routes and contain paired valid hashes', async () => {
+  const { parseGameCatalogResponse } = await import('./game-catalog-contract.mjs')
+  const game = { id: 'game', title: 'Game', system: 'gba', status: 'ready', pokemonHubSaveSupported: false, profiles: [] }
+  for (const assets of [{ romSha256: 'wrong', romUrl: '/roms/game' }, { romSha256: 'a'.repeat(64), romUrl: 'https://evil' }, { romSha256: 'a'.repeat(64), romUrl: '/roms/game', patchUrl: '/roms/game/patch' }]) {
+    assert.throws(() => parseGameCatalogResponse({ games: [{ ...game, assets }] }), /asset/)
+  }
+})
+
 test('shares one game-catalog response contract between producers and consumers', async () => {
   const contract = await import('./game-catalog-contract.mjs').catch(() => ({}))
   assert.equal(typeof contract.createGameCatalogResponse, 'function')
