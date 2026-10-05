@@ -23,7 +23,7 @@ function harness(results) {
 
 const sessions = [{ sessionId: 'a' }, { sessionId: 'b' }]
 
-test('Fossil completes six A and two B at 120 ms plus 400 ms idle, resets a normal and saves a shiny', async () => {
+test('Fossil completes five A and three B at 120 ms plus 400 ms idle, resets a normal and saves a shiny', async () => {
   let time = 0
   let presses = 0
   let resets = 0
@@ -44,7 +44,7 @@ test('Fossil completes six A and two B at 120 ms plus 400 ms idle, resets a norm
   assert.equal(resets, 2)
   for (const cycle of [1, 2]) {
     const events = inputs.filter(event => event[3] === cycle)
-    assert.deepEqual(events.filter(([, down]) => down).map(([button]) => button), ['A', 'A', 'A', 'A', 'A', 'A', 'B', 'B'])
+    assert.deepEqual(events.filter(([, down]) => down).map(([button]) => button), ['A', 'A', 'A', 'A', 'A', 'B', 'B', 'B'])
     for (let index = 0; index < 16; index += 2) {
       assert.equal(events[index + 1][2] - events[index][2], 120)
       if (index < 14) assert.equal(events[index + 2][2] - events[index + 1][2], 400)

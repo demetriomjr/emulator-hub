@@ -37,7 +37,7 @@ export function resolveShinyHuntStartPlan(config, gameCode) {
 // Each step describes its input and minimum time before the following step.
 export function getShinyHuntStartSequence({ startMode, starterPosition }) {
   if (startMode === 'common') return null
-  if (startMode === 'fossil') return ['A', 'A', 'A', 'A', 'A', 'A', 'B', 'B'].map(button => ({ button, holdMs: 120, releaseIntervalMs: 400 }))
+  if (startMode === 'fossil') return ['A', 'A', 'A', 'A', 'A', 'B', 'B', 'B'].map(button => ({ button, holdMs: 120, releaseIntervalMs: 400 }))
   if (startMode === 'interact-a') return [{ button: 'A', holdMs: 40, intervalMs: 0 }]
   const direction = { 'walk-right': 'RIGHT', 'walk-left': 'LEFT', 'walk-up': 'UP' }[startMode]
   if (direction) return [{ button: direction, holdMs: 1200, intervalMs: 0 }]
